@@ -1,5 +1,5 @@
 param([Parameter(Mandatory)][string] $PackageDirectory,
-      [string] $ExpectedVersion = '1.3.0')
+      [string] $ExpectedVersion = '1.3.1')
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $root = [IO.Path]::GetFullPath($PackageDirectory)

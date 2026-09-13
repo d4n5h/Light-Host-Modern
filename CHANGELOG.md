@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.3.1](https://github.com/heide-oficial/Light-Host-Modern/releases/tag/v1.3.1) — 2026-09-13
+
+### Added
+
+- None.
+
+### Removed
+
+- None.
+
+### Improved
+
+- None.
+
+### Fixed
+
+- Corrected the overly narrow Compact layout by increasing its maximum content width from 780 to 1000 device-independent pixels, while preserving aligned headers, cards and plugin toolbars, responsive sizing, and scrollbars at the window edge.
+
+[Full comparison with v1.3.0](https://github.com/heide-oficial/Light-Host-Modern/compare/v1.3.0...v1.3.1).
+
 ## [1.3.0](https://github.com/heide-oficial/Light-Host-Modern/releases/tag/v1.3.0) — 2026-09-12
 
 ### Added

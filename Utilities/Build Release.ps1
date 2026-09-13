@@ -31,7 +31,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $appName = "Light Host Modern"
-$appVersion = "1.3.0"
+$appVersion = "1.3.1"
 $exeName = "Light Host Modern.exe"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $outRoot = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $repoRoot "out\release" }

@@ -45,7 +45,8 @@ namespace
     constexpr wchar_t GITHUB_REPOSITORY_URL[] = L"https://github.com/heide-oficial/Light-Host-Modern";
     constexpr wchar_t GITHUB_SHOWCASE_URL[] = L"https://github.com/heide-oficial/Light-Host-Modern/issues/new?title=%5BSHOWCASE%20VIDEO%5D%20Video%20title%20here&labels=showcase%20video&body=Here%27s%20my%20video%20showcasing%20or%20featuring%20the%20app%3A%20%5BINSERT%20LINK%20HERE%5D";
     constexpr wchar_t KOFI_URL[] = L"https://ko-fi.com/heide_oficial";
-    constexpr wchar_t APP_VERSION[] = L"1.3.0";
+    constexpr wchar_t APP_VERSION[] = L"1.3.1";
+    constexpr double COMPACT_CONTENT_MAX_WIDTH = 1000.0;
     std::string toLower(std::string value)
     {
         std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
@@ -2773,7 +2774,7 @@ namespace winrt::LightHostWinUI::implementation
         MainContent().MaxWidth(std::numeric_limits<double>::infinity());
         const double width = MainContent().ActualWidth();
         const double edge = RootLayout().ActualWidth() < 840.0 ? 16.0 : 24.0;
-        const double inset = compactLayout ? (std::max)(edge, (width - 780.0) / 2.0) : edge;
+        const double inset = compactLayout ? (std::max)(edge, (width - COMPACT_CONTENT_MAX_WIDTH) / 2.0) : edge;
         HeaderGrid().Margin({inset, 0, inset, 0});
         PageContentStack().Margin({inset, 0, inset, 0});
         if (pluginsPageView) winrt::get_self<PluginsPageView>(pluginsPageView)->setContentInsets(inset);
@@ -2795,7 +2796,7 @@ namespace winrt::LightHostWinUI::implementation
         for (const auto& pair : { std::pair{DashboardInputDeviceGrid(), InputMeterBarHost()},
                                  std::pair{DashboardOutputDeviceGrid(), OutputMeterBarHost()} })
         {
-            const bool narrow = (compactLayout ? (std::min)(measuredContentWidth, 780.0) : measuredContentWidth) < 760.0;
+            const bool narrow = (compactLayout ? (std::min)(measuredContentWidth, COMPACT_CONTENT_MAX_WIDTH) : measuredContentWidth) < 760.0;
             pair.first.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::FromPixels(narrow ? 0 : 380));
             Grid::SetRow(pair.second, narrow ? 1 : 0);
             Grid::SetColumn(pair.second, narrow ? 0 : 1);

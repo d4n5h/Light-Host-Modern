@@ -2,7 +2,7 @@
 # Without -Execute, this script inspects packages and writes the reviewable plan.
 param([Parameter(Mandatory)][string]$CurrentMsi,
       [string]$PreviousMsi='',
-      [string]$ExpectedVersion='1.3.0',
+      [string]$ExpectedVersion='1.3.1',
       [string]$OutputDirectory='out/msi-lifecycle',
       [switch]$Execute,
       [string]$DisposableComputerName='')
