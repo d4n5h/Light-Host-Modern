@@ -3,20 +3,25 @@
 <p align="left">
 <a href="https://github.com/heide-oficial/Light-Host-Modern/stargazers"><img src="https://img.shields.io/github/stars/heide-oficial/Light-Host-Modern?colorA=363a4f&colorB=e0ac00&style=for-the-badge" alt="GitHub star count"></a>
 <a href="https://github.com/heide-oficial/Light-Host-Modern/releases"><img src="https://img.shields.io/github/downloads/heide-oficial/Light-Host-Modern/total?colorA=363a4f&colorB=d53984&style=for-the-badge" alt="GitHub release download count"></a>
-<a href="https://github.com/heide-oficial/Light-Host-Modern/blob/main/license"><img src="https://img.shields.io/static/v1.svg?style=for-the-badge&label=License&message=GPL-2.0-or-later&colorA=363a4f&colorB=b7bdf8" alt="GPL-2.0-or-later license"></a>
+<a href="https://github.com/heide-oficial/Light-Host-Modern/blob/master/license"><img src="https://img.shields.io/static/v1.svg?style=for-the-badge&label=License&message=GPL-2.0-or-later&colorA=363a4f&colorB=b7bdf8" alt="GPL-2.0-or-later license"></a>
 </p>
 
 Light Host Modern is a native Windows audio plugin host for running VST3 and optional VST2 effects outside a DAW. It combines a JUCE-based realtime host with a dedicated WinUI 3 interface for configuring audio devices, building a serial plugin chain, monitoring the stream, and keeping processing active from the notification area.
+
+Version **1.3.0** adds isolated scanning, custom plugin names, a redesigned plugin workspace, dedicated diagnostics, and more resilient session storage. See the [changelog](CHANGELOG.md).
 
 ## ✨ Features
 
 - Hosts VST3 and optional VST2 audio effects in a serial realtime processing chain.
 - Supports Windows Audio, DirectSound, and ASIO backends exposed by JUCE.
 - Configures audio devices, input/output channels, sample rate, and buffer size.
-- Displays live input/output meters, CPU usage, latency, x-runs, and plugin counts.
-- Scans configurable plugin folders and maintains a reusable installed-plugin database.
-- Adds multiple instances of the same plugin and supports reorder, bypass, duplicate, editor, and remove actions.
-- Preserves plugin state and compensates bypass latency to keep the chain aligned.
+- Displays responsive input/output peak meters and plugin counts, with CPU, latency, x-runs, and stream details on the optional Diagnostics page.
+- Scans configurable folders in isolated workers, with caching, progress, cancellation, readable failures, and retries.
+- Manages Running and Installed plugins through searchable cards, action toolbars, visual status badges, and optional manufacturer grouping.
+- Supports multiple instances, reorder, bypass, duplicate, custom names, original-name restoration, details, and editor actions.
+- Provides global output mute and latency-compensated chain bypass from Running and the notification area.
+- Preserves independent plugin state and names in versioned sessions with atomic writes, backups, and recovery from legacy settings.
+- Compensates bypass latency and uses short transitions when toggling bypass or mute.
 - Recovers preferred audio devices after startup, sleep, driver restarts, or temporary unavailability.
 - Provides compact and expanded layouts, Windows 11 materials, icon variants, JSON localization, and Brazilian Portuguese.
 - Runs from the notification area with close-to-tray and current-user startup options.
@@ -24,21 +29,23 @@ Light Host Modern is a native Windows audio plugin host for running VST3 and opt
 
 ## 🖼️ Demo
 
-![Light Host Modern dashboard](https://i.imgur.com/CPhkOgy.png)
+![Light Host Modern dashboard](docs/images/dashboard.png)
 
-![Audio device and stream configuration](https://i.imgur.com/EVMlX0A.png)
+![Audio device and stream configuration](docs/images/audio.png)
 
-![Running and installed plugin management](https://i.imgur.com/Nl3Jsfu.png)
+![Running and installed plugin management](docs/images/plugins.png)
 
-![Windows 11-style settings](https://i.imgur.com/XGLSiXE.png)
+![Windows 11-style settings](docs/images/settings.png)
+
+![Audio performance and reliability diagnostics](docs/images/diagnostics.png)
 
 ## 🚀 Usage
 
 1. Start Light Host Modern and open its interface from the notification area if it is not already visible.
 2. Open **Audio** and select the backend, device, channels, sample rate, and buffer size used by the host.
-3. Open **Plugins > Installed**, configure **Scan paths**, and scan for VST3 or VST2 plugins.
-4. Add plugins to **Running**, arrange the serial processing order, and open each plugin editor when needed.
-5. Review **Settings** to configure device persistence, startup, close-to-tray, VST2 availability, language, layout, material, and icon.
+3. Open **Plugins > Installed > Scan for plugins**, add or browse for folders, save each path, and choose **Start scan**. The progress dialog offers cancellation and failure retries.
+4. Use an installed card’s **…** menu to **Add to chain**. In **Running**, arrange the processing order and use each card’s menu to open its editor or manage the instance.
+5. Review **Settings** for device recovery, startup, close-to-tray, plugin database maintenance, diagnostics, language, layout, material, and icon. Use **Diagnostics** below Settings for detailed monitoring.
 
 For detailed descriptions of the screens, workflows, and internal implementation, see the [application documentation](docs/_index.md).
 
@@ -61,10 +68,11 @@ Download `LightHostModern-Portable.zip` from the [latest GitHub release](https:/
 
 - The application does not include telemetry, analytics, advertising, authentication, or user accounts.
 - Audio processing, plugin hosting, device enumeration, settings, and host/UI communication remain local to the computer.
-- Host settings, plugin database entries, chain state, and plugin state are stored locally through JUCE application properties.
+- Host preferences and the plugin database are stored locally through JUCE application properties. Chain and plugin state use a separate versioned session file beside those preferences, with atomic writes and recoverable backups.
 - WinUI preferences are stored in `%LOCALAPPDATA%\LightHostModern\ui-settings.ini`.
 - Debug logs are created under `%APPDATA%\LightHostModern\Logs` only when the host is started with `--debug`.
-- The updater sends an HTTPS request to the public GitHub Releases API for this repository. When an update is accepted, it downloads the release MSI, verifies its published SHA-256 digest, and starts Windows Installer. It does not upload audio, plugin state, device settings, or personal data.
+- The updater contacts this repository’s public GitHub Releases API over HTTPS. It downloads the MSI for installed copies or the ZIP for portable copies, checks the published SHA-256 digest and package identity, and supports cancellation. MSI updates wait for the session to be saved and the app to close; portable updates reveal the verified ZIP for manual extraction. No audio, plugin state, device settings, or personal data is uploaded.
+- Diagnostics are local and enabled by default. Disabling **Settings > General > Diagnostics** hides the page and stops diagnostics collection; audio processing and dashboard peak meters continue.
 - Enabling **Start with Windows** creates an entry for the current user under the Windows `Run` registry key.
 - GitHub and Ko-fi pages open in the default browser only after the user activates their corresponding controls. The Support page displays the Ko-fi banner from Ko-fi's content delivery network.
 - The host and WinUI shell are full-trust desktop processes so they can access audio drivers, plugins, local files, the notification area, named pipes, and startup registration.

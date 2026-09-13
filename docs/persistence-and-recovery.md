@@ -9,11 +9,12 @@ JUCE application properties retain host-owned data such as:
 - selected backend, input/output device, sample rate, and buffer size;
 - per-device channel masks;
 - installed plugin database;
-- running plugin order and bypass state;
-- processor state for running plugin slots;
+- installed-plugin custom names;
 - failed-plugin quarantine;
 - device persistence and blocklist configuration;
 - startup, tray, VST2, and icon preferences.
+
+Running order, instance IDs, custom instance names, bypass state, and processor state are stored in a versioned session file beside the host preferences. Atomic replacement and recoverable backups protect session writes; existing settings are migrated without merging distinct duplicate instances. See the [session contract](session-contract.md).
 
 The WinUI shell stores interface-only options in `%LOCALAPPDATA%\LightHostModern\ui-settings.ini`, including language, layout, material, support visibility, and custom scan paths.
 
@@ -39,7 +40,7 @@ The audio watchdog can retry stopped or failed devices after sleep, driver resta
 
 ## Plugin state and quarantine
 
-Running slots use stable state keys so processor state remains associated with the correct instance across reorder and removal. Older state keys are read when possible for compatibility.
+Running slots use persistent IDs so processor state remains associated with the correct instance across reorder and removal. Legacy state keys are imported during session migration; after migration, the versioned session is authoritative. Recovery preserves damaged originals rather than silently replacing a session with an empty chain.
 
 Failed plugins can be marked with `plugin-failed-*` settings. This prevents repeatedly restoring a plugin known to fail during load or processing.
 

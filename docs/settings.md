@@ -16,6 +16,14 @@ Keeps the audio host and plugin chain running when the WinUI window is closed. T
 
 Activates the VST2 format at runtime when VST2 support exists in the build. VST3 remains available independently. Changing this option refreshes the available formats and plugin workflow.
 
+### Diagnostics
+
+Enabled by default. Shows Diagnostics below Settings in the sidebar. Disabling it asks for confirmation, hides the page, and stops collecting diagnostic measurements. Audio processing and the Dashboard peak meters continue.
+
+## Plugin database
+
+**Remove missing** removes entries whose plugin files are no longer available. **Clear database** clears the installed database and running chain after confirmation. Scanning and folder management are available from **Plugins > Installed > Scan for plugins**.
+
 ## Audio recovery
 
 ### Device persistence
@@ -38,11 +46,15 @@ Opens a modal for choosing the backend and corresponding device. ASIO uses one d
 
 ### Enabled devices
 
-**Manage enabled devices** opens a wide modal for allowing or blocking detected backends and their input/output choices. Blocked choices are never selected manually or by recovery.
+**Manage enabled devices** opens a compact scrolling dialog for allowing or blocking detected backends and their input/output choices. The backend selector and device groups scroll together. Blocked choices are never selected manually or by recovery.
 
 See [Persistence and recovery](persistence-and-recovery.md) for the complete state machine.
 
 ## Appearance
+
+### Theme
+
+Select **System**, **Light**, or **Dark**. Windows contrast themes are applied automatically.
 
 ### Language
 

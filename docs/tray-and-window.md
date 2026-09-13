@@ -7,15 +7,17 @@ The JUCE host owns application lifetime and can continue processing audio withou
 The icon is created by the host process. Its native context menu contains:
 
 - **Open app UI** - launches, restores, or focuses the WinUI shell;
+- **Mute output** - toggles the host-owned output mute;
+- **Bypass chain** - toggles latency-compensated global bypass while processors continue running;
 - **Quit** - saves state, closes the shell, stops audio processing, and exits the host.
 
 The selected Color, White, or Black icon variant is applied to both host and interface assets where supported.
 
 ## Opening the interface
 
-The host locates the WinUI shell beside its packaged payload and launches it with the unique host pipe name. If an existing `Light Host Modern` window is found, it is restored and activated instead of launching another shell.
+The host first locates the canonical `WinUI/x64/Release/LightHost.WinUI` shell inside its own payload and launches it with the unique host pipe name. Development fallbacks must identify the repository. An existing window for the same profile is restored and activated instead of launching another shell. Temporary profiles include their identifier in the window title and tray tooltip.
 
-The shell is a view of the host state. Closing or recreating it does not rebuild the audio engine by itself.
+The shell is a view of the host state. Closing or recreating it does not rebuild the audio engine by itself. Mute and global bypass both start off in a new host and survive closing/reopening only the shell. The initial window is sized for the current DPI and kept inside the monitor work area.
 
 ## Close to tray
 
@@ -29,8 +31,10 @@ The setting creates a current-user Windows `Run` entry named `Light Host Modern`
 
 Portable users should extract the complete ZIP to a stable folder before enabling startup because the registration follows the extracted host executable. Moving or deleting that folder invalidates the startup entry; reopening the app and toggling the option off and on registers its new location.
 
+Temporary test profiles reject changes to Windows startup registration and do not open audio automatically.
+
 ## Navigation and responsive layout
 
-The sidebar contains Dashboard, Audio, Plugins, optional Support me, and Settings. Its collapsed state keeps the app logo and accessible navigation icons visible. The bottom control expands or collapses the pane.
+The sidebar contains Dashboard, Audio, Plugins, Settings, optional Diagnostics, and optional Support me, in that order. Its collapsed state keeps the app logo and accessible navigation icons visible. The bottom control expands or collapses the pane.
 
-All pages use one responsive content container. Compact mode limits its maximum width; Expanded mode uses the available space. Cards, plugin toolbars, and dialog content adapt to narrower windows rather than using page-specific fixed widths.
+Pages are created on first access and retained. Compact mode limits content width; Expanded mode uses the available space. Running and Installed each have a bounded virtualized list with its own scrolling. Search and visual sorting preserve the actual processing order; drag reordering is available only in the unfiltered chain-order view.

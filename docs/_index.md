@@ -2,7 +2,7 @@
 
 Light Host Modern is a Windows-only audio plugin host. A JUCE host process owns the audio stream, plugin chain, persistence, and notification-area lifetime, while a native WinUI 3 process presents the interface and exchanges commands and snapshots with the host through a local named pipe.
 
-The application is organized into five main areas: **Dashboard**, **Audio**, **Plugins**, **Support me**, and **Settings**. The documents below explain both the public behavior of those areas and the internal workflows behind them.
+The application is organized into **Dashboard**, **Audio**, **Plugins**, **Settings**, **Diagnostics**, and **Support me**. Diagnostics and Support me can be hidden from Settings. The documents below explain both the public behavior of those areas and the internal workflows behind them.
 
 ## Application areas
 
@@ -10,6 +10,7 @@ The application is organized into five main areas: **Dashboard**, **Audio**, **P
 - [Audio](audio.md) - Select the audio backend and devices, then configure channels, sample rate, and buffer size.
 - [Plugins](plugins.md) - Scan plugin folders, manage the installed database, and build the running serial chain.
 - [Settings](settings.md) - Configure startup, tray behavior, VST2, device persistence, enabled devices, language, layout, material, and icon.
+- [Diagnostics](diagnostics.md) - View local performance, reliability, stream, latency, and processing counters.
 - [Support me](support.md) - Open the Ko-fi, repository, and video showcase actions.
 
 ## Internal architecture and workflows

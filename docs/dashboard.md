@@ -19,7 +19,7 @@ If no usable device is open, the page reports the unavailable state rather than 
 
 Input and output meters are peak values calculated by the realtime processor. The input level is measured before the running chain and the output level after all active or bypassed slots have been processed.
 
-The UI requests lightweight telemetry more frequently than a complete state snapshot. This keeps meters responsive without repeatedly serializing the plugin database and every audio choice.
+The 28-segment bars show linear peak amplitude with green, yellow, and red segments. A dedicated lightweight channel refreshes visible meters at up to 20 Hz without waiting behind commands, diagnostic queries, or database snapshots. Meter requests stop while another page is visible or the window is minimized.
 
 ## Plugin status
 
@@ -35,6 +35,8 @@ Multiple instances of the same plugin count separately in the active chain.
 ## Performance and recovery
 
 CPU usage and x-run information come from the active JUCE audio device. Recovery text describes whether preferred-device handling is running, waiting for another attempt, paused after exhausting attempts, or disabled.
+
+The [Diagnostics](diagnostics.md) page provides detailed CPU, reliability, format, latency, and activity cards. Global mute and chain bypass are available in the Running toolbar and notification-area menu.
 
 Configuration changes increment host-side version counters. The WinUI shell requests a new complete snapshot only when the chain, plugin database, or audio configuration version changes.
 
