@@ -8,8 +8,6 @@
 
 Light Host Modern is a native Windows audio plugin host for running VST3 and optional VST2 effects outside a DAW. It combines a JUCE-based realtime host with a dedicated WinUI 3 interface for configuring audio devices, building a serial plugin chain, monitoring the stream, and keeping processing active from the notification area.
 
-Version **1.3.0** adds isolated scanning, custom plugin names, a redesigned plugin workspace, dedicated diagnostics, and more resilient session storage. See the [changelog](CHANGELOG.md).
-
 ## ✨ Features
 
 - Hosts VST3 and optional VST2 audio effects in a serial realtime processing chain.
@@ -86,7 +84,9 @@ Want to translate Light Host Modern? Copy the [English JSON catalogue](WinUI/Lig
 
 ## ❤️ Support
 
-You can support continued development by [donating on Ko-fi](https://ko-fi.com/heide_oficial), [starring the GitHub repository](https://github.com/heide-oficial/Light-Host-Modern), or publishing a video and [submitting it for showcase](https://github.com/heide-oficial/Light-Host-Modern/issues/new?title=%5BSHOWCASE%20VIDEO%5D%20Video%20title%20here&labels=showcase%20video&body=Here%27s%20my%20video%20showcasing%20or%20featuring%20the%20app%3A%20%5BINSERT%20LINK%20HERE%5D).
+Please consider supporting my work. There are many hours of work, thinking and effort behind it. You can support the application by [donating any amount on Ko-fi](https://ko-fi.com/heide_oficial), [starring the GitHub repository](https://github.com/heide-oficial/Light-Host-Modern), or publishing a video about the application and [submitting it for showcase](https://github.com/heide-oficial/Light-Host-Modern/issues/new?title=%5BSHOWCASE%20VIDEO%5D%20Video%20title%20here&labels=showcase%20video&body=Here%27s%20my%20video%20showcasing%20or%20featuring%20the%20app%3A%20%5BINSERT%20LINK%20HERE%5D).
+
+Thank you!
 
 <a href="https://ko-fi.com/heide_oficial" target="_blank">
   <img src="https://storage.ko-fi.com/cdn/brandasset/v2/support_me_on_kofi_beige.png" alt="Support me on Ko-fi" width="200">
@@ -103,4 +103,4 @@ WARNING: GitHub's automatic Contributors list is based on commit authorship and 
 
 ## 📄 License
 
-Light Host Modern follows the original Light Host license lineage and is distributed under the [GNU General Public License version 2 or later](license). Third-party components remain subject to their respective licenses and notices.
+This application is licensed under the [GNU General Public License version 2 or later license](LICENSE).
