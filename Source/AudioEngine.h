@@ -2,95 +2,16 @@
 #define AudioEngine_h
 
 #include "RealtimeHostProcessor.h"
+#include "GuardedAudioDeviceManager.h"
+#include "DeviceController.h"
+#include "PluginScanController.h"
+#include "PluginInstances.h"
+#include "KnownPluginNames.h"
+#include "HostAudioPlayer.h"
+#include "ProcessMetrics.h"
+#include "SessionStore.h"
 
 ApplicationProperties& getAppProperties();
-
-struct DiagnosticsSnapshot
-{
-	String backend;
-	String deviceName;
-	String recoveryState;
-	String recoveryMessage;
-	String recoveryTargetBackend;
-	String recoveryTargetInputDevice;
-	String recoveryTargetOutputDevice;
-	double cpuUsagePercent = 0.0;
-	int xRunCount = 0;
-	double sampleRate = 0.0;
-	int bufferSize = 0;
-	int inputLatency = 0;
-	int outputLatency = 0;
-	int inputChannels = 0;
-	int outputChannels = 0;
-	int recoveryAttempt = 0;
-	int recoveryMaxAttempts = 0;
-	float inputLevel = 0.0f;
-	float outputLevel = 0.0f;
-	int activePlugins = 0;
-	int loadedPlugins = 0;
-	int chainLatencySamples = 0;
-	uint64 chainReloads = 0;
-	uint64 bypassToggles = 0;
-	uint64 pluginStateSaves = 0;
-	uint64 settingsFlushes = 0;
-	uint64 processFailures = 0;
-	uint64 reusedSlots = 0;
-	uint64 rebuiltSlots = 0;
-};
-
-struct AudioDeviceConfiguration
-{
-	std::vector<String> backendNames;
-	std::vector<String> inputDeviceNames;
-	std::vector<String> outputDeviceNames;
-	std::vector<String> inputChannelNames;
-	std::vector<String> outputChannelNames;
-	std::vector<bool> activeInputChannels;
-	std::vector<bool> activeOutputChannels;
-	std::vector<double> sampleRates;
-	std::vector<int> bufferSizes;
-	int currentBackendIndex = -1;
-	int currentInputDeviceIndex = -1;
-	int currentOutputDeviceIndex = -1;
-	int currentInputChannels = 0;
-	int currentOutputChannels = 0;
-	int maxInputChannels = 0;
-	int maxOutputChannels = 0;
-};
-
-struct AudioRecoveryConfiguration
-{
-	String mode;
-	int retrySeconds = 5;
-	int retryAttempts = 10;
-	String customBackend;
-	String customInputDevice;
-	String customOutputDevice;
-	String lastBackend;
-	String lastInputDevice;
-	String lastOutputDevice;
-};
-
-struct BlockedAudioDeviceChoice
-{
-	String backendName;
-	String role;
-	String deviceName;
-};
-
-struct AudioBlocklistConfiguration
-{
-	std::vector<String> blockedBackends;
-	std::vector<BlockedAudioDeviceChoice> blockedDevices;
-};
-
-struct AvailableAudioChoicesConfiguration
-{
-	std::vector<String> backendNames;
-	std::vector<bool> backendEnabled;
-	std::vector<BlockedAudioDeviceChoice> deviceChoices;
-	std::vector<bool> deviceEnabled;
-};
 
 class PluginStateStore
 {
@@ -109,15 +30,6 @@ private:
 	bool dirty = false;
 };
 
-class DeviceController
-{
-public:
-	String initialise(AudioDeviceManager& deviceManager, const XmlElement* savedAudioState, bool allowDefaultFallback);
-	void recoverIfNeeded(AudioDeviceManager& deviceManager, AudioRecoveryConfiguration const& recoveryConfig,
-		int& failedAudioRecoveryAttempts, String& recoveryState, String& recoveryMessage);
-	DiagnosticsSnapshot createDiagnosticsSnapshot(AudioDeviceManager& deviceManager) const;
-};
-
 class AudioEngine : private ChangeListener, private MultiTimer
 {
 public:
@@ -129,6 +41,20 @@ public:
 	KnownPluginList& getKnownPluginList() noexcept { return knownPluginList; }
 
 	std::vector<PluginDescription> getActivePluginsSorted() const;
+	const std::vector<lightHost::PluginInstanceRecord>& getPluginInstances() const { return instances.records; }
+	String getSessionRecoveryError() const { return instances.recoveryError; }
+	lightHost::SessionSaveStatus getSessionSaveStatus() const { return sessionStore ? sessionStore->status() : lightHost::SessionSaveStatus{}; }
+	const StringArray& getStateCaptureFailures() const { return stateCaptureFailures; }
+	bool isSessionWritable() const { return instances.writable && !sessionLoadSuppressed; }
+	bool flushSession();
+	int findKnownPluginIndexById(const String& id) const;
+	int findPluginIndexById(const PluginInstanceId& id) const;
+	void setGlobalMuted(bool value) { if (hostProcessor.setGlobalMuted(value)) ++chainVersion; }
+	void setGlobalBypassed(bool value) { if (hostProcessor.setGlobalBypassed(value)) ++chainVersion; }
+	bool isGlobalMuted() const { return hostProcessor.isGlobalMuted(); }
+	bool isGlobalBypassed() const { return hostProcessor.isGlobalBypassed(); }
+	void resetClipping(bool input, bool output, int channel = -1)
+	{ hostProcessor.resetClipping(input, output, channel); }
 	std::vector<PluginDescription> getKnownPluginsSorted() const;
 	AudioDeviceConfiguration getAudioDeviceConfiguration();
 	AudioRecoveryConfiguration getAudioRecoveryConfiguration() const;
@@ -140,9 +66,14 @@ public:
 	void addKnownPluginsToMenu(PopupMenu& menu) const;
 
 	bool setAudioBackendByIndex(int backendIndex);
+    bool selectAudioDevice(const AudioDeviceSelection& selection) { return deviceController.selectConfiguration(selection); }
+    bool setPreferredAudioDevice(const String& backend, const String& input, const String& output, uint64 generation)
+    { return deviceController.setPreferredDevice(backend, input, output, generation); }
+    var getAudioSelectionState() const { return deviceController.selectionState(); }
+    var getAudioDeviceOptions(const String& backend) { return deviceController.optionsForBackend(backend); }
 	bool setAudioInputDeviceByIndex(int deviceIndex);
 	bool setAudioOutputDeviceByIndex(int deviceIndex);
-	String getLastAudioConfigurationError() const { return lastAudioConfigurationError; }
+	String getLastAudioConfigurationError() const { return deviceController.getLastAudioConfigurationError(); }
 	bool setAudioSampleRate(double sampleRate);
 	bool setAudioBufferSize(int bufferSize);
 	bool setAudioInputChannelCount(int channelCount);
@@ -168,6 +99,16 @@ public:
 
 	void scanDefaultPluginLocations(bool scanVst, bool scanVst3);
 	void scanPluginPath(const String& path, bool scanVst, bool scanVst3);
+	PluginScanController::Status getPluginScanStatus() const { return pluginScanner.status(); }
+	std::pair<String, uint64_t> getPluginScanVersion() const { return pluginScanner.version(); }
+	void cancelPluginScan();
+	bool beginPluginScan() { collectPluginScanResults(); return pluginScanner.begin(); }
+	void retryPluginScanFailures() { pluginScanner.retryFailures(); }
+    bool retryPluginScanFailures(const StringArray& ids) { return pluginScanner.retryFailures(ids); }
+    PluginScanController::FailurePage getPluginScanFailures(const String& scanId, uint64 revision, size_t offset, size_t limit) const
+    { return pluginScanner.failures(scanId, revision, offset, limit); }
+    String getPluginMetadata(const String& id) const { return pluginScanner.metadata(id); }
+	void collectPluginScanResults();
 
 	void addPluginFromMenuId(int menuId);
 	bool addKnownPluginByIndex(int sortedIndex);
@@ -180,6 +121,12 @@ public:
 	void movePluginDown(int sortedIndex);
 	void movePluginToIndex(int fromSortedIndex, int toSortedIndex);
 	void setPluginBypassed(int sortedIndex, bool shouldBypass);
+	bool renamePlugin(int sortedIndex, const String& name);
+	bool renameKnownPlugin(int sortedIndex, const String& name);
+	String getKnownPluginCustomName(const PluginDescription& plugin) const
+	{ return lightHost::knownPluginCustomName(*getAppProperties().getUserSettings(), plugin); }
+	bool isDiagnosticsEnabled() const { return lightHost::diagnosticsCollectionEnabled.load(); }
+	void setDiagnosticsEnabled(bool enabled);
 	void deletePluginStates();
 	void savePluginStates();
 	void saveAudioDeviceState();
@@ -190,9 +137,12 @@ public:
 	void showPluginEditor(int sortedIndex);
 
 	DiagnosticsSnapshot getDiagnosticsSnapshot() const;
+	std::pair<float, float> getMeterPeaks() const noexcept { return hostProcessor.getMeterPeaks(); }
+    bool configureCallbackMeasurement(unsigned warmupSeconds, unsigned durationSeconds);
+    lightHost::CallbackMeasurement::Snapshot getCallbackMeasurement() const { return player.callbackMeasurement().snapshot(); }
 	uint64 getChainVersion() const noexcept { return chainVersion; }
 	uint64 getPluginDatabaseVersion() const noexcept { return pluginDatabaseVersion; }
-	uint64 getAudioConfigVersion() const noexcept { return audioConfigVersion; }
+	uint64 getAudioConfigVersion() const noexcept { return deviceController.getVersion(); }
 
 private:
 	enum TimerIds
@@ -205,10 +155,10 @@ private:
 	void timerCallback(int timerId) override;
 	void changeListenerCallback(ChangeBroadcaster* changed) override;
 	void markSettingsDirty();
-	PluginSlot* findActiveSlotFor(const PluginDescription& plugin) const;
+	PluginSlot* findActiveSlotFor(const PluginInstanceId& id) const;
 	void recordProcessFailures();
 	void logDiagnosticsSnapshot();
-	std::unique_ptr<XmlElement> getXmlValueOrClear(const String& key);
+	std::unique_ptr<XmlElement> getXmlValuePreserving(const String& key);
 	void saveActivePluginList();
 	void saveActivePluginChain(bool saveProcessorStates);
 	void saveCurrentAudioChannelState();
@@ -230,30 +180,30 @@ private:
 	bool safeMode = false;
 	bool restoreActivePluginsOnStartup = false;
 	bool settingsDirty = false;
-	bool audioDeviceStateDirty = false;
-	int failedAudioRecoveryAttempts = 0;
-	uint32 lastManualAudioConfigurationChangeMs = 0;
-	bool manualAudioSelectionInProgress = false;
-	String audioRecoveryState = "running";
-	String audioRecoveryMessage;
 	uint64 chainReloadCount = 0;
 	uint64 bypassToggleCount = 0;
 	uint64 settingsFlushCount = 0;
 	uint64 pluginStateSaveCount = 0;
 	uint64 chainVersion = 0;
 	uint64 pluginDatabaseVersion = 0;
-	uint64 audioConfigVersion = 0;
-	String lastAudioConfigurationError;
 
 	PluginStateStore pluginStateStore;
+	PluginScanController pluginScanner;
+	GuardedAudioDeviceManager deviceManager;
 	DeviceController deviceController;
-	AudioDeviceManager deviceManager;
 	AudioPluginFormatManager formatManager;
 	KnownPluginList knownPluginList;
-	KnownPluginList activePluginList;
+	lightHost::PluginInstances instances;
+	std::unique_ptr<lightHost::SessionStore> sessionStore;
+	String sessionMigrationId;
+	StringArray stateCaptureFailures;
+	uint64 lastSessionStatusSerial = 0;
+	double stateCaptureDue = 0;
+	bool sessionLoadSuppressed = false;
 	KnownPluginList::SortMethod pluginSortMethod = KnownPluginList::sortByManufacturer;
 	RealtimeHostProcessor hostProcessor;
-	AudioProcessorPlayer player;
+	HostAudioPlayer player;
+	mutable lightHost::CpuUsageSampler hostCpuSampler, workerCpuSampler;
 };
 
 #endif /* AudioEngine_h */

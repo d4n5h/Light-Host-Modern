@@ -89,6 +89,6 @@ void LightHostController::deletePluginStates()
 
 void LightHostController::saveAndFlush()
 {
-	engine.savePluginStates();
+	engine.flushSession();
 	engine.flushPendingSaves();
 }

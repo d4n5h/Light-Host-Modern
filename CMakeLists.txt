@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(LightHost VERSION 1.2.2 LANGUAGES C CXX)
+project(LightHost VERSION 1.3.0 LANGUAGES C CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "Light Host Modern is now maintained as a Windows-only application.")
@@ -9,6 +9,54 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+option(LIGHTHOST_REALTIME_AUDIT "Instrument this host executable's callback allocations in Release validation builds" OFF)
+
+include(CTest)
+if(BUILD_TESTING)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME release-performance-report-analysis COMMAND "${Python3_EXECUTABLE}" -X utf8 "${CMAKE_CURRENT_SOURCE_DIR}/Tests/test_performance_analysis.py")
+        set_tests_properties(release-performance-report-analysis PROPERTIES TIMEOUT 30)
+    endif()
+    add_executable(LightHostCallbackMeasurementTests Tests/CallbackMeasurementTests.cpp)
+    target_include_directories(LightHostCallbackMeasurementTests PRIVATE Source)
+    add_test(NAME callback-performance-measurement COMMAND LightHostCallbackMeasurementTests)
+    set_tests_properties(callback-performance-measurement PROPERTIES TIMEOUT 15)
+    add_executable(LightHostMeterTests Tests/MeterTests.cpp)
+    target_include_directories(LightHostMeterTests PRIVATE Source)
+    add_test(NAME audio-rms-peak-and-clipping COMMAND LightHostMeterTests)
+    add_executable(LightHostRuntimeProfileTests Tests/RuntimeProfileTests.cpp)
+    target_include_directories(LightHostRuntimeProfileTests PRIVATE Source)
+    add_test(NAME runtime-profile-isolation COMMAND LightHostRuntimeProfileTests)
+    set_tests_properties(runtime-profile-isolation PROPERTIES TIMEOUT 15)
+    add_executable(LightHostOperationRegistryTests Tests/OperationRegistryTests.cpp)
+    target_include_directories(LightHostOperationRegistryTests PRIVATE Source)
+    add_test(NAME ipc-operation-retention COMMAND LightHostOperationRegistryTests)
+    set_tests_properties(ipc-operation-retention PROPERTIES TIMEOUT 15)
+    add_executable(LightHostIpcTests Tests/IpcTests.cpp)
+    target_include_directories(LightHostIpcTests PRIVATE Source)
+    add_test(NAME ipc-lifetime-and-transport COMMAND LightHostIpcTests)
+    set_tests_properties(ipc-lifetime-and-transport PROPERTIES TIMEOUT 15)
+    if(MSVC)
+        add_executable(LightHostWinUiTransportTests Tests/WinUiTransportTests.cpp)
+        find_path(LIGHTHOST_CPPWINRT_INCLUDE_DIR winrt/Windows.Foundation.h
+            HINTS "[HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows Kits\\Installed Roots;KitsRoot10]/Include/${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}/cppwinrt"
+            REQUIRED)
+        target_include_directories(LightHostWinUiTransportTests PRIVATE WinUI/LightHost.WinUI "${LIGHTHOST_CPPWINRT_INCLUDE_DIR}")
+        target_link_libraries(LightHostWinUiTransportTests PRIVATE windowsapp)
+        set_property(TARGET LightHostWinUiTransportTests PROPERTY CXX_STANDARD 20)
+        target_compile_options(LightHostWinUiTransportTests PRIVATE /utf-8)
+        add_test(NAME winui-json-and-async-transport COMMAND LightHostWinUiTransportTests)
+        set_tests_properties(winui-json-and-async-transport PROPERTIES TIMEOUT 20)
+        add_executable(LightHostLateTransportTests Tests/LateTransportTests.cpp)
+        target_include_directories(LightHostLateTransportTests PRIVATE WinUI/LightHost.WinUI "${LIGHTHOST_CPPWINRT_INCLUDE_DIR}")
+        target_link_libraries(LightHostLateTransportTests PRIVATE windowsapp)
+        set_property(TARGET LightHostLateTransportTests PROPERTY CXX_STANDARD 20)
+        target_compile_options(LightHostLateTransportTests PRIVATE /utf-8)
+        add_test(NAME winui-late-operation-reconciliation COMMAND LightHostLateTransportTests)
+        set_tests_properties(winui-late-operation-reconciliation PROPERTIES TIMEOUT 20)
+    endif()
+endif()
 
 include(FetchContent)
 
@@ -22,13 +70,18 @@ set_property(CACHE LIGHTHOST_VST2_PROVIDER PROPERTY STRINGS LEGACY XAYMAR)
 set(LIGHTHOST_ASIO_SDK_DIR "" CACHE PATH "Optional local ASIO SDK checkout")
 
 if(LIGHTHOST_JUCE_DIR)
-    add_subdirectory("${LIGHTHOST_JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
+    # Local source checkouts remain untouched by the bounded MIDI accessor.
+    set(juce_SOURCE_DIR "${CMAKE_BINARY_DIR}/juce-lighthost")
+    file(COPY "${LIGHTHOST_JUCE_DIR}/" DESTINATION "${juce_SOURCE_DIR}" PATTERN ".git" EXCLUDE)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/Utilities/PatchJuce.cmake")
+    add_subdirectory("${juce_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
 else()
     FetchContent_Declare(juce
         GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
         GIT_TAG 8.0.13
         GIT_SHALLOW TRUE)
     FetchContent_MakeAvailable(juce)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/Utilities/PatchJuce.cmake")
 endif()
 
 if(LIGHTHOST_VST3_SDK_DIR)
@@ -43,6 +96,51 @@ else()
 endif()
 
 juce_set_vst3_sdk_path("${vst3sdk_SOURCE_DIR}")
+
+if(BUILD_TESTING)
+    add_subdirectory(Tests/ScenarioPlugin scn EXCLUDE_FROM_ALL)
+endif()
+
+if(BUILD_TESTING)
+    add_executable(LightHostPluginInstanceTests Tests/PluginInstanceTests.cpp)
+    target_include_directories(LightHostPluginInstanceTests PRIVATE Source)
+    target_compile_definitions(LightHostPluginInstanceTests PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0)
+    target_compile_options(LightHostPluginInstanceTests PRIVATE /utf-8)
+    target_link_libraries(LightHostPluginInstanceTests PRIVATE juce::juce_audio_processors_headless juce::juce_cryptography)
+    add_test(NAME plugin-instance-identity-and-legacy-adapter COMMAND LightHostPluginInstanceTests)
+    set_tests_properties(plugin-instance-identity-and-legacy-adapter PROPERTIES TIMEOUT 20)
+    add_executable(LightHostSessionTests Tests/SessionPersistenceTests.cpp Source/SessionStore.cpp)
+    target_include_directories(LightHostSessionTests PRIVATE Source)
+    target_compile_definitions(LightHostSessionTests PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0)
+    target_compile_options(LightHostSessionTests PRIVATE /utf-8)
+    target_link_libraries(LightHostSessionTests PRIVATE juce::juce_audio_processors_headless juce::juce_cryptography)
+    add_test(NAME session-atomic-persistence-and-recovery COMMAND LightHostSessionTests)
+    set_tests_properties(session-atomic-persistence-and-recovery PROPERTIES TIMEOUT 30)
+    add_executable(LightHostProtocolTests Tests/ProtocolTests.cpp)
+    target_include_directories(LightHostProtocolTests PRIVATE Source)
+    target_compile_definitions(LightHostProtocolTests PRIVATE JUCE_USE_CURL=0)
+    target_link_libraries(LightHostProtocolTests PRIVATE juce::juce_core)
+    add_test(NAME ipc-versioned-protocol COMMAND LightHostProtocolTests)
+
+    add_executable(LightHostStateSyncTests Tests/StateSyncTests.cpp)
+    target_include_directories(LightHostStateSyncTests PRIVATE Source)
+    target_compile_definitions(LightHostStateSyncTests PRIVATE JUCE_USE_CURL=0)
+    target_link_libraries(LightHostStateSyncTests PRIVATE juce::juce_core)
+    add_test(NAME state-events-and-immutable-snapshots COMMAND LightHostStateSyncTests)
+    set_tests_properties(ipc-versioned-protocol PROPERTIES TIMEOUT 15)
+    add_executable(LightHostDevicePolicyTests Tests/DevicePolicyTests.cpp)
+    target_include_directories(LightHostDevicePolicyTests PRIVATE Source)
+    target_compile_definitions(LightHostDevicePolicyTests PRIVATE JUCE_USE_CURL=0)
+    target_link_libraries(LightHostDevicePolicyTests PRIVATE juce::juce_audio_devices)
+    add_test(NAME device-creation-policy COMMAND LightHostDevicePolicyTests)
+    set_tests_properties(device-creation-policy PROPERTIES TIMEOUT 15)
+    add_executable(LightHostDeviceRecoveryTests Tests/DeviceRecoveryTests.cpp Source/DeviceController.cpp)
+    target_include_directories(LightHostDeviceRecoveryTests PRIVATE Source)
+    target_compile_definitions(LightHostDeviceRecoveryTests PRIVATE JUCE_USE_CURL=0)
+    target_link_libraries(LightHostDeviceRecoveryTests PRIVATE juce::juce_audio_devices juce::juce_data_structures)
+    add_test(NAME device-recovery-scenarios COMMAND LightHostDeviceRecoveryTests)
+    set_tests_properties(device-recovery-scenarios PROPERTIES TIMEOUT 20)
+endif()
 
 string(TOUPPER "${LIGHTHOST_VST2_PROVIDER}" LIGHTHOST_VST2_PROVIDER_UPPER)
 if(NOT LIGHTHOST_VST2_PROVIDER_UPPER MATCHES "^(LEGACY|XAYMAR)$")
@@ -147,9 +245,12 @@ add_library(LightHostCore STATIC)
 target_sources(LightHostCore
     PRIVATE
         Source/AudioEngine.cpp
+        Source/SessionStore.cpp
+        Source/DeviceController.cpp
         Source/LightHostController.cpp
         Source/PluginWindow.cpp
-        Source/RealtimeHostProcessor.cpp)
+        Source/RealtimeHostProcessor.cpp
+        Source/PluginScanController.cpp)
 
 target_include_directories(LightHostCore
     PUBLIC
@@ -180,6 +281,7 @@ target_compile_definitions(LightHostCore
 target_link_libraries(LightHostCore
     PUBLIC
         juce::juce_audio_processors
+        juce::juce_cryptography
         juce::juce_audio_utils
         juce::juce_gui_extra
         juce::juce_recommended_config_flags
@@ -192,6 +294,69 @@ juce_add_gui_app(LightHost
     COMPANY_NAME "Light Host Modern"
     PRODUCT_NAME "Light Host Modern")
 
+if(BUILD_TESTING)
+    add_executable(LightHostRealtimeTests Tests/RealtimeTests.cpp Source/RealtimeAllocationAudit.cpp)
+    target_link_libraries(LightHostRealtimeTests PRIVATE LightHostCore)
+    target_include_directories(LightHostRealtimeTests PRIVATE "${LIGHTHOST_ASIO_INCLUDE_DIR}" ${LIGHTHOST_VST2_INCLUDE_DIRS})
+    add_test(NAME realtime-channels-segments-and-bypass COMMAND LightHostRealtimeTests)
+    set_tests_properties(realtime-channels-segments-and-bypass PROPERTIES TIMEOUT 30)
+    # Opt-in real modules run in their own process under the Python deadline.
+    # CTest remains self-contained and never downloads third-party binaries.
+    add_executable(LightHostRealPluginTests EXCLUDE_FROM_ALL Tests/RealPluginTests.cpp Source/RealtimeAllocationAudit.cpp)
+    target_link_libraries(LightHostRealPluginTests PRIVATE LightHostCore)
+    target_include_directories(LightHostRealPluginTests PRIVATE "${LIGHTHOST_ASIO_INCLUDE_DIR}" ${LIGHTHOST_VST2_INCLUDE_DIRS})
+endif()
+
+juce_add_console_app(LightHostScanner PRODUCT_NAME "LightHostScanner")
+target_sources(LightHostScanner PRIVATE Source/ScannerMain.cpp)
+target_link_libraries(LightHostScanner PRIVATE LightHostCore)
+target_include_directories(LightHostScanner PRIVATE "${LIGHTHOST_ASIO_INCLUDE_DIR}" ${LIGHTHOST_VST2_INCLUDE_DIRS})
+set_target_properties(LightHostScanner PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/LightHost_artefacts/$<CONFIG>")
+add_dependencies(LightHost LightHostScanner)
+
+juce_add_console_app(LightHostUpdateHelper PRODUCT_NAME "LightHostUpdateHelper")
+target_sources(LightHostUpdateHelper PRIVATE Source/UpdateHelperMain.cpp)
+target_include_directories(LightHostUpdateHelper PRIVATE Source)
+target_compile_definitions(LightHostUpdateHelper PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 NOMINMAX)
+target_compile_options(LightHostUpdateHelper PRIVATE /utf-8)
+target_link_libraries(LightHostUpdateHelper PRIVATE juce::juce_core msi bcrypt winhttp shell32)
+set_target_properties(LightHostUpdateHelper PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/LightHost_artefacts/$<CONFIG>")
+add_dependencies(LightHost LightHostUpdateHelper)
+
+# JUCE's resource command does not track Info.txt itself. Regenerate version
+# resources when project metadata changes, including in incremental builds.
+foreach(app_target IN ITEMS LightHost LightHostScanner LightHostUpdateHelper)
+    get_target_property(app_generated_sources ${app_target} JUCE_GENERATED_SOURCES_DIRECTORY)
+    get_target_property(app_info_file ${app_target} JUCE_INFO_FILE)
+    add_custom_command(OUTPUT "${app_generated_sources}/${app_target}_resources.rc"
+        APPEND DEPENDS "${app_info_file}")
+endforeach()
+
+if(BUILD_TESTING)
+    add_executable(LightHostUpdateTests Tests/UpdateTests.cpp)
+    target_include_directories(LightHostUpdateTests PRIVATE Source)
+    target_compile_definitions(LightHostUpdateTests PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 NOMINMAX)
+    target_compile_options(LightHostUpdateTests PRIVATE /utf-8)
+    target_link_libraries(LightHostUpdateTests PRIVATE juce::juce_core msi bcrypt winhttp shell32)
+    add_test(NAME update-streaming-validation-and-application COMMAND LightHostUpdateTests)
+    set_tests_properties(update-streaming-validation-and-application PROPERTIES TIMEOUT 30)
+endif()
+
+if(BUILD_TESTING)
+    add_executable(LightHostScanProcessTests Tests/ScanProcessTests.cpp)
+    target_include_directories(LightHostScanProcessTests PRIVATE Source)
+    add_test(NAME scanner-process-lifetime COMMAND LightHostScanProcessTests)
+    set_tests_properties(scanner-process-lifetime PROPERTIES TIMEOUT 15)
+    add_executable(LightHostScanControllerTests Tests/ScanControllerTests.cpp)
+    target_link_libraries(LightHostScanControllerTests PRIVATE LightHostCore Advapi32)
+    target_include_directories(LightHostScanControllerTests PRIVATE "${LIGHTHOST_ASIO_INCLUDE_DIR}" ${LIGHTHOST_VST2_INCLUDE_DIRS})
+    add_test(NAME scanner-controller-results COMMAND LightHostScanControllerTests)
+    set_tests_properties(scanner-controller-results PROPERTIES TIMEOUT 30)
+endif()
+
 juce_generate_juce_header(LightHost)
 set_target_properties(LightHost PROPERTIES OUTPUT_NAME "Light Host Modern")
 
@@ -201,6 +366,11 @@ target_sources(LightHost
         Source/HostIpcServer.cpp
         Source/HostStartup.cpp
         Source/IconMenu.cpp)
+
+if(LIGHTHOST_REALTIME_AUDIT)
+    target_sources(LightHost PRIVATE Source/RealtimeAllocationAudit.cpp)
+    target_compile_definitions(LightHost PRIVATE LIGHTHOST_REALTIME_AUDIT=1)
+endif()
 
 target_include_directories(LightHost
     PRIVATE
@@ -213,6 +383,11 @@ juce_add_binary_data(LightHostData
         Icon/logo-black.png
         Icon/logo-white.png)
 
+juce_add_binary_data(LightHostLocales
+    NAMESPACE LightHostLocales
+    HEADER_NAME LightHostLocales.h
+    SOURCES WinUI/LightHost.WinUI/Locales/en-us.json WinUI/LightHost.WinUI/Locales/pt-br.json)
+
 target_compile_definitions(LightHost
     PRIVATE
         JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:LightHost,JUCE_PRODUCT_NAME>"
@@ -222,19 +397,24 @@ target_link_libraries(LightHost
     PRIVATE
         LightHostCore
         LightHostData
+        LightHostLocales
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
 if(MSVC)
-    set(LIGHTHOST_WINUI_SOURCE_DIR
-        "${CMAKE_CURRENT_SOURCE_DIR}/WinUI/LightHost.WinUI/x64/$<CONFIG>/LightHost.WinUI")
     set(LIGHTHOST_WINUI_TARGET_DIR
         "$<TARGET_FILE_DIR:LightHost>/WinUI/x64/$<CONFIG>/LightHost.WinUI")
 
-    add_custom_command(TARGET LightHost POST_BUILD
-        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
-            "if (Test-Path -LiteralPath '${LIGHTHOST_WINUI_SOURCE_DIR}') { New-Item -ItemType Directory -Force -Path '${LIGHTHOST_WINUI_TARGET_DIR}' | Out-Null; Copy-Item -Path '${LIGHTHOST_WINUI_SOURCE_DIR}\\*' -Destination '${LIGHTHOST_WINUI_TARGET_DIR}' -Recurse -Force } else { Write-Host 'WinUI output not found; build WinUI/LightHost.WinUI.sln before packaging release.' }"
-        COMMENT "Copying Light Host Modern WinUI shell into the host output folder")
+    # Staging must also run when only WinUI changed and the host does not relink.
+    # CMP0112 (NEW through cmake_minimum_required) makes TARGET_FILE_DIR a
+    # directory query, so this prerequisite does not create a target cycle.
+    add_custom_target(LightHostStageWinUI
+        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
+            "${CMAKE_CURRENT_SOURCE_DIR}/Utilities/WinUI Output.ps1" -Mode Stage -Platform x64 -Configuration $<CONFIG>
+            -Destination "${LIGHTHOST_WINUI_TARGET_DIR}"
+        COMMENT "Verifying and staging the current WinUI shell"
+        VERBATIM)
+    add_dependencies(LightHost LightHostStageWinUI)
 endif()

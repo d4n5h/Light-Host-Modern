@@ -14,6 +14,7 @@ public:
     static void menuInvocationCallback(int id, IconMenu*);
 
 	const int INDEX_OPEN_WINUI, INDEX_QUIT;
+	static constexpr int INDEX_GLOBAL_MUTE = 900002, INDEX_GLOBAL_BYPASS = 900003;
 
 private:
 	enum TimerIds

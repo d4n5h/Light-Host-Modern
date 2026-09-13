@@ -1,8 +1,11 @@
+import "PageState.idl";
+
 namespace LightHostWinUI
 {
     [default_interface]
     runtimeclass MainWindow : Microsoft.UI.Xaml.Window
     {
         MainWindow();
+        LightHostWinUI.PageState Pages{ get; };
     }
 }

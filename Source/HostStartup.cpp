@@ -1,6 +1,7 @@
 #include <JuceHeader.h>
 #include "IconMenu.hpp"
 #include "DebugLog.h"
+#include "RuntimeProfile.h"
 
 #if JUCE_WINDOWS
  #ifndef NOMINMAX
@@ -21,15 +22,21 @@ public:
 
     void initialise (const String&) override
     {
+        const auto& profile = lightHost::RuntimeProfile::current();
+        profile.createDirectories();
         const bool debugEnabled = hasParameter("--debug") || hasParameter("-debug");
         setLightHostDebugEnabled(debugEnabled);
         openLightHostDebugConsoleIfNeeded();
         installLightHostCrashDiagnostics();
+#if LIGHTHOST_REALTIME_AUDIT
+        if (!installRealtimeAllocationAudit()) lightHostLog("Realtime allocation audit is unavailable: executable CRT imports could not be instrumented.");
+#endif
 
         lightHostLog("initialise()");
 
         PropertiesFile::Options options;
-        options.applicationName     = getApplicationName();
+        options.applicationName     = "Light Host Modern";
+        if (profile.test) options.folderName = String(profile.directory.wstring().c_str());
         options.filenameSuffix      = "settings";
         options.osxLibrarySubFolder = "Preferences";
 
@@ -51,6 +58,15 @@ public:
             && !hasParameter("--no-restore-active-plugins")
             && !hasParameter("-no-restore-active-plugins");
         mainWindow = std::make_unique<IconMenu>(safeMode, debugEnabled, restoreActivePlugins);
+        if (profile.test)
+        {
+            auto info = new DynamicObject();
+            info->setProperty("profile", String(profile.name.c_str()));
+            info->setProperty("pipe", String(profile.pipeName().c_str()));
+            info->setProperty("pid", (int) GetCurrentProcessId());
+            info->setProperty("audioInitiallySuspended", profile.noAudio);
+            File((profile.directory / L"profile.json").wstring().c_str()).replaceWithText(JSON::toString(var(info)));
+        }
     }
 
     void shutdown() override
@@ -67,7 +83,10 @@ public:
         JUCEApplicationBase::quit();
     }
 
-    const String getApplicationName() override       { return "Light Host Modern"; }
+    const String getApplicationName() override       {
+        const auto& profile = lightHost::RuntimeProfile::current();
+        return profile.test ? "Light Host Modern-profile-" + String(profile.key.c_str()) : "Light Host Modern";
+    }
     const String getApplicationVersion() override    { return ProjectInfo::versionString; }
     bool moreThanOneInstanceAllowed() override       {
         StringArray multiInstance = getParameter("-multi-instance");
@@ -142,6 +161,23 @@ private:
             }
 
             settings->saveIfNeeded();
+
+            auto storage = std::make_shared<lightHost::DiskSessionStorage>(settings->getFile());
+            const auto recovered = lightHost::SessionStore::recover(*storage);
+            if (recovered.document)
+            {
+                auto document = *recovered.document;
+                for (auto& record : document.instances.records)
+                {
+                    record.error.clear();
+                    record.loading = "unloaded";
+                    // State and recovery bytes are preserved for the next load.
+                }
+                lightHost::SessionStore writer(std::move(storage), recovered);
+                writer.submit(std::move(document.instances), document.intentionalEmpty, document.migrationId);
+                if (!writer.flush()) lightHostLog("Could not save the cleared plugin failure markers: " + writer.status().error);
+            }
+            else if (recovered.found) lightHostLog("Failed plugin markers were retained because session recovery is incomplete");
         }
     }
 };

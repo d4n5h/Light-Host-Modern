@@ -1,7 +1,26 @@
 #pragma once
+#include "SessionStatusPresenter.h"
 
 #include "MainWindow.g.h"
 #include "Localization.h"
+#include "HostTransport.h"
+#include "HostConnection.h"
+#include "UpdateService.h"
+#include "PluginPageController.h"
+#include "AudioPageController.h"
+#include "MeterPresenter.h"
+#include "DiagnosticsPresenter.h"
+#include "WindowMaterial.h"
+#include <winrt/Windows.UI.ViewManagement.h>
+#include "AudioPageView.xaml.h"
+#include "PluginsPageView.xaml.h"
+#include "SupportPageView.xaml.h"
+#include "SettingsPageView.xaml.h"
+#include "DiagnosticsPageView.xaml.h"
+#include "DatabasePageView.xaml.h"
+#include "ScanPathsDialog.h"
+#include "PageState.h"
+#include <map>
 
 namespace winrt::LightHostWinUI::implementation
 {
@@ -16,6 +35,12 @@ namespace winrt::LightHostWinUI::implementation
     struct MainWindow : MainWindowT<MainWindow>
     {
         MainWindow();
+        lightHost::ui::WindowMaterial windowMaterial;
+        winrt::LightHostWinUI::PageState Pages() const { return pageState; }
+        winrt::fire_and_forget CancelPluginScan_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget RetryPluginScan_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget ViewScanFailures_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget GlobalAudioControl_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
 
         void Dashboard_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void Preferences_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -31,12 +56,13 @@ namespace winrt::LightHostWinUI::implementation
         void HideSupportTabSwitch_Toggled(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void LanguageBox_SelectionChanged(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void PluginSearchBox_TextChanged(Microsoft::UI::Xaml::Controls::AutoSuggestBox const&, Microsoft::UI::Xaml::Controls::AutoSuggestBoxTextChangedEventArgs const&);
+        void PluginActions_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void SidebarToggle_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void Refresh_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void ThemeModeBox_SelectionChanged(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void FluentDropdownButton_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void FluentDropdownItem_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void ChannelButton_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget FluentDropdownItem_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget ChannelButton_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
         void ComboBox_DropDownOpened(winrt::Windows::Foundation::IInspectable const&, winrt::Windows::Foundation::IInspectable const&);
         void ComboBox_DropDownClosed(winrt::Windows::Foundation::IInspectable const&, winrt::Windows::Foundation::IInspectable const&);
         void RootLayout_SizeChanged(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
@@ -46,50 +72,57 @@ namespace winrt::LightHostWinUI::implementation
         void OpenWindowsSoundSettings_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RepositoryButton_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OriginalRepositoryButton_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void AudioBackendBox_SelectionChanged(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
-        void InputBox_SelectionChanged(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
-        void OutputBox_SelectionChanged(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
-        void ChannelCheckBox_Changed(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void InputChannelsToggleAll_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OutputChannelsToggleAll_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void SampleRateBox_SelectionChanged(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
-        void BufferSizeBox_SelectionChanged(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+        winrt::fire_and_forget AudioBackendBox_SelectionChanged(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs);
+        winrt::fire_and_forget InputBox_SelectionChanged(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs);
+        winrt::fire_and_forget OutputBox_SelectionChanged(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs);
+        winrt::fire_and_forget ChannelCheckBox_Changed(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget InputChannelsToggleAll_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget OutputChannelsToggleAll_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget SampleRateBox_SelectionChanged(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs);
+        winrt::fire_and_forget BufferSizeBox_SelectionChanged(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs);
         void RunningPluginsListView_SelectionChanged(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void RunningPluginsListView_DragItemsStarting(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::DragItemsStartingEventArgs const&);
         void RunningPluginsListView_DragItemsCompleted(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::DragItemsCompletedEventArgs const&);
         void RunningPluginItem_DragStarting(Microsoft::UI::Xaml::UIElement const&, Microsoft::UI::Xaml::DragStartingEventArgs const&);
         void RunningPluginItem_DragOver(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::DragEventArgs const&);
-        void RunningPluginItem_Drop(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::DragEventArgs const&);
-        void BypassPlugin_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OpenPluginEditor_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void DuplicatePlugin_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void RemovePlugin_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void ScanDefaultPlugins_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void ScanPaths_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void AddInstalledPlugin_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void OpenInstalledPluginLocation_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void RemoveInstalledPlugin_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void RemoveMissingPlugins_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void ClearPluginDatabase_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void DeletePluginStates_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void StartWithWindowsCheckBox_Changed(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void CloseToTraySwitch_Toggled(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void CloseBehaviorRadioButton_Checked(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void EnableVst2CheckBox_Changed(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void AudioPersistenceModeBox_SelectionChanged(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
-        void AudioRecoveryRetrySecondsBox_ValueChanged(Microsoft::UI::Xaml::Controls::NumberBox const&, Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const&);
-        void AudioRecoveryRetryAttemptsBox_ValueChanged(Microsoft::UI::Xaml::Controls::NumberBox const&, Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const&);
-        void CustomRecoveryBackendBox_SelectionChanged(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
-        void CustomRecoveryInputBox_SelectionChanged(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
-        void CustomRecoveryOutputBox_SelectionChanged(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
-        void RetryAudioDevice_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget RunningPluginItem_Drop(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::DragEventArgs);
+        winrt::fire_and_forget BypassPlugin_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget OpenPluginEditor_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget DuplicatePlugin_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget RemovePlugin_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget ScanDefaultPlugins_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget AddInstalledPlugin_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget OpenInstalledPluginLocation_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget RemoveInstalledPlugin_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget RemoveMissingPlugins_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget ClearPluginDatabase_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget DeletePluginStates_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget StartWithWindowsCheckBox_Changed(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget CloseToTraySwitch_Toggled(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget CloseBehaviorRadioButton_Checked(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget EnableVst2CheckBox_Changed(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        winrt::fire_and_forget AudioPersistenceModeBox_SelectionChanged(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs);
+        winrt::fire_and_forget AudioRecoveryRetrySecondsBox_ValueChanged(Microsoft::UI::Xaml::Controls::NumberBox, Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs);
+        winrt::fire_and_forget AudioRecoveryRetryAttemptsBox_ValueChanged(Microsoft::UI::Xaml::Controls::NumberBox, Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs);
+        winrt::Windows::Foundation::IAsyncAction changeAudioSelection(std::string field, std::string value);
+        winrt::fire_and_forget RetryAudioDevice_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
         void ChooseAudioDevice_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void ManageEnabledAudioDevices_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget ManageEnabledAudioDevices_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
         void PreferredDeviceButton_Click(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-        void IconModeBox_SelectionChanged(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
-        void Window_Closed(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::WindowEventArgs const&);
+        winrt::fire_and_forget IconModeBox_SelectionChanged(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs);
+        winrt::fire_and_forget Window_Closed(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::WindowEventArgs);
 
     private:
+#include "PageAccessors.h"
+        winrt::LightHostWinUI::PageState pageState = winrt::make<winrt::LightHostWinUI::implementation::PageState>();
+        winrt::LightHostWinUI::AudioPageView audioPageView{nullptr};
+        winrt::LightHostWinUI::PluginsPageView pluginsPageView{nullptr};
+        winrt::LightHostWinUI::SupportPageView supportPageView{nullptr};
+        winrt::LightHostWinUI::SettingsPageView settingsPageView{nullptr};
+        std::shared_ptr<lightHost::ui::UpdateService> updateService = std::make_shared<lightHost::ui::UpdateService>();
+        bool ensurePage(std::wstring const& section);
+        void initializePage(std::wstring const& section);
+        std::map<std::wstring, double> pageScrollOffsets;
         struct FluentDropdown
         {
             Microsoft::UI::Xaml::Controls::Button button{ nullptr };
@@ -126,8 +159,6 @@ namespace winrt::LightHostWinUI::implementation
         Microsoft::UI::Xaml::Controls::ToggleSwitch startWithWindowsCheckBox{ nullptr };
         Microsoft::UI::Xaml::Controls::ToggleSwitch closeToTraySwitch{ nullptr };
         Microsoft::UI::Xaml::Controls::ToggleSwitch enableVst2CheckBox{ nullptr };
-        Microsoft::UI::Xaml::Controls::ProgressBar inputMeterBar{ nullptr };
-        Microsoft::UI::Xaml::Controls::ProgressBar outputMeterBar{ nullptr };
         Microsoft::UI::Xaml::Controls::CheckBox scanVstCheckBox{ nullptr };
         Microsoft::UI::Xaml::Controls::CheckBox scanVst3CheckBox{ nullptr };
         Microsoft::UI::Xaml::Controls::RadioButton closeQuitsAppRadioButton{ nullptr };
@@ -144,13 +175,35 @@ namespace winrt::LightHostWinUI::implementation
         bool vst2RestartRequired = false;
         bool comboDropDownOpen = false;
         bool commandInProgress = false;
+        bool telemetryInProgress = false;
+        bool snapshotInProgress = false;
+        bool windowClosing = false;
+        std::shared_ptr<lightHost::ui::HostConnection> hostConnection = std::make_shared<lightHost::ui::HostConnection>();
+        std::shared_ptr<lightHost::ipc::ClientState> hostTransport = hostConnection->commands;
+        bool heartbeatInProgress = false;
+        uint64_t lastHeartbeatTick = 0, lastDiagnosticTick = 0;
+        uint64_t lastSnapshotAttemptTick = 0;
+        lightHost::ui::PluginPageController runningPage{true}, installedPage{false};
+        winrt::fire_and_forget receiveHostEvents();
+        winrt::fire_and_forget heartbeat();
+        bool isMinimized() const;
         bool pluginDragInProgress = false;
+        bool scanStatusInProgress = false, pluginScanActive = false, scanQueuePending = false;
+        uint64_t lastScanStatusTick = 0;
+        Windows::Foundation::IAsyncAction refreshPluginScanStatus();
+        bool globalMuted = false, globalBypassed = false, globalControlPending = false;
+        void updateGlobalAudioControls();
+
         bool asioDeviceMode = false;
         bool sidebarCollapsed = false;
         bool syncingLanguageControls = false;
         bool languageChangeQueued = false;
         bool updateInstallInProgress = false;
+        bool updateCheckStarted = false;
         bool hideSupportTab = false;
+        bool diagnosticsEnabled = true, syncingDiagnosticsControls = false, diagnosticsChangePending = false;
+        void syncDiagnosticsSetting(bool enabled);
+        winrt::fire_and_forget DiagnosticsEnabled_Toggled(winrt::Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         bool compactLayout = false;
         bool compactPluginCards = false;
         bool preferredDeviceDialogOpen = false;
@@ -158,13 +211,10 @@ namespace winrt::LightHostWinUI::implementation
         int installedPluginSortMode = 1;
         std::wstring runningPluginSearch;
         std::wstring installedPluginSearch;
-        std::wstring latestReleaseUrl;
-        std::wstring latestReleaseTag;
-        std::wstring latestInstallerUrl;
-        std::wstring latestInstallerDigest;
         std::wstring pendingLanguageCode;
         std::wstring currentSection = L"Dashboard";
         ::LightHostWinUI::LocalizationCatalog localization;
+        std::string draggedPluginSourceId, draggedPluginTargetId;
         int draggedPluginSourceIndex = -1;
         int draggedPluginTargetIndex = -1;
         int draggedPluginDropIndex = -1;
@@ -174,6 +224,7 @@ namespace winrt::LightHostWinUI::implementation
         int64_t lastPluginDbVersion = -1;
         int64_t lastAudioConfigVersion = -1;
         bool hasFullSnapshot = false;
+        bool sessionWritable = false;
         std::string lastCommandResponse;
         std::vector<std::string> renderedRunningPluginLabels;
         std::vector<std::string> renderedInstalledPluginLabels;
@@ -194,8 +245,6 @@ namespace winrt::LightHostWinUI::implementation
         std::vector<std::string> pluginScanPaths;
         std::vector<Microsoft::UI::Xaml::Controls::Border> runningPluginItemBorders;
         std::vector<Microsoft::UI::Xaml::Controls::Border> installedPluginItemBorders;
-        std::vector<Microsoft::UI::Xaml::Controls::Border> inputMeterSegments;
-        std::vector<Microsoft::UI::Xaml::Controls::Border> outputMeterSegments;
 
         Microsoft::UI::Xaml::Controls::ComboBox AudioBackendBox() const { return audioBackendBox; }
         Microsoft::UI::Xaml::Controls::ComboBox InputBox() const { return inputBox; }
@@ -215,14 +264,12 @@ namespace winrt::LightHostWinUI::implementation
         Microsoft::UI::Xaml::Controls::ToggleSwitch StartWithWindowsCheckBox() const { return startWithWindowsCheckBox; }
         Microsoft::UI::Xaml::Controls::ToggleSwitch CloseToTraySwitch() const { return closeToTraySwitch; }
         Microsoft::UI::Xaml::Controls::ToggleSwitch EnableVst2CheckBox() const { return enableVst2CheckBox; }
-        Microsoft::UI::Xaml::Controls::ProgressBar InputMeterBar() const { return inputMeterBar; }
-        Microsoft::UI::Xaml::Controls::ProgressBar OutputMeterBar() const { return outputMeterBar; }
         Microsoft::UI::Xaml::Controls::CheckBox ScanVstCheckBox() const { return scanVstCheckBox; }
         Microsoft::UI::Xaml::Controls::CheckBox ScanVst3CheckBox() const { return scanVst3CheckBox; }
         Microsoft::UI::Xaml::Controls::RadioButton CloseQuitsAppRadioButton() const { return closeQuitsAppRadioButton; }
         Microsoft::UI::Xaml::Controls::RadioButton CloseToTrayRadioButton() const { return closeToTrayRadioButton; }
 
-        void createDynamicControls();
+        void createDynamicControls(std::wstring const& section);
         void createFluentDropdown(FluentDropdown& dropdown,
             Microsoft::UI::Xaml::Controls::StackPanel const& host,
             std::string const& command);
@@ -232,23 +279,52 @@ namespace winrt::LightHostWinUI::implementation
         void syncFluentDropdownLabel(FluentDropdown& dropdown);
         void closeFluentDropdowns();
         void openFluentDropdown(FluentDropdown& dropdown);
-        void createMeterSegments(Microsoft::UI::Xaml::Controls::StackPanel const& host,
-            std::vector<Microsoft::UI::Xaml::Controls::Border>& segments);
-        void updateMeterSegments(std::vector<Microsoft::UI::Xaml::Controls::Border> const& segments, double level);
+        lightHost::ui::MeterPresenter inputMeter, outputMeter;
+        lightHost::ui::DiagnosticsPresenter diagnosticsPresenter;
+        lightHost::ui::SessionStatusPresenter sessionStatusPresenter;
+        winrt::LightHostWinUI::DiagnosticsPageView diagnosticsPageView{nullptr};
+        winrt::LightHostWinUI::DatabasePageView databasePageView{nullptr};
+        std::shared_ptr<lightHost::ui::ScanPathsDialog> databasePaths;
+        Microsoft::UI::Xaml::Controls::ContentDialog pluginScanDialog{nullptr};
+        Microsoft::UI::Xaml::Controls::ContentDialog scanProgressDialog{nullptr};
+        bool scanShowingProgress = false;
+        int scanFailureCount = 0;
+        bool scanHasResult = false;
+        bool scanDialogOpen = false;
+        bool scanStatusKnown = false;
+        bool scanFailuresRequested = false;
+        bool scanCancelRequested = false;
+        void updateScanDialogActions();
+        winrt::fire_and_forget ScanForPlugins_Click(winrt::Windows::Foundation::IInspectable, Microsoft::UI::Xaml::RoutedEventArgs);
+        Windows::Foundation::IAsyncAction showScanFailures();
+        Windows::Foundation::IAsyncAction confirmClearPluginDatabase();
+        bool meterReadInProgress = false;
+        winrt::fire_and_forget refreshMeterLevels();
+        bool isControlVisible(Microsoft::UI::Xaml::FrameworkElement control);
+        void updateMeters(const std::string& json);
         void showNotification(std::wstring const& message);
         void showSection(std::wstring const& section);
-        void refreshTelemetry();
-        void refreshSnapshot();
-        bool sendCommand(std::string const& command);
+        winrt::fire_and_forget refreshTelemetry();
+        winrt::Windows::Foundation::IAsyncAction refreshSnapshot(bool fromCache = false);
+        winrt::Windows::Foundation::IAsyncOperation<bool> sendCommand(std::string command);
         int taggedIndexOrSelected(winrt::Windows::Foundation::IInspectable const& sender, int selectedIndex) const;
         int selectedRunningPluginIndex();
         void updateRunningPluginActions();
         void updateInstalledPluginActions();
+        winrt::fire_and_forget openPluginDialog(std::string action, winrt::LightHostWinUI::PluginItem item, Microsoft::UI::Xaml::Controls::Button button);
+        bool pluginDialogOpen = false;
+        bool installedGrouped = false;
         void applyTheme(Microsoft::UI::Xaml::ElementTheme theme);
+        void updateThemeVisuals();
+        void queueThemeRefresh();
+        bool themeRefreshQueued = false;
+        int appliedBackdropIndex = -1;
+        winrt::Windows::UI::ViewManagement::AccessibilitySettings accessibilitySettings;
+        winrt::Windows::UI::ViewManagement::AccessibilitySettings::HighContrastChanged_revoker contrastChanged;
         void applyBackdrop(int selectedIndex);
         void applyLayoutMode();
         void updatePreferredDeviceSummary();
-        winrt::fire_and_forget showPreferredDeviceDialogAsync();
+        fire_and_forget showPreferredDeviceDialogAsync();
         void applyIconMode(std::string const& mode);
         void syncIconMode(std::string const& mode);
         void applyResponsiveLayout(double width);
@@ -267,11 +343,14 @@ namespace winrt::LightHostWinUI::implementation
         void resetRunningPluginDragVisuals();
         void showPluginSubsection(std::wstring const& section);
         void configurePluginSortMenus();
+        void refreshPluginViews();
         void localizeVisualTree(Microsoft::UI::Xaml::DependencyObject const& root);
         void applyLocalization();
         void refreshLanguageItems();
-        winrt::fire_and_forget checkForUpdatesAsync();
-        winrt::fire_and_forget downloadAndInstallUpdateAsync();
+        void updateDownloadButtonText();
+        void presentUpdateResult();
+        fire_and_forget checkForUpdatesAsync();
+        fire_and_forget downloadAndInstallUpdateAsync();
         void updateDebugControls();
         void resetDefaultPluginScanPaths();
     };

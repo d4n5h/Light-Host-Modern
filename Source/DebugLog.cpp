@@ -1,4 +1,5 @@
 #include "DebugLog.h"
+#include "RuntimeProfile.h"
 
 #if JUCE_WINDOWS
  #ifndef NOMINMAX
@@ -30,6 +31,8 @@ namespace
 			.getChildFile("LightHostModern")
 			.getChildFile("Logs");
 
+		const auto& profile = lightHost::RuntimeProfile::current();
+		if (profile.test) logsDirectory = File((profile.directory / L"Logs").wstring().c_str());
 		logsDirectory.createDirectory();
 
 		const auto timestamp = Time::getCurrentTime().formatted("%Y%m%d-%H%M%S");

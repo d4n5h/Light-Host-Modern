@@ -130,6 +130,10 @@ PluginWindow* PluginWindow::getWindowFor (AudioProcessor& processor,
                                           NamedValueSet& windowProperties,
                                           WindowFormatType type)
 {
+    // Resolve the normal-editor fallback before searching. Otherwise a plugin
+    // without its own editor opens another generic window on every request.
+    if (type == Normal && !processor.hasEditor()) type = Generic;
+    const auto requestedType = type;
     for (int i = activePluginWindows.size(); --i >= 0;)
         if (activePluginWindows.getUnchecked(i)->owner == &processor
              && activePluginWindows.getUnchecked(i)->type == type)
@@ -158,7 +162,7 @@ PluginWindow* PluginWindow::getWindowFor (AudioProcessor& processor,
         if (AudioPluginInstance* const plugin = dynamic_cast<AudioPluginInstance*> (&processor))
             ui->setName (plugin->getName());
 
-        return new PluginWindow (ui, processor, windowProperties, type);
+        return new PluginWindow (ui, processor, windowProperties, requestedType);
     }
 
     return nullptr;

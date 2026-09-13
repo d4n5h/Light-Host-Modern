@@ -2,11 +2,16 @@
 #define HostIpcServer_h
 
 #include "AudioEngine.h"
+#include "IpcOperation.h"
+#include "IpcProtocol.h"
+#include "OperationRegistry.h"
+#include "StateEvents.h"
+#include "StateSnapshots.h"
 #include <atomic>
 #include <functional>
 #include <thread>
 
-class HostIpcServer
+class HostIpcServer : private Timer
 {
 public:
 	explicit HostIpcServer(AudioEngine& engineToExpose);
@@ -16,17 +21,25 @@ public:
 	String getPipeName() const { return pipeName; }
 
 private:
-	void run();
-	void wakeServer();
+	void run(bool metersOnly = false);
+	void runEvents();
+	String eventRequest(const String& request);
+	void timerCallback() override;
+	var revisionsJson(const lightHost::ipc::StateRevisions&) const;
+	String acceptRequest(const String& json);
+	String operationResponse(const lightHost::ipc::Request&, const lightHost::ipc::OperationRegistry::Record&);
+	String withEnvelope(const String& json, const String& id) const;
 	String processRequestOnMessageThread(const String& request);
 	String processRequest(const String& request);
+	String dispatchRequest(const lightHost::ipc::Request& request);
 	String buildTelemetry();
+	String meterRequest(const String& request);
+	String buildDiagnostics(const DiagnosticsSnapshot&);
 	String buildSnapshot();
 	String buildEnabledAudioChoices();
 	String commandOk();
 	String commandResult(bool success);
 
-	static String escapeJson(const String& value);
 	static String quote(const String& value);
 	static String stringArrayJson(const std::vector<String>& values);
 	static String numberArrayJson(const std::vector<int>& values);
@@ -36,8 +49,25 @@ private:
 	AudioEngine& engine;
 	std::function<void()> trayIconChanged;
 	String pipeName;
+	const String hostSession = Uuid().toString();
+	lightHost::ipc::OperationRegistry operations;
+	lightHost::ipc::StateEvents events;
+	lightHost::ipc::StateSnapshots snapshots;
+	lightHost::ipc::StateRevisions publishedRevisions{};
+	std::atomic<uint64_t> operationRevision{0};
+	std::atomic<uint64_t> telemetryRequests{0}, snapshotRequests{0}, heartbeatRequests{0}, eventRequests{0};
+	std::atomic<uint64_t> meterRequests{0};
+	std::pair<String, uint64_t> scanRevision;
+	std::map<std::string, std::string> chainEntities, databaseEntities;
+	std::vector<std::string> completedOperationIds;
 	std::atomic<bool> stopping { false };
+	std::atomic<bool> responseInFlight { false }, quitRequested { false };
+	std::shared_ptr<lightHost::ipc::LifetimeGate<HostIpcServer>> lifetime;
+	struct Transport;
+	std::unique_ptr<Transport> transport;
 	std::thread worker;
+	std::thread eventWorker;
+	std::thread meterWorker;
 };
 
 #endif /* HostIpcServer_h */

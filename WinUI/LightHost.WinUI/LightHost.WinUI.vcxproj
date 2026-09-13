@@ -73,6 +73,7 @@
   </PropertyGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <Import Project="..\LightHost.Output.props" />
 
   <PropertyGroup>
     <NuGetPackageRoot Condition="'$(NuGetPackageRoot)'==''">$(UserProfile)\.nuget\packages\</NuGetPackageRoot>
@@ -92,7 +93,7 @@
       <WarningLevel>Level4</WarningLevel>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalIncludeDirectories>$(ProjectDir)Generated Files\Pages;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
+      <AdditionalOptions>%(AdditionalOptions) /bigobj /utf-8</AdditionalOptions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
@@ -122,6 +123,19 @@
   <ItemGroup>
     <ClInclude Include="pch.h" />
     <ClInclude Include="Localization.h" />
+    <ClInclude Include="HostJson.h" />
+    <ClInclude Include="HostTransport.h" />
+    <ClInclude Include="HostConnection.h" />
+    <ClInclude Include="AudioPageController.h" />
+    <ClInclude Include="PluginItem.h" />
+    <ClInclude Include="PageState.h" />
+    <ClInclude Include="PluginPageController.h" />
+    <ClInclude Include="PluginDialogs.h" />
+    <ClInclude Include="MeterPresenter.h" />
+    <ClInclude Include="WindowMaterial.h" />
+    <ClInclude Include="DiagnosticsPresenter.h" />
+    <ClInclude Include="PluginRows.h" />
+    <ClInclude Include="ScanFailureDialog.h" />
     <ClInclude Include="WinUIDebug.h" />
     <ClInclude Include="App.xaml.h">
       <DependentUpon>App.xaml</DependentUpon>
@@ -133,6 +147,33 @@
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml" />
     <Page Include="MainWindow.xaml" />
+    <Page Include="AudioPageView.xaml" />
+    <Page Include="PluginsPageView.xaml" />
+    <Page Include="SupportPageView.xaml" />
+    <Page Include="SettingsPageView.xaml" />
+    <Page Include="DatabasePageView.xaml" />
+    <Midl Include="DatabasePageView.idl"><DependentUpon>DatabasePageView.xaml</DependentUpon></Midl>
+    <ClInclude Include="DatabasePageView.xaml.h"><DependentUpon>DatabasePageView.xaml</DependentUpon></ClInclude>
+    <ClCompile Include="DatabasePageView.xaml.cpp"><DependentUpon>DatabasePageView.xaml</DependentUpon></ClCompile>
+    <Page Include="DiagnosticsPageView.xaml" />
+    <Midl Include="DiagnosticsPageView.idl"><DependentUpon>DiagnosticsPageView.xaml</DependentUpon></Midl>
+    <ClInclude Include="DiagnosticsPageView.xaml.h"><DependentUpon>DiagnosticsPageView.xaml</DependentUpon></ClInclude>
+    <ClCompile Include="DiagnosticsPageView.xaml.cpp"><DependentUpon>DiagnosticsPageView.xaml</DependentUpon></ClCompile>
+    <ClInclude Include="ScanPathsDialog.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Midl Include="AudioPageView.idl"><DependentUpon>AudioPageView.xaml</DependentUpon></Midl>
+    <ClInclude Include="AudioPageView.xaml.h"><DependentUpon>AudioPageView.xaml</DependentUpon></ClInclude>
+    <ClCompile Include="AudioPageView.xaml.cpp"><DependentUpon>AudioPageView.xaml</DependentUpon></ClCompile>
+    <Midl Include="PluginsPageView.idl"><DependentUpon>PluginsPageView.xaml</DependentUpon></Midl>
+    <ClInclude Include="PluginsPageView.xaml.h"><DependentUpon>PluginsPageView.xaml</DependentUpon></ClInclude>
+    <ClCompile Include="PluginsPageView.xaml.cpp"><DependentUpon>PluginsPageView.xaml</DependentUpon></ClCompile>
+    <Midl Include="SupportPageView.idl"><DependentUpon>SupportPageView.xaml</DependentUpon></Midl>
+    <ClInclude Include="SupportPageView.xaml.h"><DependentUpon>SupportPageView.xaml</DependentUpon></ClInclude>
+    <ClCompile Include="SupportPageView.xaml.cpp"><DependentUpon>SupportPageView.xaml</DependentUpon></ClCompile>
+    <Midl Include="SettingsPageView.idl"><DependentUpon>SettingsPageView.xaml</DependentUpon></Midl>
+    <ClInclude Include="SettingsPageView.xaml.h"><DependentUpon>SettingsPageView.xaml</DependentUpon></ClInclude>
+    <ClCompile Include="SettingsPageView.xaml.cpp"><DependentUpon>SettingsPageView.xaml</DependentUpon></ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -143,10 +184,15 @@
     </ClCompile>
     <ClCompile Include="WinUIDebug.cpp" />
     <ClCompile Include="Localization.cpp" />
+    <ClCompile Include="PluginItem.cpp" />
+    <ClCompile Include="PageState.cpp" />
     <ClCompile Include="MainWindow.xaml.cpp">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClCompile>
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="Version.rc" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Locales\*.json">
@@ -158,6 +204,8 @@
       <SubType>Code</SubType>
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </Midl>
+    <Midl Include="PluginItem.idl" />
+    <Midl Include="PageState.idl" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="Assets\LockScreenLogo.scale-200.png" />
@@ -239,4 +287,7 @@
   <Import Project="$(NuGetPackageRoot)microsoft.web.webview2\1.0.3719.77\build\native\Microsoft.Web.WebView2.targets" Condition="Exists('$(NuGetPackageRoot)microsoft.web.webview2\1.0.3719.77\build\native\Microsoft.Web.WebView2.targets')" />
   <Import Project="$(NuGetPackageRoot)microsoft.windowsappsdk.winui\2.2.1\build\native\Microsoft.WindowsAppSDK.WinUI.targets" Condition="Exists('$(NuGetPackageRoot)microsoft.windowsappsdk.winui\2.2.1\build\native\Microsoft.WindowsAppSDK.WinUI.targets')" />
   <Import Project="$(MSBuildExtensionsPath)\Microsoft\VisualStudio\v$(VisualStudioVersion)\AppxPackage\Microsoft.AppXPackage.Targets" Condition="'$(AppxPackage)'=='true' and Exists('$(MSBuildExtensionsPath)\Microsoft\VisualStudio\v$(VisualStudioVersion)\AppxPackage\Microsoft.AppXPackage.Targets')" />
+  <Target Name="RecordLightHostWinUIOutput" AfterTargets="Build">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\Utilities\WinUI Output.ps1&quot; -Mode Record -Platform $(Platform) -Configuration $(Configuration)" />
+  </Target>
 </Project>

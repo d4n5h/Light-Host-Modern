@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "WinUIDebug.h"
+#include "../../Source/RuntimeProfile.h"
 
 namespace
 {
@@ -8,6 +9,8 @@ namespace
 
 	std::wstring debugLogPath()
 	{
+		const auto& profile = lightHost::RuntimeProfile::current();
+		if (profile.test) return (profile.directory / L"Logs" / L"WinUI.log").wstring();
 		if (!debugFilePath.empty())
 			return debugFilePath;
 

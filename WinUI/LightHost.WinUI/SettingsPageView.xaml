@@ -1,0 +1,370 @@
+<?xml version='1.0' encoding='utf-8'?>
+<UserControl xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="LightHostWinUI.SettingsPageView" xmlns:local="using:LightHostWinUI">
+    <StackPanel x:Name="ConfigPanel" Visibility="Collapsed" Spacing="24">
+        <InfoBar x:Name="UpdateResultCard" AutomationProperties.AutomationId="UpdateResultInfoBar" IsOpen="True" IsClosable="True" Visibility="Collapsed">
+            <Button x:Name="UpdateResultLog" AutomationProperties.AutomationId="ViewUpdateLog" Content="View update log" />
+        </InfoBar>
+        <InfoBar x:Name="UpdateAvailableCard" AutomationProperties.AutomationId="UpdateAvailableInfoBar" IsOpen="True" IsClosable="False" Severity="Informational" Visibility="Collapsed">
+            <Grid ColumnSpacing="24">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="4">
+                    <TextBlock x:Name="UpdateAvailableTitleText" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Update available" />
+                    <TextBlock x:Name="UpdateAvailableBodyText" Text="A newer version of Light Host Modern is available." TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+                    <ProgressBar x:Name="UpdateTransferProgress" AutomationProperties.AutomationId="UpdateTransferProgress" AutomationProperties.Name="Download progress" Minimum="0" Maximum="100" Visibility="Collapsed" />
+                    <TextBlock x:Name="UpdateTransferBytes" AutomationProperties.AutomationId="UpdateTransferBytes" TextWrapping="Wrap" Visibility="Collapsed" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <ProgressRing x:Name="UpdateProgressRing" AutomationProperties.AutomationId="UpdateProgress" Width="20" Height="20" IsActive="False" Visibility="Collapsed" />
+                    <Button x:Name="CancelUpdateButton" AutomationProperties.AutomationId="CancelUpdate" Content="Cancel" Visibility="Collapsed" />
+                    <Button x:Name="DownloadUpdateButton" AutomationProperties.AutomationId="InstallUpdate" Content="Download and install" VerticalAlignment="Center" />
+                </StackPanel>
+            </Grid>
+        </InfoBar>
+        <StackPanel Spacing="8">
+            <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="General" />
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="32" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon VerticalAlignment="Center" FontFamily="Segoe Fluent Icons" Glyph="" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Start with Windows" />
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Launch Light Host Modern automatically when you sign in." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="12">
+                        <TextBlock x:Name="StartWithWindowsStateText" AutomationProperties.AutomationId="StartWithWindowsState" VerticalAlignment="Center" Text="Off" />
+                        <StackPanel x:Name="StartWithWindowsCheckBoxHost" Width="52" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="32" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon VerticalAlignment="Center" FontFamily="Segoe Fluent Icons" Glyph="" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Close to tray" />
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Keep audio processing active when the window is closed." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="12">
+                        <TextBlock x:Name="CloseToTrayStateText" AutomationProperties.AutomationId="CloseToTrayState" VerticalAlignment="Center" Text="Off" />
+                        <StackPanel x:Name="CloseToTraySwitchHost" Width="52" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="32" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon VerticalAlignment="Center" FontFamily="Segoe Fluent Icons" Glyph="" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Enable VST2 plugins" />
+                        <TextBlock x:Name="Vst2StatusText" Style="{StaticResource CaptionTextBlockStyle}" Text="VST2 status unavailable." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="12">
+                        <TextBlock x:Name="EnableVst2StateText" AutomationProperties.AutomationId="EnableVst2State" VerticalAlignment="Center" Text="Off" />
+                        <StackPanel x:Name="EnableVst2CheckBoxHost" Width="52" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="32" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <FontIcon VerticalAlignment="Center" Glyph="&#xE9D9;" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock x:Name="DiagnosticsSettingTitle" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Diagnostics" />
+                        <TextBlock x:Name="DiagnosticsSettingDescription" Style="{StaticResource CaptionTextBlockStyle}" Text="Show the Diagnostics page and collect performance data." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Spacing="12">
+                        <TextBlock x:Name="DiagnosticsStateText" VerticalAlignment="Center" Text="On" />
+                        <ToggleSwitch x:Name="DiagnosticsEnabledSwitch" AutomationProperties.AutomationId="DiagnosticsEnabled" AutomationProperties.Name="Enable diagnostics" Style="{StaticResource CompactToggleSwitchStyle}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </StackPanel>
+        <StackPanel Spacing="8" AutomationProperties.AutomationId="PluginDatabaseSettings">
+            <TextBlock x:Name="PluginDatabaseTitle" Style="{StaticResource SubtitleTextBlockStyle}" Text="Plugin database" AutomationProperties.HeadingLevel="Level2" />
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="32" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE90F;" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                        <TextBlock x:Name="RemoveMissingTitle" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Remove missing plugins" />
+                        <TextBlock x:Name="RemoveMissingDescription" Style="{StaticResource CaptionTextBlockStyle}" Text="Remove database entries whose plugin files are no longer available." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button x:Name="RemoveMissingPluginsButton" Grid.Column="2" AutomationProperties.AutomationId="RemoveMissingPlugins" Content="Remove missing" VerticalAlignment="Center" IsEnabled="False" />
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="32" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE74D;" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                        <TextBlock x:Name="ClearDatabaseTitle" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Clear plugin database" />
+                        <TextBlock x:Name="ClearDatabaseDescription" Style="{StaticResource CaptionTextBlockStyle}" Text="Clear all installed entries and the running chain. You will be asked to confirm." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button x:Name="ClearPluginDatabaseButton" Grid.Column="2" AutomationProperties.AutomationId="ClearPluginDatabase" Content="Clear database" VerticalAlignment="Center" IsEnabled="False" />
+                </Grid>
+            </Border>
+        </StackPanel>
+        <StackPanel Spacing="8">
+            <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Audio recovery" />
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="32" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon VerticalAlignment="Center" FontFamily="Segoe Fluent Icons" Glyph="" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Device persistence" />
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Choose how Light Host Modern handles unavailable audio devices." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel x:Name="AudioPersistenceModeBoxHost" Grid.Column="2" MinWidth="240" VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+            <Border x:Name="AudioPersistenceRetryIntervalGrid" Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="32" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon VerticalAlignment="Center" FontFamily="Segoe Fluent Icons" Glyph="" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Device persistence: retry interval" />
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Choose how many seconds to wait between retry attempts." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel x:Name="AudioRecoveryRetrySecondsBoxHost" Grid.Column="2" Width="96" />
+                </Grid>
+            </Border>
+            <Border x:Name="AudioPersistenceRetryAttemptsGrid" Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="32" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon VerticalAlignment="Center" FontFamily="Segoe Fluent Icons" Glyph="" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Device persistence: max attempts" />
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Choose how many times to retry before pausing recovery." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel x:Name="AudioRecoveryRetryAttemptsBoxHost" Grid.Column="2" Width="96" />
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="32" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon VerticalAlignment="Center" FontFamily="Segoe Fluent Icons" Glyph="" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Enabled devices" />
+                        <TextBlock x:Name="EnabledAudioChoicesSummaryText" AutomationProperties.AutomationId="EnabledDevicesSummary" Style="{StaticResource CaptionTextBlockStyle}" Text="Choose which audio backends and devices Light Host Modern is allowed to use." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button x:Name="ManageEnabledAudioDevicesButton" Grid.Column="2" AutomationProperties.AutomationId="ManageEnabledAudioDevices" VerticalAlignment="Center" Content="Manage enabled devices" />
+                </Grid>
+            </Border>
+            <Border x:Name="CustomAudioPersistenceCard" AutomationProperties.AutomationId="PreferredDeviceCard" Style="{StaticResource AppCardStyle}">
+                <Grid x:Name="CustomAudioPersistenceGrid" ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="32" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="360" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon VerticalAlignment="Center" FontFamily="Segoe Fluent Icons" Glyph="" />
+                    <StackPanel x:Name="PreferredDeviceHeading" Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Preferred device" />
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Select the backend and device Light Host Modern should retry." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button x:Name="PreferredDeviceButton" Grid.Column="2" AutomationProperties.AutomationId="PreferredDevicePicker" Width="360" HorizontalAlignment="Right" HorizontalContentAlignment="Stretch" VerticalAlignment="Center" Click="PreferredDeviceButton_Click">
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="PreferredDeviceSummaryText" VerticalAlignment="Center" Text="Choose device" TextTrimming="CharacterEllipsis" />
+                            <FontIcon Grid.Column="1" FontFamily="Segoe Fluent Icons" Glyph="" />
+                        </Grid>
+                    </Button>
+                </Grid>
+            </Border>
+            <StackPanel Visibility="Collapsed">
+                <StackPanel x:Name="CustomRecoveryBackendBoxHost" />
+                <StackPanel x:Name="CustomRecoveryInputBoxHost" />
+                <StackPanel x:Name="CustomRecoveryOutputBoxHost" />
+                <TextBlock x:Name="CustomRecoveryInputLabel" Text="Input device" />
+                <Grid x:Name="CustomRecoveryOutputRow" />
+            </StackPanel>
+            <TextBlock x:Name="AudioRecoveryStatusText" Visibility="Collapsed" Text="Audio recovery is running normally." />
+            <Button x:Name="RetryAudioDeviceButton" Visibility="Collapsed" Content="Retry now" />
+            <Button x:Name="ChooseAudioDeviceButton" Visibility="Collapsed" Content="Choose device" />
+        </StackPanel>
+        <StackPanel Spacing="8">
+            <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Appearance" />
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="32" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="240" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon VerticalAlignment="Center" FontFamily="Segoe Fluent Icons" Glyph="" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock x:Name="LanguageTitleText" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Language" />
+                        <TextBlock x:Name="LanguageDescriptionText" Style="{StaticResource CaptionTextBlockStyle}" Text="Choose the language used by the app." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ComboBox x:Name="LanguageBox" Grid.Column="2" AutomationProperties.AutomationId="AppLanguage" AutomationProperties.Name="App language" HorizontalAlignment="Stretch" />
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="32" /><ColumnDefinition Width="*" /><ColumnDefinition Width="240" /></Grid.ColumnDefinitions>
+                    <FontIcon AutomationProperties.AutomationId="ThemeIcon" VerticalAlignment="Center" Glyph="&#xE790;" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Theme" />
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Use the system theme, light or dark. Windows contrast themes apply automatically." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel x:Name="ThemeSelectorHost" Grid.Column="2" VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="32" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="240" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon VerticalAlignment="Center" FontFamily="Segoe Fluent Icons" Glyph="" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock x:Name="LayoutModeTitleText" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Layout mode" />
+                        <TextBlock x:Name="LayoutModeDescriptionText" Style="{StaticResource CaptionTextBlockStyle}" Text="Compact limits page width; Expanded uses all available space." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel x:Name="LayoutModeBoxHost" Grid.Column="2" />
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="32" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="240" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon VerticalAlignment="Center" FontFamily="Segoe Fluent Icons" Glyph="" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Window material" />
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Choose the native Windows 11 backdrop used behind the app content." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel x:Name="BackdropModeBoxHost" Grid.Column="2" />
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="32" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="240" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon VerticalAlignment="Center" FontFamily="Segoe Fluent Icons" Glyph="" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="App icon" />
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Choose the icon variant used in the app and tray." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel x:Name="IconModeBoxHost" Grid.Column="2" />
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="32" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <SymbolIcon VerticalAlignment="Center" Symbol="Favorite" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock x:Name="HideSupportTitleText" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Hide the Support me tab" />
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Remove the support page from the navigation sidebar." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="12">
+                        <TextBlock x:Name="HideSupportStateText" AutomationProperties.AutomationId="HideSupportState" VerticalAlignment="Center" Text="Off" />
+                        <ToggleSwitch x:Name="HideSupportTabSwitch" AutomationProperties.AutomationId="HideSupportTab" AutomationProperties.Name="Hide the Support me tab" Style="{StaticResource CompactToggleSwitchStyle}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </StackPanel>
+        <StackPanel Spacing="8">
+            <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="System" />
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="32" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <SymbolIcon VerticalAlignment="Center" Symbol="Audio" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Windows sound settings" />
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Open the system sound control page for device-level changes." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button x:Name="OpenWindowsSoundSettingsButton" Grid.Column="2" VerticalAlignment="Center" Content="Open Windows Sound Settings" />
+                </Grid>
+            </Border>
+        </StackPanel>
+        <StackPanel Spacing="8">
+            <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="About" />
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid x:Name="ModernRepositoryGrid" ColumnSpacing="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Light Host Modern" />
+                            <TextBlock VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" Text="v1.3.0" />
+                        </StackPanel>
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="A Windows-focused fork of Light Host, updated and modernized by Matheus Heidemann." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button x:Name="RepositoryButton" Grid.Column="1" AutomationProperties.AutomationId="ModernRepository" AutomationProperties.Name="Go to Light Host Modern repository" Width="294" VerticalAlignment="Center" Content="Go to repo" Click="RepositoryButton_Click" />
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource AppCardStyle}">
+                <Grid x:Name="OriginalRepositoryGrid" ColumnSpacing="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Light Host (Original)" />
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Original project by Rolando Islas/OpenCMA." TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button x:Name="OriginalRepositoryButton" Grid.Column="1" AutomationProperties.AutomationId="OriginalRepository" AutomationProperties.Name="Go to original Light Host repository" Width="294" VerticalAlignment="Center" Content="Go to repo" Click="OriginalRepositoryButton_Click" />
+                </Grid>
+            </Border>
+        </StackPanel>
+    </StackPanel>
+</UserControl>

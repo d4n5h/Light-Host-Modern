@@ -20,14 +20,19 @@
                     <StaticResource x:Key="AppFlyoutStrokeBrush" ResourceKey="SurfaceStrokeColorFlyoutBrush" />
                     <StaticResource x:Key="AppTextSecondaryBrush" ResourceKey="TextFillColorSecondaryBrush" />
                     <StaticResource x:Key="AppAccentBrush" ResourceKey="AccentFillColorDefaultBrush" />
-                    <StaticResource x:Key="AppMeterInactiveBrush" ResourceKey="ControlFillColorDefaultBrush" />
-                    <StaticResource x:Key="AppMeterSafeBrush" ResourceKey="SystemFillColorSuccessBrush" />
-                    <StaticResource x:Key="AppMeterWarningBrush" ResourceKey="SystemFillColorCautionBrush" />
-                    <StaticResource x:Key="AppMeterCriticalBrush" ResourceKey="SystemFillColorCriticalBrush" />
+                    <SolidColorBrush x:Key="AppMeterInactiveBrush" Color="#D3D8DE" />
+                    <SolidColorBrush x:Key="AppMeterSafeBrush" Color="#10893E" />
+                    <SolidColorBrush x:Key="AppMeterWarningBrush" Color="#9D5D00" />
+                    <SolidColorBrush x:Key="AppMeterCriticalBrush" Color="#C42B1C" />
                     <StaticResource x:Key="AppStatusSuccessBackgroundBrush" ResourceKey="SystemFillColorSuccessBackgroundBrush" />
                     <StaticResource x:Key="AppStatusSuccessStrokeBrush" ResourceKey="SystemFillColorSuccessBrush" />
                     <StaticResource x:Key="AppStatusCriticalBackgroundBrush" ResourceKey="SystemFillColorCriticalBackgroundBrush" />
                     <StaticResource x:Key="AppStatusCriticalStrokeBrush" ResourceKey="SystemFillColorCriticalBrush" />
+
+                    <StaticResource x:Key="AppStatusCautionBackgroundBrush" ResourceKey="SystemFillColorCautionBackgroundBrush" />
+                    <StaticResource x:Key="AppStatusCautionStrokeBrush" ResourceKey="SystemFillColorCautionBrush" />
+                    <StaticResource x:Key="AppStatusAvailableBackgroundBrush" ResourceKey="SystemFillColorNeutralBackgroundBrush" />
+                    <StaticResource x:Key="AppStatusAvailableStrokeBrush" ResourceKey="TextFillColorSecondaryBrush" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Dark">
                     <StaticResource x:Key="AppSidebarBrush" ResourceKey="LayerFillColorDefaultBrush" />
@@ -40,14 +45,19 @@
                     <StaticResource x:Key="AppFlyoutStrokeBrush" ResourceKey="SurfaceStrokeColorFlyoutBrush" />
                     <StaticResource x:Key="AppTextSecondaryBrush" ResourceKey="TextFillColorSecondaryBrush" />
                     <StaticResource x:Key="AppAccentBrush" ResourceKey="AccentFillColorDefaultBrush" />
-                    <StaticResource x:Key="AppMeterInactiveBrush" ResourceKey="ControlFillColorDefaultBrush" />
-                    <StaticResource x:Key="AppMeterSafeBrush" ResourceKey="SystemFillColorSuccessBrush" />
-                    <StaticResource x:Key="AppMeterWarningBrush" ResourceKey="SystemFillColorCautionBrush" />
-                    <StaticResource x:Key="AppMeterCriticalBrush" ResourceKey="SystemFillColorCriticalBrush" />
+                    <SolidColorBrush x:Key="AppMeterInactiveBrush" Color="#44484E" />
+                    <SolidColorBrush x:Key="AppMeterSafeBrush" Color="#4DD964" />
+                    <SolidColorBrush x:Key="AppMeterWarningBrush" Color="#FFB928" />
+                    <SolidColorBrush x:Key="AppMeterCriticalBrush" Color="#FF6359" />
                     <StaticResource x:Key="AppStatusSuccessBackgroundBrush" ResourceKey="SystemFillColorSuccessBackgroundBrush" />
                     <StaticResource x:Key="AppStatusSuccessStrokeBrush" ResourceKey="SystemFillColorSuccessBrush" />
                     <StaticResource x:Key="AppStatusCriticalBackgroundBrush" ResourceKey="SystemFillColorCriticalBackgroundBrush" />
                     <StaticResource x:Key="AppStatusCriticalStrokeBrush" ResourceKey="SystemFillColorCriticalBrush" />
+
+                    <StaticResource x:Key="AppStatusCautionBackgroundBrush" ResourceKey="SystemFillColorCautionBackgroundBrush" />
+                    <StaticResource x:Key="AppStatusCautionStrokeBrush" ResourceKey="SystemFillColorCautionBrush" />
+                    <StaticResource x:Key="AppStatusAvailableBackgroundBrush" ResourceKey="SystemFillColorNeutralBackgroundBrush" />
+                    <StaticResource x:Key="AppStatusAvailableStrokeBrush" ResourceKey="TextFillColorSecondaryBrush" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
                     <StaticResource x:Key="AppSidebarBrush" ResourceKey="SystemColorWindowColorBrush" />
@@ -68,6 +78,11 @@
                     <StaticResource x:Key="AppStatusSuccessStrokeBrush" ResourceKey="SystemColorButtonTextColorBrush" />
                     <StaticResource x:Key="AppStatusCriticalBackgroundBrush" ResourceKey="SystemColorButtonFaceColorBrush" />
                     <StaticResource x:Key="AppStatusCriticalStrokeBrush" ResourceKey="SystemColorButtonTextColorBrush" />
+
+                    <StaticResource x:Key="AppStatusCautionBackgroundBrush" ResourceKey="SystemColorButtonFaceColorBrush" />
+                    <StaticResource x:Key="AppStatusCautionStrokeBrush" ResourceKey="SystemColorButtonTextColorBrush" />
+                    <StaticResource x:Key="AppStatusAvailableBackgroundBrush" ResourceKey="SystemColorButtonFaceColorBrush" />
+                    <StaticResource x:Key="AppStatusAvailableStrokeBrush" ResourceKey="SystemColorButtonTextColorBrush" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
             <Style x:Key="AppCardStyle" TargetType="Border">
@@ -78,6 +93,46 @@
                 <Setter Property="BorderThickness" Value="1" />
                 <Setter Property="CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
             </Style>
+            <Style x:Key="ScanFailureItemStyle" TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="Padding" Value="12" />
+                <Setter Property="Margin" Value="0,0,0,8" />
+                <Setter Property="Background" Value="{ThemeResource AppCardBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource AppCardStrokeBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
+            </Style>
+            <Style x:Key="SecondaryCaptionStyle" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource AppTextSecondaryBrush}" />
+            </Style>
+            <Style x:Key="MeterInactiveSegmentStyle" TargetType="Border"><Setter Property="Background" Value="{ThemeResource AppMeterInactiveBrush}" /></Style>
+            <Style x:Key="MeterSafeSegmentStyle" TargetType="Border"><Setter Property="Background" Value="{ThemeResource AppMeterSafeBrush}" /></Style>
+            <Style x:Key="MeterWarningSegmentStyle" TargetType="Border"><Setter Property="Background" Value="{ThemeResource AppMeterWarningBrush}" /></Style>
+            <Style x:Key="MeterCriticalSegmentStyle" TargetType="Border"><Setter Property="Background" Value="{ThemeResource AppMeterCriticalBrush}" /></Style>
+            <Style x:Key="PluginStatusBadgeStyle" TargetType="Border">
+                <Setter Property="MinHeight" Value="32" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Padding" Value="8,4" />
+                <Setter Property="CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="HorizontalAlignment" Value="Left" />
+            </Style>
+            <Style x:Key="PluginSuccessBadgeStyle" TargetType="Border" BasedOn="{StaticResource PluginStatusBadgeStyle}">
+                <Setter Property="Background" Value="{ThemeResource AppStatusSuccessBackgroundBrush}" /><Setter Property="BorderBrush" Value="{ThemeResource AppStatusSuccessStrokeBrush}" />
+            </Style>
+            <Style x:Key="PluginSuccessIconStyle" TargetType="FontIcon"><Setter Property="Foreground" Value="{ThemeResource AppStatusSuccessStrokeBrush}" /></Style>
+            <Style x:Key="PluginCautionBadgeStyle" TargetType="Border" BasedOn="{StaticResource PluginStatusBadgeStyle}">
+                <Setter Property="Background" Value="{ThemeResource AppStatusCautionBackgroundBrush}" /><Setter Property="BorderBrush" Value="{ThemeResource AppStatusCautionStrokeBrush}" />
+            </Style>
+            <Style x:Key="PluginCautionIconStyle" TargetType="FontIcon"><Setter Property="Foreground" Value="{ThemeResource AppStatusCautionStrokeBrush}" /></Style>
+            <Style x:Key="PluginCriticalBadgeStyle" TargetType="Border" BasedOn="{StaticResource PluginStatusBadgeStyle}">
+                <Setter Property="Background" Value="{ThemeResource AppStatusCriticalBackgroundBrush}" /><Setter Property="BorderBrush" Value="{ThemeResource AppStatusCriticalStrokeBrush}" />
+            </Style>
+            <Style x:Key="PluginCriticalIconStyle" TargetType="FontIcon"><Setter Property="Foreground" Value="{ThemeResource AppStatusCriticalStrokeBrush}" /></Style>
+            <Style x:Key="PluginAvailableBadgeStyle" TargetType="Border" BasedOn="{StaticResource PluginStatusBadgeStyle}">
+                <Setter Property="Background" Value="{ThemeResource AppStatusAvailableBackgroundBrush}" /><Setter Property="BorderBrush" Value="{ThemeResource AppStatusAvailableStrokeBrush}" />
+            </Style>
+            <Style x:Key="PluginAvailableIconStyle" TargetType="FontIcon"><Setter Property="Foreground" Value="{ThemeResource AppStatusAvailableStrokeBrush}" /></Style>
             <Style x:Key="CompactToggleSwitchStyle" TargetType="ToggleSwitch">
                 <Setter Property="Width" Value="52" />
                 <Setter Property="MinWidth" Value="0" />

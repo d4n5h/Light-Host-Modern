@@ -81,6 +81,8 @@ WinUI/**/*_h.h
 WinUI/test-screenshots/
 
 # Test and analysis output
+__pycache__/
+*.py[cod]
 screenshots/
 TestResults/
 test-results.json

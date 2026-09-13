@@ -1,0 +1,8 @@
+namespace LightHostWinUI
+{
+    [default_interface]
+    runtimeclass DiagnosticsPageView : Microsoft.UI.Xaml.Controls.UserControl
+    {
+        DiagnosticsPageView();
+    }
+}

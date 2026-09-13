@@ -17,7 +17,11 @@ param(
 
     [switch] $SkipBuild,
 
+    [switch] $SkipTests,
+
     [switch] $KeepStage,
+
+    [string] $OutputDirectory = "",
 
     [string] $SigningThumbprint = $env:LIGHTHOST_SIGNING_THUMBPRINT,
 
@@ -27,14 +31,15 @@ param(
 $ErrorActionPreference = "Stop"
 
 $appName = "Light Host Modern"
-$appVersion = "1.2.2"
+$appVersion = "1.3.0"
 $exeName = "Light Host Modern.exe"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$outRoot = Join-Path $repoRoot "out\release"
+$outRoot = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $repoRoot "out\release" }
 $stageRoot = Join-Path $outRoot "payload"
 $packageWorkRoot = Join-Path $outRoot "package-work"
 $installerMsi = Join-Path $outRoot "LightHostModern-Setup.msi"
 $portableZip = Join-Path $outRoot "LightHostModern-Portable.zip"
+$portableDirectory = Join-Path $outRoot "LightHostModern-Portable"
 $releaseIcon = Join-Path $repoRoot "Icon\logo.ico"
 
 function Resolve-CMake {
@@ -191,11 +196,88 @@ function Copy-VCRuntime {
 function New-Directory {
     param([Parameter(Mandatory)][string] $Path)
 
+    $Path = Assert-BuildOutputPath $Path
+
     if (Test-Path -LiteralPath $Path) {
         Remove-Item -LiteralPath $Path -Recurse -Force
     }
 
     New-Item -ItemType Directory -Force -Path $Path | Out-Null
+}
+
+function Assert-BuildOutputPath([string] $Path) {
+    $resolved = [IO.Path]::GetFullPath($Path)
+    $allowed = [IO.Path]::GetFullPath((Join-Path $repoRoot 'out')) + '\'
+    if (!$resolved.StartsWith($allowed, [StringComparison]::OrdinalIgnoreCase)) { throw "Build output must be inside $allowed" }
+    for ($ancestor = $resolved; $ancestor.Length -gt $repoRoot.Length; $ancestor = [IO.Path]::GetDirectoryName($ancestor)) {
+        if ((Test-Path -LiteralPath $ancestor) -and ((Get-Item -LiteralPath $ancestor).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw "Reparse point in build output: $ancestor" }
+    }
+    return $resolved
+}
+
+function Remove-BuildDirectory([string] $Path) {
+    $checked = Assert-BuildOutputPath $Path
+    if (Test-Path -LiteralPath $checked) { Remove-Item -LiteralPath $checked -Recurse -Force }
+}
+
+function Publish-VerifiedPortableDirectory {
+    # Test the archive that will be delivered, then publish that exact extraction.
+    # Previously only payload and ZIP were refreshed, leaving an older, runnable
+    # LightHostModern-Portable folder beside a newly generated archive.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $extracted = Assert-BuildOutputPath (Join-Path $packageWorkRoot 'portable-verified')
+    $destination = Assert-BuildOutputPath $portableDirectory
+    $running = @(Get-CimInstance Win32_Process | Where-Object {
+        $_.ExecutablePath -and $_.ExecutablePath.StartsWith($destination + '\', [StringComparison]::OrdinalIgnoreCase)
+    })
+    if ($running.Count) { throw "Close the portable application before replacing '$destination'." }
+    New-Directory $extracted
+    [IO.Compression.ZipFile]::ExtractToDirectory($portableZip, $extracted)
+
+    $expectedFiles = @(Get-ChildItem -LiteralPath $stageRoot -Recurse -File)
+    $actualFiles = @(Get-ChildItem -LiteralPath $extracted -Recurse -File)
+    if ($expectedFiles.Count -ne $actualFiles.Count) { throw 'Portable ZIP file count does not match staging.' }
+    $fileHashes = [ordered]@{}
+    foreach ($file in $expectedFiles) {
+        $relative = $file.FullName.Substring($stageRoot.Length).TrimStart('\')
+        $expandedFile = Join-Path $extracted $relative
+        if (!(Test-Path -LiteralPath $expandedFile -PathType Leaf)) { throw "Portable ZIP is missing '$relative'." }
+        $expectedHash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+        if ((Get-FileHash -LiteralPath $expandedFile -Algorithm SHA256).Hash -ne $expectedHash) {
+            throw "Portable ZIP contains an inconsistent file: '$relative'."
+        }
+        $fileHashes[$relative.Replace('\', '/')] = $expectedHash
+    }
+    foreach ($required in @($exeName, 'LightHostScanner.exe', 'LightHostUpdateHelper.exe',
+        "WinUI/x64/$Configuration/LightHost.WinUI/LightHostWinUI.exe",
+        "WinUI/x64/$Configuration/LightHost.WinUI/MainWindow.xbf",
+        "WinUI/x64/$Configuration/LightHost.WinUI/SettingsPageView.xbf")) {
+        if (!$fileHashes.Contains($required)) { throw "Required portable component is missing: '$required'." }
+    }
+
+    $backup = $null
+    if (Test-Path -LiteralPath $destination) {
+        $backup = Assert-BuildOutputPath (Join-Path $outRoot ('portable-backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N')))
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backup) | Out-Null
+        Move-Item -LiteralPath $destination -Destination $backup
+    }
+    try { Move-Item -LiteralPath $extracted -Destination $destination }
+    catch {
+        if ($backup -and !(Test-Path -LiteralPath $destination)) { Move-Item -LiteralPath $backup -Destination $destination }
+        throw
+    }
+    [ordered]@{
+        status = 'passed'
+        version = $appVersion
+        verifiedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+        archive = $portableZip
+        archiveSha256 = (Get-FileHash -LiteralPath $portableZip -Algorithm SHA256).Hash
+        portableDirectory = $destination
+        previousDirectoryBackup = $backup
+        extractedFromDeliveredArchive = $true
+        verifiedFileCount = $expectedFiles.Count
+        files = $fileHashes
+    } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $outRoot 'portable-verification.json') -Encoding UTF8
 }
 
 function New-IExpressPackage {
@@ -1043,6 +1125,7 @@ The installed application includes the full LICENSE file. The license is also av
     $wxs.Add("    <Property Id=`"ARPPRODUCTICON`" Value=`"AppIcon.ico`" />")
     $wxs.Add("    <Property Id=`"ApplicationFolderName`" Value=`"$productName`" />")
     $wxs.Add("    <Property Id=`"WIXUI_INSTALLDIR`" Value=`"APPLICATIONFOLDER`" />")
+    $wxs.Add("    <SetProperty Id=`"ARPINSTALLLOCATION`" Value=`"[APPLICATIONFOLDER]`" After=`"CostFinalize`" Sequence=`"both`" />")
     $wxs.Add("    <Property Id=`"LEGACYINSTALLFOLDER`">")
     $wxs.Add("      <RegistrySearch Id=`"FindLegacyInstallFolder`" Root=`"HKCU`" Key=`"Software\Microsoft\Windows\CurrentVersion\Uninstall\LightHostModern`" Name=`"InstallLocation`" Type=`"raw`" />")
     $wxs.Add("    </Property>")
@@ -1118,9 +1201,10 @@ The installed application includes the full LICENSE file. The license is also av
     }
 }
 
+$outRoot = Assert-BuildOutputPath $outRoot
 if (!$SkipBuild) {
     $msbuild = Resolve-MSBuild
-    $winUIProject = Join-Path $repoRoot "WinUI\LightHost.WinUI\LightHost.WinUI.vcxproj"
+    $winUIProject = Join-Path $repoRoot "WinUI\LightHost.WinUI.sln"
 
     Invoke-Checked -FilePath $msbuild -Arguments @(
         $winUIProject,
@@ -1134,7 +1218,8 @@ if (!$SkipBuild) {
     $configureArgs = @(
         "--preset", $Preset,
         "-DLIGHTHOST_ENABLE_VST2=$EnableVst2",
-        "-DLIGHTHOST_VST2_PROVIDER=$Vst2Provider"
+        "-DLIGHTHOST_VST2_PROVIDER=$Vst2Provider",
+        "-DLIGHTHOST_REALTIME_AUDIT=OFF"
     )
 
     if (![string]::IsNullOrWhiteSpace($Vst2SdkDir)) {
@@ -1147,9 +1232,15 @@ if (!$SkipBuild) {
     Invoke-Checked -FilePath $cmakePath -Arguments @("--build", "--preset", "$Preset-$($Configuration.ToLowerInvariant())", "--config", $Configuration)
 }
 
-$hostOutput = Join-Path $repoRoot "out\build\windows-vs2022\LightHost_artefacts\$Configuration"
+$buildDirectory = Join-Path $repoRoot "out\build\$Preset"
+if (!$SkipTests) {
+    $ctestPath = Join-Path (Split-Path (Resolve-CMake) -Parent) 'ctest.exe'
+    Invoke-Checked -FilePath $ctestPath -Arguments @('--test-dir', $buildDirectory, '-C', $Configuration, '--output-on-failure')
+}
+$hostOutput = Join-Path $buildDirectory "LightHost_artefacts\$Configuration"
 $hostExe = Join-Path $hostOutput $exeName
-$builtWinUIOutput = Join-Path $repoRoot "WinUI\LightHost.WinUI\$Platform\$Configuration\LightHost.WinUI"
+$winUIStageScript = Join-Path $PSScriptRoot 'WinUI Output.ps1'
+$builtWinUIOutput = & $winUIStageScript -Mode Resolve -Platform $Platform -Configuration $Configuration
 $hostWinUIOutput = Join-Path $hostOutput "WinUI\$Platform\$Configuration\LightHost.WinUI"
 $winUIOutput = Join-Path $hostWinUIOutput "LightHostWinUI.exe"
 
@@ -1157,11 +1248,7 @@ if (!(Test-Path -LiteralPath (Join-Path $builtWinUIOutput "LightHostWinUI.exe"))
     throw "Built WinUI output was not found: $builtWinUIOutput"
 }
 
-if (Test-Path -LiteralPath $hostWinUIOutput) {
-    Remove-Item -LiteralPath $hostWinUIOutput -Recurse -Force
-}
-New-Item -ItemType Directory -Force -Path $hostWinUIOutput | Out-Null
-Copy-Item -Path (Join-Path $builtWinUIOutput "*") -Destination $hostWinUIOutput -Recurse -Force
+& $winUIStageScript -Mode Stage -Platform $Platform -Configuration $Configuration -Destination $hostWinUIOutput
 
 if (!(Test-Path -LiteralPath $hostExe)) {
     throw "Host executable was not found: $hostExe"
@@ -1172,8 +1259,23 @@ if (!(Test-Path -LiteralPath $winUIOutput)) {
 }
 
 New-Directory -Path $stageRoot
+if (!(Test-Path -LiteralPath (Join-Path $hostOutput 'LightHostScanner.exe'))) {
+    throw 'LightHostScanner.exe is missing from the host build output.'
+}
+if (!(Test-Path -LiteralPath (Join-Path $hostOutput 'LightHostUpdateHelper.exe'))) { throw 'LightHostUpdateHelper.exe is missing from the host build output.' }
+foreach ($releaseExecutable in @($hostExe, $winUIOutput, (Join-Path $hostOutput 'LightHostScanner.exe'), (Join-Path $hostOutput 'LightHostUpdateHelper.exe'))) {
+    $versionInfo = (Get-Item -LiteralPath $releaseExecutable).VersionInfo
+    if ($versionInfo.ProductVersion -ne $appVersion -or $versionInfo.FileVersion -ne $appVersion) {
+        throw "Executable version does not match release ${appVersion}: $releaseExecutable (product: $($versionInfo.ProductVersion), file: $($versionInfo.FileVersion)). Rebuild before packaging."
+    }
+}
 New-Item -ItemType Directory -Force -Path $outRoot | Out-Null
-Copy-Item -Path (Join-Path $hostOutput "*") -Destination $stageRoot -Recurse -Force
+foreach ($name in $exeName, 'LightHostScanner.exe', 'LightHostUpdateHelper.exe', 'WinUI') {
+    Copy-Item -LiteralPath (Join-Path $hostOutput $name) -Destination $stageRoot -Recurse -Force
+}
+foreach ($name in 'LICENSE', 'README.md') {
+    if (Test-Path -LiteralPath (Join-Path $repoRoot $name)) { Copy-Item -LiteralPath (Join-Path $repoRoot $name) -Destination $stageRoot }
+}
 
 Get-ChildItem -LiteralPath $stageRoot -Recurse -File |
     Where-Object { $_.Extension -in @(".pdb", ".ilk", ".exp", ".lib", ".appxsym") } |
@@ -1184,6 +1286,8 @@ Copy-VCRuntime -Destination $stageRoot
 if (![string]::IsNullOrWhiteSpace($SigningThumbprint)) {
     $signTargets = @(
         (Join-Path $stageRoot $exeName),
+        (Join-Path $stageRoot "LightHostScanner.exe"),
+        (Join-Path $stageRoot "LightHostUpdateHelper.exe"),
         (Join-Path $stageRoot "WinUI\x64\$Configuration\LightHost.WinUI\LightHostWinUI.exe"),
         (Join-Path $stageRoot "WinUI\x64\$Configuration\LightHost.WinUI\RestartAgent.exe")
     )
@@ -1203,9 +1307,15 @@ $releaseInfo = [ordered]@{
     platform = $Platform
     builtAtUtc = (Get-Date).ToUniversalTime().ToString("o")
     entryPoint = $exeName
+    uiSha256 = (Get-FileHash -LiteralPath (Join-Path $stageRoot "WinUI\x64\$Configuration\LightHost.WinUI\LightHostWinUI.exe") -Algorithm SHA256).Hash
 }
 
 $releaseInfo | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stageRoot "release-info.json") -Encoding UTF8
+
+$forbidden = @(Get-ChildItem -LiteralPath $stageRoot -Recurse -File | Where-Object {
+    $_.Extension -in '.vst3', '.vst', '.clap' -or $_.Name -match 'Dragonfly|LightHost.*Tests|Fixture' -or $_.FullName -match '[\\/](fixtures|test-profiles|Tests)[\\/]'
+})
+if ($forbidden.Count) { throw "Test files or third-party plugin fixtures found in payload: $($forbidden.FullName -join ', ')" }
 
 if (Test-Path -LiteralPath $portableZip) {
     Remove-Item -LiteralPath $portableZip -Force
@@ -1227,17 +1337,30 @@ if (Test-Path -LiteralPath $legacyInstallerExe) {
 New-WixMsiPackage -SourceDir $stageRoot -WorkDir $installerWork -TargetMsi $installerMsi -IconPath $releaseIcon
 Sign-ReleaseFile -Path $installerMsi
 
+$artifactMetadata = foreach ($pair in @(@($installerMsi, 'installed'), @($portableZip, 'portable'))) {
+    $file = Get-Item -LiteralPath $pair[0]
+    $digest = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    & (Join-Path $hostOutput 'LightHostUpdateHelper.exe') --mode validate --operation $outRoot --package $file.FullName --version $appVersion --size $file.Length --sha256 $digest --distribution $pair[1]
+    if ($LASTEXITCODE -ne 0) { throw "Package inspection failed: $(Get-Content -LiteralPath (Join-Path $outRoot 'update-result.json') -Raw)" }
+    [ordered]@{ name = $file.Name; version = $appVersion; architecture = $Platform; distribution = $pair[1]; size = $file.Length; digest = "sha256:$digest" }
+}
+[ordered]@{ formatVersion = 1; artifacts = @($artifactMetadata) } | ConvertTo-Json -Depth 5 |
+    Set-Content -LiteralPath (Join-Path $outRoot 'release-artifacts.json') -Encoding UTF8
+
 $legacyPortableExe = Join-Path $outRoot "LightHostModern-Portable.exe"
 if (Test-Path -LiteralPath $legacyPortableExe) {
     Remove-Item -LiteralPath $legacyPortableExe -Force
 }
 
+Publish-VerifiedPortableDirectory
+
 if (!$KeepStage) {
-    Remove-Item -LiteralPath $stageRoot -Recurse -Force
-    Remove-Item -LiteralPath $packageWorkRoot -Recurse -Force
+    Remove-BuildDirectory $stageRoot
+    Remove-BuildDirectory $packageWorkRoot
 }
 
 Write-Host ""
 Write-Host "Release artifacts created:"
 Write-Host "  Installer: $installerMsi"
 Write-Host "  Portable:  $portableZip"
+Write-Host "  Extracted: $portableDirectory"

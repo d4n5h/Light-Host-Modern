@@ -1,0 +1,79 @@
+<?xml version='1.0' encoding='utf-8'?>
+<UserControl xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="LightHostWinUI.AudioPageView" xmlns:local="using:LightHostWinUI">
+    <StackPanel x:Name="PreferencesPanel" Visibility="Collapsed" Spacing="18">
+        <Border x:Name="DeviceRoutingCard" Style="{StaticResource AppCardStyle}">
+            <StackPanel Spacing="14">
+                <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Devices" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Audio backend" VerticalAlignment="Center" />
+                    <StackPanel x:Name="AudioBackendBoxHost" Grid.Column="1" />
+                </Grid>
+                <Grid x:Name="InputDeviceRow">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="InputDeviceLabel" Text="Input device" VerticalAlignment="Center" />
+                    <StackPanel x:Name="InputBoxHost" Grid.Column="1" />
+                </Grid>
+                <Grid x:Name="OutputDeviceRow">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="OutputDeviceLabel" Text="Output device" VerticalAlignment="Center" />
+                    <StackPanel x:Name="OutputBoxHost" Grid.Column="1" />
+                </Grid>
+            </StackPanel>
+        </Border>
+        <Grid x:Name="ChannelsCard" ColumnSpacing="16" RowSpacing="16">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+            <Border x:Name="InputChannelGroup" Grid.Column="0" AutomationProperties.AutomationId="InputChannelsCard" Style="{StaticResource AppCardStyle}">
+                <StackPanel Spacing="12">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock Text="Input channels" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                        <Button x:Name="InputChannelsToggleAllButton" Grid.Column="1" Content="Uncheck all" MinHeight="32" />
+                    </Grid>
+                    <StackPanel x:Name="InputChannelsPanel" />
+                </StackPanel>
+            </Border>
+            <Border x:Name="OutputChannelGroup" Grid.Column="1" AutomationProperties.AutomationId="OutputChannelsCard" Style="{StaticResource AppCardStyle}">
+                <StackPanel Spacing="12">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock Text="Output channels" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                        <Button x:Name="OutputChannelsToggleAllButton" Grid.Column="1" Content="Uncheck all" MinHeight="32" />
+                    </Grid>
+                    <StackPanel x:Name="OutputChannelsPanel" />
+                </StackPanel>
+            </Border>
+        </Grid>
+        <Border x:Name="FormatCard" Style="{StaticResource AppCardStyle}">
+            <StackPanel Spacing="14">
+                <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Format" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="SampleRateLabel" Text="Sample rate" VerticalAlignment="Center" />
+                    <StackPanel x:Name="SampleRateBoxHost" Grid.Column="1" />
+                </Grid>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="BufferSizeLabel" Text="Buffer size" VerticalAlignment="Center" />
+                    <StackPanel x:Name="BufferSizeBoxHost" Grid.Column="1" />
+                </Grid>
+            </StackPanel>
+        </Border>
+    </StackPanel>
+</UserControl>

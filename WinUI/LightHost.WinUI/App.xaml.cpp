@@ -2,6 +2,7 @@
 #include "App.xaml.h"
 #include "MainWindow.xaml.h"
 #include "WinUIDebug.h"
+#include "../../Source/RuntimeProfile.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -10,12 +11,12 @@ namespace winrt::LightHostWinUI::implementation
 {
     App::App()
     {
+        lightHost::RuntimeProfile::current().createDirectories();
         setWinUIDebugEnabled(commandLineHasFlag(L"--debug") || commandLineHasFlag(L"-debug"));
         setWinUIDebugLogPath(commandLineOptionValue(L"--debug-log"));
         initialiseWinUIDebugConsole();
         winUILog("App constructed.");
 
-#if defined _DEBUG && !defined DISABLE_XAML_GENERATED_BREAK_ON_UNHANDLED_EXCEPTION
         UnhandledException([](IInspectable const&, UnhandledExceptionEventArgs const& e)
         {
             winUILog("Unhandled XAML exception: " + winrt::to_string(e.Message()));
@@ -26,7 +27,6 @@ namespace winrt::LightHostWinUI::implementation
                 __debugbreak();
             }
         });
-#endif
     }
 
     void App::OnLaunched(LaunchActivatedEventArgs const&)
