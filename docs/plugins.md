@@ -46,7 +46,7 @@ Default Windows locations include common system and per-user VST3 folders and co
 
 **Start scan** opens a small progress dialog with cancellation. Completion shows results and offers **Retry failed files**, **View failures**, and **Close**. Failure cards separate the path, readable error, format, and attempt count; selected entries can be retried without pagination buttons.
 
-Scanning uses a separate `LightHostScanner.exe` worker for each module, with a timeout and cleanup when cancelled or when its owner exits. Unchanged plugin descriptions are cached, and interrupted scans preserve completed results. This isolation applies to discovery; active effects still run inside the audio host. VST2 scanning occurs only when support was compiled into the host and **Enable VST2 plugins** is enabled.
+Scanning uses a separate `LightHostModernScanner.exe` worker for each module, with a timeout and cleanup when cancelled or when its owner exits. Unchanged plugin descriptions are cached, and interrupted scans preserve completed results. This isolation applies to discovery; active effects still run inside the audio host. VST2 scanning occurs only when support was compiled into the host and **Enable VST2 plugins** is enabled.
 
 Plugins that fail to load can be quarantined so one broken binary does not repeatedly crash startup or chain restoration. Use `--clear-failed-plugins` to clear that quarantine, or `--safe-mode` to start without restoring the saved chain.
 

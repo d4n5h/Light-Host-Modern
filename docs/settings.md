@@ -28,7 +28,7 @@ Enabled by default. Shows Diagnostics below Settings in the sidebar. Disabling i
 
 ### Device persistence
 
-- **Disabled** allows the normal audio-device behavior without preferred-device retry.
+- **Disabled** opens only the saved device and permits one restart of that same device after an interruption. It never substitutes another device or backend.
 - **Last selected device** retries the most recently selected working configuration.
 - **Custom device** retries a backend and device explicitly selected in the preferred-device dialog.
 

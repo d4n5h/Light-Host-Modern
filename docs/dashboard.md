@@ -19,7 +19,7 @@ If no usable device is open, the page reports the unavailable state rather than 
 
 Input and output meters are peak values calculated by the realtime processor. The input level is measured before the running chain and the output level after all active or bypassed slots have been processed.
 
-The 28-segment bars show linear peak amplitude with green, yellow, and red segments. A dedicated lightweight channel refreshes visible meters at up to 20 Hz without waiting behind commands, diagnostic queries, or database snapshots. Meter requests stop while another page is visible or the window is minimized.
+The 28-segment bars show peak level on a −60 to 0 dBFS scale with green, yellow, and red segments. A one-decimal reading in a fixed-width field to the left of each bar remains unclamped above 0 dBFS. Silence reads −∞ dBFS; an unavailable stream reads —. Bars decay smoothly and short peaks are retained for 75 ms to survive the display interval. No maximum reading is shown. A dedicated lightweight channel refreshes visible meters at up to 20 Hz without waiting behind commands, diagnostic queries, or database snapshots. Meter requests stop while another page is visible or the window is minimized.
 
 ## Plugin status
 

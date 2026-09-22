@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.4.0](https://github.com/heide-oficial/Light-Host-Modern/releases/tag/v1.4.0) — 2026-09-21
+
+### Added
+
+- Independent Individual/Pairs selection for input and output channels, including partially selected pairs and device-specific preferences.
+- Optional Mix inputs to mono before the plugin chain and independent Main output to mono monitoring for physical outputs 1 + 2, with smooth transitions and preserved auxiliary outputs.
+- Whole-app CPU, resident RAM and committed memory readings, with English and Brazilian Portuguese explanations for every Diagnostics metric.
+- Current dBFS readings beside the Dashboard's existing bar meters and clear notices when the selected audio device is unavailable.
+
+### Removed
+
+- Automatic fallback to a different device when audio recovery is Disabled.
+- Unrestricted recursive cleanup of legacy installation folders; migration now backs up and verifies known app files while retaining unknown files and user settings.
+
+### Improved
+
+- Standardized current app names, executables, project folders and preference paths as LightHostModern, with migration and compatibility for older installations and update clients.
+- Reorganized Audio into Devices, Format, side-by-side Input/Output settings, and separate Input/Output channel lists. Mono and selection controls align to the right; Settings is now the last sidebar item.
+- More sensitive logarithmic meters, smooth decay and short peak retention. Fixed-width dBFS fields sit to the left of the bars without shifting them as values change.
+- Versioned installer filename, LightHostModern-1.4.0-Setup.msi, alongside the identical LightHostModern-Setup.msi alias required by older updaters.
+- Updated application documentation, screenshots and contributor credits for [k-ross's PR #5](https://github.com/heide-oficial/Light-Host-Modern/pull/5) and [Log1cFX's issue #6](https://github.com/heide-oficial/Light-Host-Modern/issues/6).
+
+### Fixed
+
+- Device creation and recovery silently substituting another backend or input/output device when the selected configuration cannot open.
+- Diagnostics hover explanations being replaced during live updates, preventing tooltips from appearing reliably.
+- Interrupted preference migration replaying after an intentional reset, and unsafe removal of files left by older installers.
+
+[Full comparison with v1.3.1](https://github.com/heide-oficial/Light-Host-Modern/compare/v1.3.1...v1.4.0).
+
 ## [1.3.1](https://github.com/heide-oficial/Light-Host-Modern/releases/tag/v1.3.1) — 2026-09-13
 
 ### Added

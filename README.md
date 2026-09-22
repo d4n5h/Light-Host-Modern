@@ -1,4 +1,4 @@
-# Light Host Modern
+# LightHostModern
 
 <p align="left">
 <a href="https://github.com/heide-oficial/Light-Host-Modern/stargazers"><img src="https://img.shields.io/github/stars/heide-oficial/Light-Host-Modern?colorA=363a4f&colorB=e0ac00&style=for-the-badge" alt="GitHub star count"></a>
@@ -6,28 +6,31 @@
 <a href="https://github.com/heide-oficial/Light-Host-Modern/blob/master/license"><img src="https://img.shields.io/static/v1.svg?style=for-the-badge&label=License&message=GPL-2.0-or-later&colorA=363a4f&colorB=b7bdf8" alt="GPL-2.0-or-later license"></a>
 </p>
 
-Light Host Modern is a native Windows audio plugin host for running VST3 and optional VST2 effects outside a DAW. It combines a JUCE-based realtime host with a dedicated WinUI 3 interface for configuring audio devices, building a serial plugin chain, monitoring the stream, and keeping processing active from the notification area.
+LightHostModern is a native Windows audio plugin host for running VST3 and optional VST2 effects outside a DAW. It combines a JUCE-based realtime host with a dedicated WinUI 3 interface for configuring audio devices, building a serial plugin chain, monitoring the stream, and keeping processing active from the notification area.
 
 ## ✨ Features
 
 - Hosts VST3 and optional VST2 audio effects in a serial realtime processing chain.
 - Supports Windows Audio, DirectSound, and ASIO backends exposed by JUCE.
 - Configures audio devices, input/output channels, sample rate, and buffer size.
-- Displays responsive input/output peak meters and plugin counts, with CPU, latency, x-runs, and stream details on the optional Diagnostics page.
+- Selects input and output channels individually or in consecutive pairs, with separate per-device preferences for input mixing and main-output mono monitoring.
+- Displays responsive logarithmic input/output bar meters with fixed-width dBFS readings, and whole-app CPU/private memory, latency, x-runs, stream details and explanatory tooltips on the optional Diagnostics page.
 - Scans configurable folders in isolated workers, with caching, progress, cancellation, readable failures, and retries.
 - Manages Running and Installed plugins through searchable cards, action toolbars, visual status badges, and optional manufacturer grouping.
 - Supports multiple instances, reorder, bypass, duplicate, custom names, original-name restoration, details, and editor actions.
 - Provides global output mute and latency-compensated chain bypass from Running and the notification area.
 - Preserves independent plugin state and names in versioned sessions with atomic writes, backups, and recovery from legacy settings.
 - Compensates bypass latency and uses short transitions when toggling bypass or mute.
-- Recovers preferred audio devices after startup, sleep, driver restarts, or temporary unavailability.
+- Recovers preferred audio devices after startup, sleep, driver restarts, or temporary unavailability, with bounded retries and clear notices when the selected device cannot run. Disabled recovery never substitutes another device.
 - Provides compact and expanded layouts, Windows 11 materials, icon variants, JSON localization, and Brazilian Portuguese.
 - Runs from the notification area with close-to-tray and current-user startup options.
 - Includes safe mode, settings reset, failed-plugin quarantine recovery, installer, and portable packages.
 
 ## 🖼️ Demo
 
-![Light Host Modern dashboard](docs/images/dashboard.png)
+LightHostModern 1.4.0, shown in an isolated demonstration profile. Device, plugin and diagnostic values illustrate the interface.
+
+![LightHostModern dashboard](docs/images/dashboard.png)
 
 ![Audio device and stream configuration](docs/images/audio.png)
 
@@ -39,11 +42,11 @@ Light Host Modern is a native Windows audio plugin host for running VST3 and opt
 
 ## 🚀 Usage
 
-1. Start Light Host Modern and open its interface from the notification area if it is not already visible.
+1. Start LightHostModern and open its interface from the notification area if it is not already visible.
 2. Open **Audio** and select the backend, device, channels, sample rate, and buffer size used by the host.
 3. Open **Plugins > Installed > Scan for plugins**, add or browse for folders, save each path, and choose **Start scan**. The progress dialog offers cancellation and failure retries.
 4. Use an installed card’s **…** menu to **Add to chain**. In **Running**, arrange the processing order and use each card’s menu to open its editor or manage the instance.
-5. Review **Settings** for device recovery, startup, close-to-tray, plugin database maintenance, diagnostics, language, layout, material, and icon. Use **Diagnostics** below Settings for detailed monitoring.
+5. Review **Settings**, the last sidebar item, for device recovery, startup, close-to-tray, plugin database maintenance, diagnostics, language, layout, material, and icon. Use **Diagnostics**, after Plugins, for detailed monitoring.
 
 For detailed descriptions of the screens, workflows, and internal implementation, see the [application documentation](docs/_index.md).
 
@@ -56,11 +59,11 @@ For detailed descriptions of the screens, workflows, and internal implementation
 
 ### Recommended installation
 
-Download `LightHostModern-Setup.msi` from the [latest GitHub release](https://github.com/heide-oficial/Light-Host-Modern/releases/latest), open it, and follow the Windows Installer steps. The application is installed under `%ProgramFiles%\Light Host Modern` and receives Start menu and desktop shortcuts. Newer MSI releases upgrade the existing installation; the installer also migrates installations created by the legacy per-user setup.
+Download `LightHostModern-<version>-Setup.msi` from the [latest GitHub release](https://github.com/heide-oficial/Light-Host-Modern/releases/latest), open it, and follow the Windows Installer steps. The application is installed under `%ProgramFiles%\LightHostModern` and receives Start menu and desktop shortcuts. Newer MSI releases upgrade the existing installation; the installer also migrates installations created by the legacy per-user setup.
 
 ### Portable version
 
-Download `LightHostModern-Portable.zip` from the [latest GitHub release](https://github.com/heide-oficial/Light-Host-Modern/releases/latest), extract it to a stable folder, and run `Light Host Modern.exe`. The ZIP contains the complete self-contained app and does not use an extraction launcher or PowerShell at runtime.
+Download `LightHostModern-Portable.zip` from the [latest GitHub release](https://github.com/heide-oficial/Light-Host-Modern/releases/latest), extract it to a stable folder, and run `LightHostModern.exe`. The ZIP contains the complete self-contained app and does not use an extraction launcher or PowerShell at runtime.
 
 ## 🔒 Privacy and disclosures
 
@@ -80,7 +83,7 @@ Download `LightHostModern-Portable.zip` from the [latest GitHub release](https:/
 - English (`1.0.0+`)
 - Brazilian Portuguese (`1.2.0+`)
 
-Want to translate Light Host Modern? Copy the [English JSON catalogue](WinUI/LightHost.WinUI/Locales/en-us.json), rename it with the appropriate language code, translate only the values, and submit the file through a pull request or GitHub issue. Missing keys automatically fall back to English. See [Contributing translations](docs/localization.md) for the complete format.
+Want to translate LightHostModern? Copy the [English JSON catalogue](WinUI/LightHostModern.WinUI/Locales/en-us.json), rename it with the appropriate language code, translate only the values, and submit the file through a pull request or GitHub issue. Missing keys automatically fall back to English. See [Contributing translations](docs/localization.md) for the complete format.
 
 ## ❤️ Support
 
@@ -94,12 +97,14 @@ Thank you!
 
 ## 👥 Credits
 
-WARNING: GitHub's automatic Contributors list is based on commit authorship and may not include every person credited above. This section is the project's complete attribution record, including contributions that were reviewed, adapted, or reimplemented before integration.
+WARNING: GitHub's automatic Contributors list is based on commit authorship and may not include every person credited below. This section is the project's complete attribution record, including contributions that were reviewed, adapted, or reimplemented before integration.
 
 - Created by [Matheus Heidemann - heide-oficial](https://github.com/heide-oficial).
 - Based on the original [Light Host](https://github.com/opencma/LightHost) by [Rolando Islas / OpenCMA](https://github.com/opencma/).
 - Built with [JUCE](https://github.com/juce-framework/JUCE), the [Steinberg VST3 SDK](https://github.com/steinbergmedia/vst3sdk), the [ASIO SDK](https://github.com/audiosdk/asio), and optional [Xaymar VST2 headers](https://github.com/Xaymar/vst2sdk).
 - [multimattia](https://github.com/multimattia) contributed the [RNNoise VST3 loading fix for plugins with incomplete scan channel metadata](https://github.com/heide-oficial/Light-Host-Modern/pull/4).
+- [k-ross](https://github.com/k-ross) contributed the [individual input selection and mono input mixing proposal](https://github.com/heide-oficial/Light-Host-Modern/pull/5), adapted with smooth transitions, device-specific preferences and revised routing.
+- [Log1cFX](https://github.com/Log1cFX) contributed [feedback on naming consistency, upgrade cleanup, audio device handling, diagnostics and meter responsiveness](https://github.com/heide-oficial/Light-Host-Modern/issues/6).
 
 ## 📄 License
 

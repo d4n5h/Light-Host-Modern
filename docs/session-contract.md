@@ -1,6 +1,6 @@
 # Durable session contract
 
-Application version 1.3.0 uses IPC version 4. Session storage is separate from preferences and is scoped by the preferences file, including test profiles and separate instances.
+Application version 1.4.0 uses IPC version 4. Session storage is separate from preferences and is scoped by the preferences file, including test profiles and separate instances.
 
 ## File and model
 

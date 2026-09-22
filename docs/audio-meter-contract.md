@@ -1,15 +1,16 @@
 # Audio measurement contract (IPC 4)
 
 Input is measured before plugins. Output is measured after individual/global
-wet/dry selection, mute and the coordinated resume ramp. No clipping decision
+wet/dry selection, mute, optional main-output mono and the coordinated resume ramp. No clipping decision
 uses a value clamped to unity. Host processing continues while meters are hidden.
 
 `meters` contains `input` and `output`. Each direction contains `channels` and
 `aggregate`; each measurement contains linear `rms`, `peak`, `peakHold` and a
 persistent `clipped` flag. Channel records also contain a zero-based stream
 channel ID and its displayed device-channel label. The Dashboard presents only
-two level bars using the original 1.2.2 presentation: 28 segments, linear peak
-amplitude, and green/yellow/red levels. RMS, hold and clipping details remain in
+two level bars with 28 segments on a logarithmic -60..0 dBFS scale and
+green/yellow/red levels. Each has an unclamped, one-decimal dBFS reading in a
+fixed-width field to its left, with smooth decay and short peak retention. RMS, hold and clipping details remain in
 the IPC contract but are no longer shown
 as labels or a channel/clipping menu in the UI.
 
@@ -35,7 +36,7 @@ Diagnostics distinguish DSP deadline load, host process CPU, UI process CPU,
 application worker CPU, xruns, failed plugin calls, dropped MIDI events and
 chain latency. Requested device settings are separate from effective driver
 values. Unknown driver values are null, never fabricated zeroes.
-Diagnostics now has a dedicated sidebar page immediately above Settings, with
+Diagnostics now has a dedicated sidebar page after Plugins and before Support me, with
 non-collapsible cards, and requests telemetry at 1 Hz only while that page is
 visible. Dashboard meters keep their existing maximum presentation rate of 20 Hz.
 

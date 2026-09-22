@@ -1,12 +1,12 @@
 # Architecture and IPC
 
-Light Host Modern uses two cooperating native desktop processes. This keeps the realtime host independent from the lifetime and rendering work of the WinUI shell.
+LightHostModern uses two cooperating native desktop processes. This keeps the realtime host independent from the lifetime and rendering work of the WinUI shell.
 
 ## Process model
 
 ### Host process
 
-`Light Host Modern.exe` owns:
+`LightHostModern.exe` owns:
 
 - JUCE application lifetime;
 - audio device and callback;
@@ -28,16 +28,16 @@ The main modules are:
 
 ### WinUI shell
 
-`LightHostWinUI.exe` owns the Windows 11-style interface, navigation, dialogs, localization, update check, UI preferences, and IPC client. It does not process audio or own plugin instances.
+`LightHostModernWinUI.exe` owns the Windows 11-style interface, navigation, dialogs, localization, update check, UI preferences, and IPC client. It does not process audio or own plugin instances.
 
 ## Startup sequence
 
 1. The host parses command-line options and enables diagnostics when requested.
 2. JUCE application properties are opened, reset, or repaired as requested.
 3. `AudioEngine` initializes formats, audio state, plugin database, and optionally the saved chain.
-4. `HostIpcServer` creates `\\.\pipe\LightHost-<host-pid>`.
+4. `HostIpcServer` creates `\\.\pipe\LightHostModern-<host-pid>`.
 5. The notification-area icon is created.
-6. Opening the interface launches `LightHostWinUI.exe --host-pipe="<pipe>"`.
+6. Opening the interface launches `LightHostModernWinUI.exe --host-pipe="<pipe>"`.
 7. The shell requests a complete snapshot and begins periodic telemetry/state checks.
 
 If the shell window already exists, the host restores and focuses it rather than opening a duplicate UI.
@@ -76,9 +76,13 @@ An ordered instance collection owns UUIDs independently of plugin descriptions. 
 
 ## Isolated discovery
 
+`set-mono-inputs` and `set-mono-output` take one object with boolean `enabled` and positive `expectedGeneration`. The host rejects stale generations with `stale_configuration` and malformed values or an unconfigured device with `invalid_arguments`, using the normal operation error envelope. Snapshot and telemetry expose independent `monoInputs` and `monoOutput` flags. `audioSelection.preferenceKey` identifies the device combination; `audioSelection.mainOutputPairActive` indicates that processing is available and physical outputs 1/2 are both active. Enabling output mono does not reopen the stream or rebuild the chain.
+
+Channel presentation remains local to WinUI. A pair click uses the existing generation-checked audio-selection transaction with both mask bits changed together. Presentation changes during pending operations are saved and applied after reconciliation. Mono operations use the captured generation and the existing operation/snapshot path; an old command cannot apply to a newly selected device.
+
 Scan commands accept controller operations, whose results report queue acceptance. `begin-plugin-scan` resets an idle scan's progress; `scan-default-plugins` and `scan-plugin-path` enqueue work. `plugin-scan-status` includes scan ID, revision, activity, cancellation, module/enum/cache counts and a bounded summary of failure IDs. `cancel-plugin-scan` cancels queued/running work; `retry-plugin-scan` explicitly retries all failures while idle.
 
-The sibling `LightHostScanner.exe` has separate enumeration and module examination modes, with only one child active. All filesystem operations on configured plugin locations, including fingerprints, run in that child. A kill-on-close Windows Job Object owns it before it resumes. Each enumeration root and module examination has a 60-second deadline. Immutable, bounded candidate batches preserve partial progress; a blocked root does not prevent later roots from being attempted. Canonical paths deduplicate overlapping directories, but the path sent to JUCE and the identity returned by JUCE are preserved. Junctions are not traversed recursively.
+The sibling `LightHostModernScanner.exe` has separate enumeration and module examination modes, with only one child active. All filesystem operations on configured plugin locations, including fingerprints, run in that child. A kill-on-close Windows Job Object owns it before it resumes. Each enumeration root and module examination has a 60-second deadline. Immutable, bounded candidate batches preserve partial progress; a blocked root does not prevent later roots from being attempted. Canonical paths deduplicate overlapping directories, but the path sent to JUCE and the identity returned by JUCE are preserved. Junctions are not traversed recursively.
 
 Private temporary XML uses scanner protocol 2 and correlates format, module path, ID, batch sequence and content fingerprint. VST3 static metadata accelerates enumeration through JUCE; the worker also creates each class and verifies its identity and buses. Cache version 2 records declared versus verified metadata, input/output bus names, main/auxiliary roles, enabled state and default layouts. Fingerprints include relevant file names, sizes, modification times and streamed SHA-256 digests for binaries and JSON metadata. Valid sibling classes survive another class's failure. Existing known entries survive failure, cancellation and retry; clearing the database invalidates older scan generations.
 

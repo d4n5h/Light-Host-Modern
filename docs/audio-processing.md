@@ -1,6 +1,6 @@
 # Audio processing
 
-Light Host Modern uses JUCE's `AudioDeviceManager` and `AudioProcessorPlayer` with a custom `RealtimeHostProcessor`. The processor runs installed plugin instances in one serial chain.
+LightHostModern uses JUCE's `AudioDeviceManager` and `AudioProcessorPlayer` with a custom `RealtimeHostProcessor`. The processor runs installed plugin instances in one serial chain.
 
 ## Chain snapshots
 
@@ -21,20 +21,23 @@ Old snapshots are retired and collected outside the callback. Compatible plugin 
 For every audio block:
 
 1. The input peak is calculated.
-2. Channel data is adapted to the scratch buffer and chain requirements.
+2. Enabled inputs are packed by JUCE. If mono mixing is enabled for the current device pair, their unity-gain sum is faded into the main stereo pair over 5 ms, before dry/bypass capture and plugins.
 3. Each slot is processed in list order.
 4. Bypassed slots pass audio through their compensation path.
 5. Failed slots are disabled for later blocks.
-6. The result is copied to the configured output channels.
-7. The output peak is calculated.
+6. Global latency-compensated bypass and mute are applied.
+7. If enabled and both physical principal outputs are active, output mono blends their signals toward their average over 5 ms. Auxiliary outputs and lone principal outputs retain their signal.
+8. The stream-resume gain is applied, and output meters measure only actual output channels before JUCE sends them to the device.
 
 The empty-chain path still routes compatible inputs to outputs instead of producing silence.
 
 ## Channel handling
 
-Plugins can expose mono, stereo, or other channel layouts. The scratch buffer supports up to 64 channels, and each slot records its input/output capabilities. The host adapts between the opened device and plugin requirements rather than assuming every processor is stereo.
+Plugins can expose mono, stereo, or other channel layouts. The scratch buffer supports up to 256 channels, and each slot records its input/output capabilities. The host adapts between the opened device and plugin requirements rather than assuming every processor is stereo. With mono input mixing enabled, a mono plugin's main output is centered in the main stereo pair; true stereo output and auxiliary bus handling retain their existing behavior. Summing inputs can exceed 0 dBFS; there is no automatic normalization or limiter.
 
 Plugins that expose no usable audio input/output configuration can be rejected when added to the running chain.
+
+At device start, the active physical output mask maps outputs 1/2 to JUCE's packed buffer positions. This map and the output count are prepared while the callback is excluded. Output mono reads an atomic preference; it adds no callback allocation, device enumeration, settings access or lock. The transition continues from its current blend when toggled rapidly. Global bypass keeps this final monitoring transformation active; global mute still silences it. Input meters remain ahead of input mixing, and output meters include output mono even with Diagnostics disabled.
 
 ## Bypass and latency
 

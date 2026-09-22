@@ -1,6 +1,6 @@
-# Light Host Modern documentation
+# LightHostModern documentation
 
-Light Host Modern is a Windows-only audio plugin host. A JUCE host process owns the audio stream, plugin chain, persistence, and notification-area lifetime, while a native WinUI 3 process presents the interface and exchanges commands and snapshots with the host through a local named pipe.
+LightHostModern is a Windows-only audio plugin host. A JUCE host process owns the audio stream, plugin chain, persistence, and notification-area lifetime, while a native WinUI 3 process presents the interface and exchanges commands and snapshots with the host through a local named pipe.
 
 The application is organized into **Dashboard**, **Audio**, **Plugins**, **Settings**, **Diagnostics**, and **Support me**. Diagnostics and Support me can be hidden from Settings. The documents below explain both the public behavior of those areas and the internal workflows behind them.
 
@@ -31,4 +31,7 @@ The application is organized into **Dashboard**, **Audio**, **Plugins**, **Setti
 5. Review [Settings](settings.md) for recovery and background behavior.
 6. Use the [Dashboard](dashboard.md) to monitor the active stream and diagnose failures.
 
-Light Host Modern processes audio only while the host process is running and a usable audio device is open. Closing only the WinUI window can leave the host and chain active when close-to-tray is enabled.
+LightHostModern processes audio only while the host process is running and a usable audio device is open. Closing only the WinUI window can leave the host and chain active when close-to-tray is enabled.
+
+- [Issue 6 and PR 5 implementation](issue-6-implementation-plan.md) — approved scope and local validation status.
+- [Channel selection and main mono output](audio-channels-followup-plan.md) — approved follow-up for Individual/Pairs selection and independent output mono, with local implementation and validation status.

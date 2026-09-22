@@ -1,6 +1,6 @@
 # Support me
 
-The Support me page collects optional ways to support Light Host Modern. It does not affect audio processing, plugin hosting, or application functionality.
+The Support me page collects optional ways to support LightHostModern. It does not affect audio processing, plugin hosting, or application functionality.
 
 ## Donate via Ko-fi
 
@@ -8,7 +8,7 @@ The first card explains how donations support continued development. Its Ko-fi b
 
 ## Star the GitHub repository
 
-The second card explains how a GitHub star helps the project gain visibility. **Go to repo** opens the Light Host Modern repository in the default browser.
+The second card explains how a GitHub star helps the project gain visibility. **Go to repo** opens the LightHostModern repository in the default browser.
 
 ## Showcase the application
 

@@ -15,7 +15,7 @@ The selected Color, White, or Black icon variant is applied to both host and int
 
 ## Opening the interface
 
-The host first locates the canonical `WinUI/x64/Release/LightHost.WinUI` shell inside its own payload and launches it with the unique host pipe name. Development fallbacks must identify the repository. An existing window for the same profile is restored and activated instead of launching another shell. Temporary profiles include their identifier in the window title and tray tooltip.
+The host first locates the canonical `WinUI/x64/Release/LightHostModern.WinUI` shell inside its own payload and launches it with the unique host pipe name. Development fallbacks must identify the repository. An existing window for the same profile is restored and activated instead of launching another shell. Temporary profiles include their identifier in the window title and tray tooltip.
 
 The shell is a view of the host state. Closing or recreating it does not rebuild the audio engine by itself. Mute and global bypass both start off in a new host and survive closing/reopening only the shell. The initial window is sized for the current DPI and kept inside the monitor work area.
 
@@ -27,7 +27,7 @@ When disabled, the close flow requests host shutdown, which saves plugin state a
 
 ## Start with Windows
 
-The setting creates a current-user Windows `Run` entry named `Light Host Modern`. It points to the host executable that enabled the option. Disabling the setting removes the value.
+The setting creates a current-user Windows `Run` entry named `LightHostModern`. It points to the host executable that enabled the option. Disabling the setting removes the value.
 
 Portable users should extract the complete ZIP to a stable folder before enabling startup because the registration follows the extracted host executable. Moving or deleting that folder invalidates the startup entry; reopening the app and toggling the option off and on registers its new location.
 

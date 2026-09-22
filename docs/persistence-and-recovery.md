@@ -1,6 +1,6 @@
 # Persistence and recovery
 
-Light Host Modern stores enough state to restore the audio setup, installed database, and running chain, while providing recovery paths for unavailable devices and unsafe plugins.
+LightHostModern stores enough state to restore the audio setup, installed database, and running chain, while providing recovery paths for unavailable devices and unsafe plugins.
 
 ## Stored state
 
@@ -22,9 +22,13 @@ Settings writes are debounced during interactive operations and flushed explicit
 
 ## Preferred-device recovery
 
+Mono preferences use the existing length-delimited backend/input/output identity encoded as Base64. Input mono retains its `monoInputsV1_` key; output mono uses `monoOutputV1_` with the same identity and defaults to false. Channel masks are excluded from that identity. The host restores both settings when loading the chain, independently of whether WinUI is open.
+
+WinUI saves `InputMode` and `OutputMode` under `AudioChannels.<preferenceKey>` in its existing `ui-settings.ini`. Missing values mean Individual inputs and Pairs outputs. The host supplies `preferenceKey` so the UI does not recreate the identity format. Changing the presentation writes only UI preferences and refreshes channel rows; it never sends an audio reconfiguration.
+
 Device persistence supports three modes:
 
-- **Disabled** - no preferred-device retry policy.
+- **Disabled** - no preferred-device retry policy or default-device fallback. Only the exact saved device may open; its disappearance stops processing.
 - **Last selected device** - remembers the last manual working configuration.
 - **Custom device** - uses a backend/device choice saved from the preferred-device dialog.
 
@@ -58,3 +62,9 @@ Failed plugins can be marked with `plugin-failed-*` settings. This prevents repe
 ## Debug logs
 
 With `--debug`, the host writes timestamped files under `%APPDATA%\LightHostModern\Logs`. Logs include startup, IPC, device selection, plugin loading, chain rebuilds, and fatal crash context when available. Debug logging is disabled during ordinary launches.
+
+## Product name migration
+
+On the first normal start, the host copies the complete `Light Host Modern.settings` family into the canonical `LightHostModern.settings` location before opening preferences. Session primary, backup, pending candidates, damaged archives and plugin quarantine are copied byte-for-byte. Staged files and a durable manifest allow interrupted publication to resume. Originals are retained. Existing canonical recovery candidates take precedence even when invalid, so migration cannot hide damaged newer data with an older session. Conflicting pending migrations stop startup and preserve both versions.
+
+WinUI preferences already use `%LOCALAPPDATA%/LightHostModern/ui-settings.ini` and keep that path. Test profiles never import real user preferences. The WinUI package registration identity remains `LightHost.WinUI` for compatibility.
