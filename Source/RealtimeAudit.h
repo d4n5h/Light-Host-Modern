@@ -5,7 +5,7 @@
 
 bool installRealtimeAllocationAudit();
 
-namespace lightHost::realtimeAudit
+namespace lightHostModern::realtimeAudit
 {
 // False in ordinary builds, or if executable-local CRT interception failed.
 // Third-party DLL imports are never patched by the host audit.

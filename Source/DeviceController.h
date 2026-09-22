@@ -34,6 +34,9 @@ public:
     bool isAudioDeviceChoiceAllowed(const String& backendName,
                                                  const String& inputDeviceName,
                                                  const String& outputDeviceName) const;
+    bool isAudioDeviceCreationAllowed(const String& backend, const String& input, const String& output) const;
+    String monoInputsKey() const;
+    String monoOutputKey() const;
     bool currentAudioDeviceMatchesPreferred(AudioRecoveryConfiguration const& recoveryConfig) const;
     void closeCurrentAudioDeviceIfBlocked(const String& context);
     void rememberLastSelectedAudioDevice();
@@ -90,6 +93,7 @@ private:
     bool manualAudioSelectionInProgress = false, audioStartSuspended = false, applicationsSuspended = false;
     String audioRecoveryState = "running", audioRecoveryMessage, lastAudioConfigurationError;
     String configuredBackend;
+    String openingBackend, openingInput, openingOutput;
     String attemptedBackend;
     uint64 attemptedGeneration = 0;
     String inventory;

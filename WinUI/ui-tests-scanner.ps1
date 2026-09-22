@@ -51,9 +51,9 @@ function Scenario([string]$Name,[scriptblock]$Action) {
     catch { $results.Add([pscustomobject]@{name=$Name;status='failed';error="$($_.Exception.Message)"}); throw }
 }
 try {
-    rtk proxy "$repo\out\build\windows-vs2022\Release\LightHostPluginInstanceTests.exe" --write-ui-fixture (Join-Path $profileDirectory 'Light Host Modern.settings') 3
+    rtk proxy "$repo\out\build\windows-vs2022\Release\LightHostModernPluginInstanceTests.exe" --write-ui-fixture (Join-Path $profileDirectory 'LightHostModern.settings') 3
     if ($LASTEXITCODE -ne 0) { throw 'Fixture generation failed.' }
-    $hostProcess=Start-Process -FilePath "$repo\out\build\windows-vs2022\LightHost_artefacts\Release\Light Host Modern.exe" -ArgumentList @("--test-profile=$name",('--profile-root="'+$profileRoot+'"')) -WindowStyle Hidden -PassThru
+    $hostProcess=Start-Process -FilePath "$repo\out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe" -ArgumentList @("--test-profile=$name",('--profile-root="'+$profileRoot+'"')) -WindowStyle Hidden -PassThru
     $metadata=Join-Path $profileDirectory 'profile.json'
     $deadline=[DateTime]::UtcNow.AddSeconds(30)
     while (!(Test-Path -LiteralPath $metadata)) {
@@ -68,7 +68,7 @@ try {
     Mutate 'scan-plugin-path' @($paths)
     $script:status=Wait-ScanIdle
     $script:failures=Failures $script:status
-    $launch=rtk proxy winapp run "$repo\WinUI\x64\Release\LightHost.WinUI" --manifest "$repo\WinUI\LightHost.WinUI\Package.appxmanifest" --exe LightHostWinUI.exe --detach --json -- "--test-profile=$name" "--profile-root=$profileRoot" "--host-pipe=$script:pipe" | ConvertFrom-Json
+    $launch=rtk proxy winapp run "$repo\WinUI\x64\Release\LightHostModern.WinUI" --manifest "$repo\WinUI\LightHostModern.WinUI\Package.appxmanifest" --exe LightHostModernWinUI.exe --detach --json -- "--test-profile=$name" "--profile-root=$profileRoot" "--host-pipe=$script:pipe" | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0) { throw 'UI did not launch.' }
     $script:appPid=$launch.ProcessId
     @{hostPid=$hostProcess.Id;uiPid=$appPid;name=$name;root=$profileRoot;profile=$profileDirectory;pipe=$script:pipe} | ConvertTo-Json | Set-Content "$OutputDirectory/profile.json" -Encoding UTF8

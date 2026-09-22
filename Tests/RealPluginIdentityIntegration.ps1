@@ -4,7 +4,7 @@ $ErrorActionPreference='Stop'
 . "$PSScriptRoot\HostProtocol.ps1"
 $repo=(Resolve-Path -LiteralPath "$PSScriptRoot\..").Path
 $root=Join-Path $repo 'out\test-profiles'
-$hostExe=Join-Path $repo 'out\build\windows-vs2022\LightHost_artefacts\Release\Light Host Modern.exe'
+$hostExe=Join-Path $repo 'out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe'
 [xml]$cache=Get-Content -LiteralPath $MetadataCache -Raw -Encoding UTF8
 $entry=$cache.SelectSingleNode('/SCAN/ENTRY')
 $plugin=$entry.SelectSingleNode('PLUGIN')
@@ -71,7 +71,7 @@ function Stop-Host {
 foreach ($scenario in @('exact-class','replaced-class')) {
     $name='identity-'+[guid]::NewGuid().ToString('N'); $directory=Join-Path $root $name
     New-Item -ItemType Directory -Force -Path $directory | Out-Null
-    $preferences=Join-Path $directory 'Light Host Modern.settings'
+    $preferences=Join-Path $directory 'LightHostModern.settings'
     $run=[ordered]@{scenario=$scenario;profile=$directory;status='running'}; $report.runs.Add($run)
     try {
         if (!$savedInstance) {

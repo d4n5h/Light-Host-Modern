@@ -30,14 +30,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$appName = "Light Host Modern"
-$appVersion = "1.3.1"
-$exeName = "Light Host Modern.exe"
+$appName = "LightHostModern"
+$appVersion = "1.4.0"
+$exeName = "LightHostModern.exe"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $outRoot = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $repoRoot "out\release" }
 $stageRoot = Join-Path $outRoot "payload"
 $packageWorkRoot = Join-Path $outRoot "package-work"
-$installerMsi = Join-Path $outRoot "LightHostModern-Setup.msi"
+$installerMsi = Join-Path $outRoot "LightHostModern-$appVersion-Setup.msi"
+$installerAlias = Join-Path $outRoot "LightHostModern-Setup.msi"
 $portableZip = Join-Path $outRoot "LightHostModern-Portable.zip"
 $portableDirectory = Join-Path $outRoot "LightHostModern-Portable"
 $releaseIcon = Join-Path $repoRoot "Icon\logo.ico"
@@ -248,10 +249,10 @@ function Publish-VerifiedPortableDirectory {
         }
         $fileHashes[$relative.Replace('\', '/')] = $expectedHash
     }
-    foreach ($required in @($exeName, 'LightHostScanner.exe', 'LightHostUpdateHelper.exe',
-        "WinUI/x64/$Configuration/LightHost.WinUI/LightHostWinUI.exe",
-        "WinUI/x64/$Configuration/LightHost.WinUI/MainWindow.xbf",
-        "WinUI/x64/$Configuration/LightHost.WinUI/SettingsPageView.xbf")) {
+    foreach ($required in @($exeName, 'LightHostModernScanner.exe', 'LightHostModernUpdateHelper.exe',
+        "WinUI/x64/$Configuration/LightHostModern.WinUI/LightHostModernWinUI.exe",
+        "WinUI/x64/$Configuration/LightHostModern.WinUI/MainWindow.xbf",
+        "WinUI/x64/$Configuration/LightHostModern.WinUI/SettingsPageView.xbf")) {
         if (!$fileHashes.Contains($required)) { throw "Required portable component is missing: '$required'." }
     }
 
@@ -278,689 +279,6 @@ function Publish-VerifiedPortableDirectory {
         verifiedFileCount = $expectedFiles.Count
         files = $fileHashes
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $outRoot 'portable-verification.json') -Encoding UTF8
-}
-
-function New-IExpressPackage {
-    param(
-        [Parameter(Mandatory)]
-        [string] $Name,
-
-        [Parameter(Mandatory)]
-        [string] $SourceDir,
-
-        [Parameter(Mandatory)]
-        [string] $Launcher,
-
-        [Parameter(Mandatory)]
-        [string] $TargetExe
-    )
-
-    $iexpress = Join-Path $env:windir "System32\iexpress.exe"
-    if (!(Test-Path -LiteralPath $iexpress)) {
-        throw "iexpress.exe was not found. It is required to generate the single-file release executables."
-    }
-
-    $files = Get-ChildItem -LiteralPath $SourceDir -File | Sort-Object Name
-    if ($files.Count -eq 0) {
-        throw "No files found for IExpress package: $SourceDir"
-    }
-
-    $sedPath = Join-Path $SourceDir "$Name.sed"
-    $fileStrings = New-Object System.Collections.Generic.List[string]
-    $sourceFileEntries = New-Object System.Collections.Generic.List[string]
-
-    for ($i = 0; $i -lt $files.Count; $i++) {
-        $fileStrings.Add("FILE$i=$($files[$i].Name)")
-        $sourceFileEntries.Add("%FILE$i%=")
-    }
-
-    $sed = @"
-[Version]
-Class=IEXPRESS
-SEDVersion=3
-
-[Options]
-PackagePurpose=InstallApp
-ShowInstallProgramWindow=0
-HideExtractAnimation=1
-UseLongFileName=1
-InsideCompressed=1
-CAB_FixedSize=0
-CAB_ResvCodeSigning=0
-RebootMode=N
-InstallPrompt=%InstallPrompt%
-DisplayLicense=%DisplayLicense%
-FinishMessage=%FinishMessage%
-TargetName=%TargetName%
-FriendlyName=%FriendlyName%
-AppLaunched=%AppLaunched%
-PostInstallCmd=<None>
-AdminQuietInstCmd=%AppLaunched%
-UserQuietInstCmd=%AppLaunched%
-SourceFiles=SourceFiles
-
-[Strings]
-InstallPrompt=
-DisplayLicense=
-FinishMessage=
-TargetName=$TargetExe
-FriendlyName=$Name
-AppLaunched=$Launcher
-$($fileStrings -join "`r`n")
-
-[SourceFiles]
-SourceFiles0=$SourceDir
-
-[SourceFiles0]
-$($sourceFileEntries -join "`r`n")
-"@
-
-    Set-Content -LiteralPath $sedPath -Value $sed -Encoding ASCII
-    Invoke-Checked -FilePath $iexpress -Arguments @("/N", "/Q", $sedPath)
-
-    if (!(Test-Path -LiteralPath $TargetExe)) {
-        throw "IExpress did not create the expected package: $TargetExe"
-    }
-}
-
-function New-NativeSelfExtractPackage {
-    param(
-        [Parameter(Mandatory)]
-        [string] $Name,
-
-        [Parameter(Mandatory)]
-        [string] $WorkDir,
-
-        [Parameter(Mandatory)]
-        [string] $PayloadZipPath,
-
-        [Parameter(Mandatory)]
-        [string] $EntryScriptPath,
-
-        [Parameter(Mandatory)]
-        [string] $TargetExe,
-
-        [string] $IconPath = "",
-
-        [switch] $InstallerUi
-    )
-
-    $vcvars = Resolve-VCVars64
-    $safeName = ($Name -replace "[^A-Za-z0-9_]", "_")
-    $cppPath = Join-Path $WorkDir "$safeName.cpp"
-    $rcPath = Join-Path $WorkDir "$safeName.rc"
-    $resPath = Join-Path $WorkDir "$safeName.res"
-    $objPath = Join-Path $WorkDir "$safeName.obj"
-
-    $cpp = @'
-#ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x0600
-#endif
-#include <windows.h>
-#include <commctrl.h>
-#include <string>
-
-static bool writeResource(int id, const std::wstring& path)
-{
-    HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(id), RT_RCDATA);
-    if (resource == nullptr) return false;
-
-    HGLOBAL loaded = LoadResource(nullptr, resource);
-    if (loaded == nullptr) return false;
-
-    DWORD size = SizeofResource(nullptr, resource);
-    const void* data = LockResource(loaded);
-    if (data == nullptr || size == 0) return false;
-
-    HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE) return false;
-
-    DWORD written = 0;
-    BOOL ok = WriteFile(file, data, size, &written, nullptr);
-    CloseHandle(file);
-    return ok && written == size;
-}
-
-static std::wstring quote(const std::wstring& value)
-{
-    return L"\"" + value + L"\"";
-}
-
-static bool showInstallPrompt()
-{
-    HMODULE comctl = LoadLibraryW(L"comctl32.dll");
-    if (comctl != nullptr) {
-        using TaskDialogIndirectFn = HRESULT (WINAPI *)(const TASKDIALOGCONFIG*, int*, int*, BOOL*);
-        auto taskDialogIndirect = reinterpret_cast<TaskDialogIndirectFn>(GetProcAddress(comctl, "TaskDialogIndirect"));
-
-        if (taskDialogIndirect != nullptr) {
-            const TASKDIALOG_BUTTON buttons[] = {
-                { 100, L"Install Light Host Modern\nInstall for the current Windows user." },
-                { IDCANCEL, L"Cancel" }
-            };
-
-            TASKDIALOGCONFIG config = {};
-            config.cbSize = sizeof(config);
-            config.dwFlags = TDF_USE_COMMAND_LINKS | TDF_ALLOW_DIALOG_CANCELLATION;
-            config.pszWindowTitle = L"Light Host Modern Setup";
-            config.pszMainInstruction = L"Install Light Host Modern";
-            config.pszContent = L"Destination: %LOCALAPPDATA%\\Programs\\Light Host Modern\n\nThe installer will add Start Menu and Desktop shortcuts.";
-            config.cButtons = ARRAYSIZE(buttons);
-            config.pButtons = buttons;
-            config.nDefaultButton = 100;
-            config.pszMainIcon = TD_INFORMATION_ICON;
-
-            int pressedButton = IDCANCEL;
-            if (SUCCEEDED(taskDialogIndirect(&config, &pressedButton, nullptr, nullptr))) {
-                FreeLibrary(comctl);
-                return pressedButton == 100;
-            }
-        }
-
-        FreeLibrary(comctl);
-    }
-
-    int result = MessageBoxW(
-        nullptr,
-        L"Install Light Host Modern for the current Windows user?\n\nDestination: %LOCALAPPDATA%\\Programs\\Light Host Modern",
-        L"Light Host Modern Setup",
-        MB_OKCANCEL | MB_ICONINFORMATION);
-
-    return result == IDOK;
-}
-
-static void showInstallComplete()
-{
-    HMODULE comctl = LoadLibraryW(L"comctl32.dll");
-    if (comctl != nullptr) {
-        using TaskDialogFn = HRESULT (WINAPI *)(HWND, HINSTANCE, PCWSTR, PCWSTR, PCWSTR, TASKDIALOG_COMMON_BUTTON_FLAGS, PCWSTR, int*);
-        auto taskDialog = reinterpret_cast<TaskDialogFn>(GetProcAddress(comctl, "TaskDialog"));
-
-        if (taskDialog != nullptr) {
-            int pressedButton = IDOK;
-            taskDialog(
-                nullptr,
-                nullptr,
-                L"Light Host Modern Setup",
-                L"Installation completed",
-                L"Light Host Modern was installed successfully.",
-                TDCBF_OK_BUTTON,
-                TD_INFORMATION_ICON,
-                &pressedButton);
-            FreeLibrary(comctl);
-            return;
-        }
-
-        FreeLibrary(comctl);
-    }
-
-    MessageBoxW(nullptr, L"Light Host Modern was installed successfully.", L"Light Host Modern Setup", MB_OK | MB_ICONINFORMATION);
-}
-
-int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
-{
-    wchar_t tempPath[MAX_PATH] = {};
-    DWORD tempLength = GetTempPathW(MAX_PATH, tempPath);
-    if (tempLength == 0 || tempLength >= MAX_PATH) {
-        MessageBoxW(nullptr, L"Unable to resolve the temporary folder.", L"Light Host Modern", MB_ICONERROR);
-        return 1;
-    }
-
-    std::wstring workDir = std::wstring(tempPath) + L"LightHostModernRelease-" + std::to_wstring(GetCurrentProcessId());
-    CreateDirectoryW(workDir.c_str(), nullptr);
-
-    std::wstring payloadPath = workDir + L"\\payload.zip";
-    std::wstring scriptPath = workDir + L"\\entry.ps1";
-
-    if (!writeResource(101, payloadPath) || !writeResource(102, scriptPath)) {
-        MessageBoxW(nullptr, L"Unable to extract release payload.", L"Light Host Modern", MB_ICONERROR);
-        return 1;
-    }
-
-    std::wstring command = L"powershell.exe -NoProfile -ExecutionPolicy Bypass -Sta -File " + quote(scriptPath);
-    STARTUPINFOW startupInfo = {};
-    startupInfo.cb = sizeof(startupInfo);
-    startupInfo.dwFlags = STARTF_USESHOWWINDOW;
-    startupInfo.wShowWindow = SW_HIDE;
-
-    PROCESS_INFORMATION processInfo = {};
-    std::wstring mutableCommand = command;
-    if (!CreateProcessW(nullptr, &mutableCommand[0], nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, workDir.c_str(), &startupInfo, &processInfo)) {
-        MessageBoxW(nullptr, L"Unable to run the embedded release script.", L"Light Host Modern", MB_ICONERROR);
-        return 1;
-    }
-
-    WaitForSingleObject(processInfo.hProcess, INFINITE);
-
-    DWORD exitCode = 0;
-    GetExitCodeProcess(processInfo.hProcess, &exitCode);
-    CloseHandle(processInfo.hThread);
-    CloseHandle(processInfo.hProcess);
-
-    if (exitCode != 0) {
-        MessageBoxW(nullptr, L"The release script failed. Run the app with --debug or rebuild the release package for diagnostics.", L"Light Host Modern", MB_ICONERROR);
-        return static_cast<int>(exitCode);
-    }
-
-    return 0;
-}
-'@
-
-    Set-Content -LiteralPath $cppPath -Value $cpp -Encoding ASCII
-
-    $payloadResourcePath = $PayloadZipPath.Replace("\", "\\")
-    $scriptResourcePath = $EntryScriptPath.Replace("\", "\\")
-    $iconResourceLine = ""
-    if (![string]::IsNullOrWhiteSpace($IconPath) -and (Test-Path -LiteralPath $IconPath)) {
-        $iconResourcePath = $IconPath.Replace("\", "\\")
-        $iconResourceLine = "1 ICON `"$iconResourcePath`"`r`n"
-    }
-
-    $rc = @"
-$iconResourceLine
-101 RCDATA "$payloadResourcePath"
-102 RCDATA "$scriptResourcePath"
-"@
-    Set-Content -LiteralPath $rcPath -Value $rc -Encoding ASCII
-
-    if (Test-Path -LiteralPath $TargetExe) {
-        Remove-Item -LiteralPath $TargetExe -Force
-    }
-
-    $installerDefine = ""
-    if ($InstallerUi) {
-        $installerDefine = "/DSHOW_INSTALLER_UI "
-    }
-
-    $compileCommand = "`"$vcvars`" >nul && rc.exe /nologo /fo `"$resPath`" `"$rcPath`" && cl.exe /nologo /O2 /MT /EHsc /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0600 $installerDefine/Fo`"$objPath`" `"$cppPath`" `"$resPath`" user32.lib /link /SUBSYSTEM:WINDOWS /OUT:`"$TargetExe`""
-    & cmd.exe /d /s /c $compileCommand
-    if ($LASTEXITCODE -ne 0) {
-        throw "Native self-extracting package build failed with exit code $LASTEXITCODE`: $TargetExe"
-    }
-
-    if (!(Test-Path -LiteralPath $TargetExe)) {
-        throw "Native self-extracting package was not created: $TargetExe"
-    }
-}
-
-function Write-InstallerPayload {
-    param([Parameter(Mandatory)][string] $TargetDir)
-
-    New-Directory -Path $TargetDir
-    Copy-Item -LiteralPath $payloadZip -Destination (Join-Path $TargetDir "payload.zip") -Force
-
-    @'
-@echo off
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Sta -File "%~dp0install.ps1"
-exit /b %ERRORLEVEL%
-'@ | Set-Content -LiteralPath (Join-Path $TargetDir "install.cmd") -Encoding ASCII
-
-    @'
-$ErrorActionPreference = "Stop"
-
-$appName = "Light Host Modern"
-$exeName = "Light Host Modern.exe"
-$payloadZip = Join-Path $PSScriptRoot "payload.zip"
-
-function Get-DefaultInstallRoot {
-    Join-Path $env:LOCALAPPDATA "Programs\Light Host Modern"
-}
-
-function ConvertTo-PowerShellLiteral {
-    param([AllowNull()][string] $Value)
-    if ($null -eq $Value) { return "''" }
-    return "'" + ($Value -replace "'", "''") + "'"
-}
-
-function New-Shortcut {
-    param(
-        [Parameter(Mandatory)][string] $ShortcutPath,
-        [Parameter(Mandatory)][string] $TargetPath,
-        [Parameter(Mandatory)][string] $WorkingDirectory
-    )
-
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($ShortcutPath)
-    $shortcut.TargetPath = $TargetPath
-    $shortcut.WorkingDirectory = $WorkingDirectory
-    $shortcut.IconLocation = "$TargetPath,0"
-    $shortcut.Save()
-}
-
-function Install-LightHostModern {
-    param(
-        [Parameter(Mandatory)][string] $InstallRoot,
-        [bool] $CreateStartMenu,
-        [bool] $CreateDesktopShortcut,
-        [bool] $LaunchAfterInstall
-    )
-
-    if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
-        throw "Install location cannot be empty."
-    }
-
-    $installRoot = [System.IO.Path]::GetFullPath($InstallRoot)
-    $startMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Light Host Modern"
-    $desktopShortcut = Join-Path ([Environment]::GetFolderPath("DesktopDirectory")) "Light Host Modern.lnk"
-    $uninstallScript = Join-Path $installRoot "Uninstall-LightHostModern.ps1"
-
-    Get-Process "Light Host Modern" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-
-    if (Test-Path -LiteralPath $installRoot) {
-        Remove-Item -LiteralPath $installRoot -Recurse -Force
-    }
-
-    New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
-    Expand-Archive -LiteralPath $payloadZip -DestinationPath $installRoot -Force
-
-    $exePath = Join-Path $installRoot $exeName
-    if (!(Test-Path -LiteralPath $exePath)) {
-        throw "Installed executable was not found: $exePath"
-    }
-
-    if ($CreateStartMenu) {
-        New-Item -ItemType Directory -Force -Path $startMenuDir | Out-Null
-        New-Shortcut -ShortcutPath (Join-Path $startMenuDir "Light Host Modern.lnk") -TargetPath $exePath -WorkingDirectory $installRoot
-    }
-
-    if ($CreateDesktopShortcut) {
-        New-Shortcut -ShortcutPath $desktopShortcut -TargetPath $exePath -WorkingDirectory $installRoot
-    }
-
-    $installLiteral = ConvertTo-PowerShellLiteral $installRoot
-    $startMenuLiteral = ConvertTo-PowerShellLiteral $(if ($CreateStartMenu) { $startMenuDir } else { "" })
-    $desktopLiteral = ConvertTo-PowerShellLiteral $(if ($CreateDesktopShortcut) { $desktopShortcut } else { "" })
-
-    $uninstallBody = @"
-`$ErrorActionPreference = "Stop"
-`$installRoot = $installLiteral
-`$startMenuDir = $startMenuLiteral
-`$desktopShortcut = $desktopLiteral
-`$uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LightHostModern"
-Get-Process "Light Host Modern" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-if (`$desktopShortcut -and (Test-Path -LiteralPath `$desktopShortcut)) { Remove-Item -LiteralPath `$desktopShortcut -Force }
-if (`$startMenuDir -and (Test-Path -LiteralPath `$startMenuDir)) { Remove-Item -LiteralPath `$startMenuDir -Recurse -Force }
-if (Test-Path -LiteralPath `$uninstallKey) { Remove-Item -LiteralPath `$uninstallKey -Recurse -Force }
-if (Test-Path -LiteralPath `$installRoot) { Remove-Item -LiteralPath `$installRoot -Recurse -Force }
-"@
-
-    Set-Content -LiteralPath $uninstallScript -Value $uninstallBody -Encoding UTF8
-
-    $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LightHostModern"
-    New-Item -Path $uninstallKey -Force | Out-Null
-    Set-ItemProperty -Path $uninstallKey -Name DisplayName -Value $appName
-    Set-ItemProperty -Path $uninstallKey -Name DisplayVersion -Value $appVersion
-    Set-ItemProperty -Path $uninstallKey -Name Publisher -Value "Light Host Modern"
-    Set-ItemProperty -Path $uninstallKey -Name InstallLocation -Value $installRoot
-    Set-ItemProperty -Path $uninstallKey -Name DisplayIcon -Value $exePath
-    Set-ItemProperty -Path $uninstallKey -Name UninstallString -Value "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$uninstallScript`""
-    Set-ItemProperty -Path $uninstallKey -Name NoModify -Value 1 -Type DWord
-    Set-ItemProperty -Path $uninstallKey -Name NoRepair -Value 1 -Type DWord
-
-    if ($LaunchAfterInstall) {
-        Start-Process -FilePath $exePath -WorkingDirectory $installRoot
-    }
-
-    return $installRoot
-}
-
-function Show-InstallerWizard {
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-
-    [System.Windows.Forms.Application]::EnableVisualStyles()
-
-    $state = [ordered]@{
-        Page = 0
-        InstallRoot = Get-DefaultInstallRoot
-        CreateStartMenu = $true
-        CreateDesktopShortcut = $true
-        LaunchAfterInstall = $false
-        InstalledPath = ""
-    }
-
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Light Host Modern Setup"
-    $form.StartPosition = "CenterScreen"
-    $form.FormBorderStyle = "FixedDialog"
-    $form.MaximizeBox = $false
-    $form.MinimizeBox = $false
-    $form.ClientSize = New-Object System.Drawing.Size(680, 460)
-    $form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-
-    $title = New-Object System.Windows.Forms.Label
-    $title.AutoSize = $false
-    $title.Location = New-Object System.Drawing.Point(24, 18)
-    $title.Size = New-Object System.Drawing.Size(620, 40)
-    $title.Font = New-Object System.Drawing.Font("Segoe UI", 16, [System.Drawing.FontStyle]::Bold)
-    $form.Controls.Add($title)
-
-    $panel = New-Object System.Windows.Forms.Panel
-    $panel.Location = New-Object System.Drawing.Point(24, 72)
-    $panel.Size = New-Object System.Drawing.Size(632, 300)
-    $form.Controls.Add($panel)
-
-    $backButton = New-Object System.Windows.Forms.Button
-    $backButton.Text = "Back"
-    $backButton.Location = New-Object System.Drawing.Point(332, 404)
-    $backButton.Size = New-Object System.Drawing.Size(96, 32)
-    $form.Controls.Add($backButton)
-
-    $nextButton = New-Object System.Windows.Forms.Button
-    $nextButton.Text = "Next"
-    $nextButton.Location = New-Object System.Drawing.Point(440, 404)
-    $nextButton.Size = New-Object System.Drawing.Size(96, 32)
-    $form.Controls.Add($nextButton)
-
-    $cancelButton = New-Object System.Windows.Forms.Button
-    $cancelButton.Text = "Cancel"
-    $cancelButton.Location = New-Object System.Drawing.Point(548, 404)
-    $cancelButton.Size = New-Object System.Drawing.Size(96, 32)
-    $form.Controls.Add($cancelButton)
-
-    $script:pathBox = $null
-    $script:startMenuCheck = $null
-    $script:desktopCheck = $null
-    $script:launchCheck = $null
-    $script:statusLabel = $null
-
-    function Add-BodyLabel {
-        param([string] $Text, [int] $Y, [int] $Height = 28)
-        $label = New-Object System.Windows.Forms.Label
-        $label.AutoSize = $false
-        $label.Location = New-Object System.Drawing.Point(0, $Y)
-        $label.Size = New-Object System.Drawing.Size(620, $Height)
-        $label.Text = $Text
-        [void] $panel.Controls.Add($label)
-        return $label
-    }
-
-    function Render-Page {
-        $panel.Controls.Clear()
-        $backButton.Enabled = $state.Page -gt 0 -and $state.Page -lt 4
-        $cancelButton.Visible = $state.Page -lt 4
-        $nextButton.Enabled = $true
-        $nextButton.Visible = $true
-
-        switch ($state.Page) {
-            0 {
-                $title.Text = "Welcome to Light Host Modern Setup"
-                Add-BodyLabel "This wizard will install Light Host Modern on your computer." 10 32 | Out-Null
-                Add-BodyLabel "Click Next to continue." 58 28 | Out-Null
-                $nextButton.Text = "Next"
-            }
-            1 {
-                $title.Text = "Choose install location"
-                Add-BodyLabel "Select the folder where Light Host Modern will be installed." 8 28 | Out-Null
-
-                $script:pathBox = New-Object System.Windows.Forms.TextBox
-                $script:pathBox.Location = New-Object System.Drawing.Point(0, 58)
-                $script:pathBox.Size = New-Object System.Drawing.Size(512, 28)
-                $script:pathBox.Text = $state.InstallRoot
-                $panel.Controls.Add($script:pathBox)
-
-                $browseButton = New-Object System.Windows.Forms.Button
-                $browseButton.Text = "Browse..."
-                $browseButton.Location = New-Object System.Drawing.Point(526, 56)
-                $browseButton.Size = New-Object System.Drawing.Size(96, 30)
-                $browseButton.Add_Click({
-                    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-                    $dialog.Description = "Choose the install folder"
-                    $dialog.SelectedPath = $script:pathBox.Text
-                    if ($dialog.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
-                        $script:pathBox.Text = $dialog.SelectedPath
-                    }
-                })
-                $panel.Controls.Add($browseButton)
-
-                $nextButton.Text = "Next"
-            }
-            2 {
-                $title.Text = "Choose setup options"
-                Add-BodyLabel "Select the shortcuts and post-install actions to create." 8 28 | Out-Null
-
-                $script:startMenuCheck = New-Object System.Windows.Forms.CheckBox
-                $script:startMenuCheck.Text = "Create Start Menu folder and shortcut"
-                $script:startMenuCheck.Location = New-Object System.Drawing.Point(0, 58)
-                $script:startMenuCheck.Size = New-Object System.Drawing.Size(420, 28)
-                $script:startMenuCheck.Checked = $state.CreateStartMenu
-                $panel.Controls.Add($script:startMenuCheck)
-
-                $script:desktopCheck = New-Object System.Windows.Forms.CheckBox
-                $script:desktopCheck.Text = "Create desktop shortcut"
-                $script:desktopCheck.Location = New-Object System.Drawing.Point(0, 96)
-                $script:desktopCheck.Size = New-Object System.Drawing.Size(420, 28)
-                $script:desktopCheck.Checked = $state.CreateDesktopShortcut
-                $panel.Controls.Add($script:desktopCheck)
-
-                $script:launchCheck = New-Object System.Windows.Forms.CheckBox
-                $script:launchCheck.Text = "Launch Light Host Modern after installation"
-                $script:launchCheck.Location = New-Object System.Drawing.Point(0, 134)
-                $script:launchCheck.Size = New-Object System.Drawing.Size(420, 28)
-                $script:launchCheck.Checked = $state.LaunchAfterInstall
-                $panel.Controls.Add($script:launchCheck)
-
-                $nextButton.Text = "Next"
-            }
-            3 {
-                $title.Text = "Ready to install"
-                Add-BodyLabel "Light Host Modern will be installed with these settings:" 8 28 | Out-Null
-                Add-BodyLabel "Install folder: $($state.InstallRoot)" 52 28 | Out-Null
-                Add-BodyLabel "Start Menu shortcut: $(if ($state.CreateStartMenu) { 'Yes' } else { 'No' })" 88 28 | Out-Null
-                Add-BodyLabel "Desktop shortcut: $(if ($state.CreateDesktopShortcut) { 'Yes' } else { 'No' })" 124 28 | Out-Null
-                Add-BodyLabel "Launch after install: $(if ($state.LaunchAfterInstall) { 'Yes' } else { 'No' })" 160 28 | Out-Null
-                $nextButton.Text = "Install"
-            }
-            4 {
-                $title.Text = "Installation complete"
-                Add-BodyLabel "Light Host Modern was installed successfully." 10 32 | Out-Null
-                Add-BodyLabel "Installed to: $($state.InstalledPath)" 58 48 | Out-Null
-                $backButton.Visible = $false
-                $cancelButton.Visible = $false
-                $nextButton.Text = "Finish"
-            }
-        }
-    }
-
-    $backButton.Add_Click({
-        if ($state.Page -gt 0) {
-            $state.Page--
-            Render-Page
-        }
-    })
-
-    $nextButton.Add_Click({
-        try {
-            switch ($state.Page) {
-                0 { $state.Page = 1 }
-                1 {
-                    $candidate = $script:pathBox.Text.Trim()
-                    if ([string]::IsNullOrWhiteSpace($candidate)) {
-                        [System.Windows.Forms.MessageBox]::Show($form, "Choose an install location.", "Light Host Modern Setup", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
-                        return
-                    }
-                    $state.InstallRoot = $candidate
-                    $state.Page = 2
-                }
-                2 {
-                    $state.CreateStartMenu = $script:startMenuCheck.Checked
-                    $state.CreateDesktopShortcut = $script:desktopCheck.Checked
-                    $state.LaunchAfterInstall = $script:launchCheck.Checked
-                    $state.Page = 3
-                }
-                3 {
-                    $title.Text = "Installing"
-                    $panel.Controls.Clear()
-                    $script:statusLabel = Add-BodyLabel "Installing Light Host Modern..." 10 32
-                    $backButton.Enabled = $false
-                    $nextButton.Enabled = $false
-                    $cancelButton.Enabled = $false
-                    [System.Windows.Forms.Application]::DoEvents()
-                    $state.InstalledPath = Install-LightHostModern -InstallRoot $state.InstallRoot -CreateStartMenu $state.CreateStartMenu -CreateDesktopShortcut $state.CreateDesktopShortcut -LaunchAfterInstall $state.LaunchAfterInstall
-                    $state.Page = 4
-                    $cancelButton.Enabled = $true
-                }
-                4 {
-                    $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
-                    $form.Close()
-                    return
-                }
-            }
-            Render-Page
-        }
-        catch {
-            $nextButton.Enabled = $true
-            $backButton.Enabled = $state.Page -gt 0
-            $cancelButton.Enabled = $true
-            [System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, "Light Host Modern Setup", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
-        }
-    })
-
-    $cancelButton.Add_Click({
-        $form.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-        $form.Close()
-    })
-
-    Render-Page
-    [void] $form.ShowDialog()
-}
-
-Show-InstallerWizard
-'@ | Set-Content -LiteralPath (Join-Path $TargetDir "install.ps1") -Encoding UTF8
-}
-
-function Write-PortablePayload {
-    param([Parameter(Mandatory)][string] $TargetDir)
-
-    New-Directory -Path $TargetDir
-    Copy-Item -LiteralPath $payloadZip -Destination (Join-Path $TargetDir "payload.zip") -Force
-
-    @'
-@echo off
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0run-portable.ps1"
-exit /b %ERRORLEVEL%
-'@ | Set-Content -LiteralPath (Join-Path $TargetDir "run-portable.cmd") -Encoding ASCII
-
-    @'
-$ErrorActionPreference = "Stop"
-
-$exeName = "Light Host Modern.exe"
-$payloadZip = Join-Path $PSScriptRoot "payload.zip"
-$payloadHash = (Get-FileHash -LiteralPath $payloadZip -Algorithm SHA256).Hash.Substring(0, 16)
-$portableRoot = Join-Path $env:TEMP "LightHostModern-Portable\$payloadHash"
-$exePath = Join-Path $portableRoot $exeName
-
-if (!(Test-Path -LiteralPath $exePath)) {
-    if (Test-Path -LiteralPath $portableRoot) {
-        Remove-Item -LiteralPath $portableRoot -Recurse -Force
-    }
-
-    New-Item -ItemType Directory -Force -Path $portableRoot | Out-Null
-    Expand-Archive -LiteralPath $payloadZip -DestinationPath $portableRoot -Force
-}
-
-Start-Process -FilePath $exePath -WorkingDirectory $portableRoot
-'@ | Set-Content -LiteralPath (Join-Path $TargetDir "run-portable.ps1") -Encoding UTF8
 }
 
 function Resolve-Wix {
@@ -1078,7 +396,7 @@ The installed application includes the full LICENSE file. The license is also av
         $indent = " " * $IndentLevel
         foreach ($file in Get-ChildItem -LiteralPath $DirectoryPath -File | Sort-Object Name) {
             $componentId = New-WixComponentId
-            $fileId = New-WixFileId
+            $fileId = if ($file.Name -eq "LightHostModernUpdateHelper.exe" -and $DirectoryPath -eq $SourceDir) { "MigrationHelperFile" } else { New-WixFileId }
             $componentRefs.Add($componentId)
             $source = ConvertTo-WixXmlText $file.FullName
             $Lines.Add("$indent<Component Id=`"$componentId`" Guid=`"*`">")
@@ -1109,7 +427,9 @@ The installed application includes the full LICENSE file. The license is also av
 
     $wxsPath = Join-Path $WorkDir "LightHostModern.wxs"
     $productName = ConvertTo-WixXmlText $appName
-    $manufacturer = "Light Host Modern"
+    # Transitional MSI identity accepted by installed 1.3.x updaters.
+    $msiProductName = "Light Host Modern"
+    $manufacturer = "LightHostModern"
     $escapedIconPath = ConvertTo-WixXmlText $IconPath
     $upgradeCode = "8F28E61C-DC90-4927-B7B4-3E74E4B5960B"
     $productCode = New-StableGuid "$upgradeCode|$appVersion"
@@ -1118,27 +438,20 @@ The installed application includes the full LICENSE file. The license is also av
     $wxs = New-Object System.Collections.Generic.List[string]
     $wxs.Add("<?xml version=`"1.0`" encoding=`"UTF-8`"?>")
     $wxs.Add("<Wix xmlns=`"http://wixtoolset.org/schemas/v4/wxs`" xmlns:ui=`"http://wixtoolset.org/schemas/v4/wxs/ui`" xmlns:util=`"http://wixtoolset.org/schemas/v4/wxs/util`">")
-    $wxs.Add("  <Package Name=`"$productName`" Manufacturer=`"$manufacturer`" Version=`"$appVersion`" UpgradeCode=`"$upgradeCode`" ProductCode=`"$productCode`" Scope=`"perMachine`">")
-    $wxs.Add("    <MajorUpgrade AllowSameVersionUpgrades=`"yes`" DowngradeErrorMessage=`"A newer version of $productName is already installed.`" />")
+    $wxs.Add("  <Package Name=`"$msiProductName`" Manufacturer=`"$manufacturer`" Version=`"$appVersion`" UpgradeCode=`"$upgradeCode`" ProductCode=`"$productCode`" Scope=`"perMachine`">")
+    $wxs.Add("    <MajorUpgrade Schedule=`"afterInstallInitialize`" AllowSameVersionUpgrades=`"yes`" DowngradeErrorMessage=`"A newer version of $productName is already installed.`" />")
     $wxs.Add("    <MediaTemplate EmbedCab=`"yes`" />")
+    $wxs.Add("    <CustomAction Id=`"MigrateLegacyPayload`" FileRef=`"MigrationHelperFile`" ExeCommand=`"--migrate-legacy-install`" Execute=`"commit`" Impersonate=`"yes`" Return=`"ignore`" />")
+    $wxs.Add("    <InstallExecuteSequence><Custom Action=`"MigrateLegacyPayload`" After=`"InstallFiles`" Condition=`"NOT Installed`" /></InstallExecuteSequence>")
     $wxs.Add("    <Icon Id=`"AppIcon.ico`" SourceFile=`"$escapedIconPath`" />")
     $wxs.Add("    <Property Id=`"ARPPRODUCTICON`" Value=`"AppIcon.ico`" />")
     $wxs.Add("    <Property Id=`"ApplicationFolderName`" Value=`"$productName`" />")
     $wxs.Add("    <Property Id=`"WIXUI_INSTALLDIR`" Value=`"APPLICATIONFOLDER`" />")
     $wxs.Add("    <SetProperty Id=`"ARPINSTALLLOCATION`" Value=`"[APPLICATIONFOLDER]`" After=`"CostFinalize`" Sequence=`"both`" />")
-    $wxs.Add("    <Property Id=`"LEGACYINSTALLFOLDER`">")
-    $wxs.Add("      <RegistrySearch Id=`"FindLegacyInstallFolder`" Root=`"HKCU`" Key=`"Software\Microsoft\Windows\CurrentVersion\Uninstall\LightHostModern`" Name=`"InstallLocation`" Type=`"raw`" />")
-    $wxs.Add("    </Property>")
     $wxs.Add("    <WixVariable Id=`"WixUILicenseRtf`" Value=`"$licenseRtf`" />")
     $wxs.Add("    <ui:WixUI Id=`"WixUI_InstallDir`" />")
     $wxs.Add("    <StandardDirectory Id=`"ProgramFiles64Folder`">")
     $wxs.Add("      <Directory Id=`"APPLICATIONFOLDER`" Name=`"$productName`">")
-    $legacyCleanupGuid = New-StableGuid "$upgradeCode|legacy-install-cleanup"
-    $wxs.Add("        <Component Id=`"LegacyInstallCleanupComponent`" Guid=`"$legacyCleanupGuid`">")
-    $wxs.Add("          <RegistryValue Root=`"HKLM`" Key=`"Software\LightHostModern`" Name=`"LegacyMigration`" Type=`"string`" Value=`"$appVersion`" KeyPath=`"yes`" />")
-    $wxs.Add("          <RemoveRegistryKey Id=`"RemoveLegacyUninstallEntry`" Root=`"HKCU`" Key=`"Software\Microsoft\Windows\CurrentVersion\Uninstall\LightHostModern`" Action=`"removeOnInstall`" />")
-    $wxs.Add("          <util:RemoveFolderEx Id=`"RemoveLegacyInstallFolder`" Property=`"LEGACYINSTALLFOLDER`" On=`"install`" />")
-    $wxs.Add("        </Component>")
     foreach ($line in $installDirectoryLines) {
         $wxs.Add($line)
     }
@@ -1160,7 +473,6 @@ The installed application includes the full LICENSE file. The license is also av
     $wxs.Add("      </Component>")
     $wxs.Add("    </StandardDirectory>")
     $wxs.Add("    <Feature Id=`"ApplicationFeature`" Title=`"$productName`" Level=`"1`">")
-    $wxs.Add("      <ComponentRef Id=`"LegacyInstallCleanupComponent`" />")
     foreach ($line in $featureRefs) {
         $wxs.Add($line)
     }
@@ -1204,7 +516,7 @@ The installed application includes the full LICENSE file. The license is also av
 $outRoot = Assert-BuildOutputPath $outRoot
 if (!$SkipBuild) {
     $msbuild = Resolve-MSBuild
-    $winUIProject = Join-Path $repoRoot "WinUI\LightHost.WinUI.sln"
+    $winUIProject = Join-Path $repoRoot "WinUI\LightHostModern.WinUI.sln"
 
     Invoke-Checked -FilePath $msbuild -Arguments @(
         $winUIProject,
@@ -1237,14 +549,14 @@ if (!$SkipTests) {
     $ctestPath = Join-Path (Split-Path (Resolve-CMake) -Parent) 'ctest.exe'
     Invoke-Checked -FilePath $ctestPath -Arguments @('--test-dir', $buildDirectory, '-C', $Configuration, '--output-on-failure')
 }
-$hostOutput = Join-Path $buildDirectory "LightHost_artefacts\$Configuration"
+$hostOutput = Join-Path $buildDirectory "LightHostModern_artefacts\$Configuration"
 $hostExe = Join-Path $hostOutput $exeName
 $winUIStageScript = Join-Path $PSScriptRoot 'WinUI Output.ps1'
 $builtWinUIOutput = & $winUIStageScript -Mode Resolve -Platform $Platform -Configuration $Configuration
-$hostWinUIOutput = Join-Path $hostOutput "WinUI\$Platform\$Configuration\LightHost.WinUI"
-$winUIOutput = Join-Path $hostWinUIOutput "LightHostWinUI.exe"
+$hostWinUIOutput = Join-Path $hostOutput "WinUI\$Platform\$Configuration\LightHostModern.WinUI"
+$winUIOutput = Join-Path $hostWinUIOutput "LightHostModernWinUI.exe"
 
-if (!(Test-Path -LiteralPath (Join-Path $builtWinUIOutput "LightHostWinUI.exe"))) {
+if (!(Test-Path -LiteralPath (Join-Path $builtWinUIOutput "LightHostModernWinUI.exe"))) {
     throw "Built WinUI output was not found: $builtWinUIOutput"
 }
 
@@ -1259,18 +571,18 @@ if (!(Test-Path -LiteralPath $winUIOutput)) {
 }
 
 New-Directory -Path $stageRoot
-if (!(Test-Path -LiteralPath (Join-Path $hostOutput 'LightHostScanner.exe'))) {
-    throw 'LightHostScanner.exe is missing from the host build output.'
+if (!(Test-Path -LiteralPath (Join-Path $hostOutput 'LightHostModernScanner.exe'))) {
+    throw 'LightHostModernScanner.exe is missing from the host build output.'
 }
-if (!(Test-Path -LiteralPath (Join-Path $hostOutput 'LightHostUpdateHelper.exe'))) { throw 'LightHostUpdateHelper.exe is missing from the host build output.' }
-foreach ($releaseExecutable in @($hostExe, $winUIOutput, (Join-Path $hostOutput 'LightHostScanner.exe'), (Join-Path $hostOutput 'LightHostUpdateHelper.exe'))) {
+if (!(Test-Path -LiteralPath (Join-Path $hostOutput 'LightHostModernUpdateHelper.exe'))) { throw 'LightHostModernUpdateHelper.exe is missing from the host build output.' }
+foreach ($releaseExecutable in @($hostExe, $winUIOutput, (Join-Path $hostOutput 'LightHostModernScanner.exe'), (Join-Path $hostOutput 'LightHostModernUpdateHelper.exe'))) {
     $versionInfo = (Get-Item -LiteralPath $releaseExecutable).VersionInfo
     if ($versionInfo.ProductVersion -ne $appVersion -or $versionInfo.FileVersion -ne $appVersion) {
         throw "Executable version does not match release ${appVersion}: $releaseExecutable (product: $($versionInfo.ProductVersion), file: $($versionInfo.FileVersion)). Rebuild before packaging."
     }
 }
 New-Item -ItemType Directory -Force -Path $outRoot | Out-Null
-foreach ($name in $exeName, 'LightHostScanner.exe', 'LightHostUpdateHelper.exe', 'WinUI') {
+foreach ($name in $exeName, 'LightHostModernScanner.exe', 'LightHostModernUpdateHelper.exe', 'Light Host Modern.exe', 'LightHostScanner.exe', 'LightHostUpdateHelper.exe', 'LightHostWinUI.exe', 'WinUI') {
     Copy-Item -LiteralPath (Join-Path $hostOutput $name) -Destination $stageRoot -Recurse -Force
 }
 foreach ($name in 'LICENSE', 'README.md') {
@@ -1286,10 +598,10 @@ Copy-VCRuntime -Destination $stageRoot
 if (![string]::IsNullOrWhiteSpace($SigningThumbprint)) {
     $signTargets = @(
         (Join-Path $stageRoot $exeName),
-        (Join-Path $stageRoot "LightHostScanner.exe"),
-        (Join-Path $stageRoot "LightHostUpdateHelper.exe"),
-        (Join-Path $stageRoot "WinUI\x64\$Configuration\LightHost.WinUI\LightHostWinUI.exe"),
-        (Join-Path $stageRoot "WinUI\x64\$Configuration\LightHost.WinUI\RestartAgent.exe")
+        (Join-Path $stageRoot "LightHostModernScanner.exe"),
+        (Join-Path $stageRoot "LightHostModernUpdateHelper.exe"),
+        (Join-Path $stageRoot "WinUI\x64\$Configuration\LightHostModern.WinUI\LightHostModernWinUI.exe"),
+        (Join-Path $stageRoot "WinUI\x64\$Configuration\LightHostModern.WinUI\RestartAgent.exe")
     )
     foreach ($signTarget in $signTargets) {
         if (Test-Path -LiteralPath $signTarget) {
@@ -1307,19 +619,29 @@ $releaseInfo = [ordered]@{
     platform = $Platform
     builtAtUtc = (Get-Date).ToUniversalTime().ToString("o")
     entryPoint = $exeName
-    uiSha256 = (Get-FileHash -LiteralPath (Join-Path $stageRoot "WinUI\x64\$Configuration\LightHost.WinUI\LightHostWinUI.exe") -Algorithm SHA256).Hash
+    uiSha256 = (Get-FileHash -LiteralPath (Join-Path $stageRoot "WinUI\x64\$Configuration\LightHostModern.WinUI\LightHostModernWinUI.exe") -Algorithm SHA256).Hash
 }
 
 $releaseInfo | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stageRoot "release-info.json") -Encoding UTF8
 
 $forbidden = @(Get-ChildItem -LiteralPath $stageRoot -Recurse -File | Where-Object {
-    $_.Extension -in '.vst3', '.vst', '.clap' -or $_.Name -match 'Dragonfly|LightHost.*Tests|Fixture' -or $_.FullName -match '[\\/](fixtures|test-profiles|Tests)[\\/]'
+    $_.Extension -in '.vst3', '.vst', '.clap' -or $_.Name -match 'Dragonfly|LightHostModern.*Tests|Fixture' -or $_.FullName -match '[\\/](fixtures|test-profiles|Tests)[\\/]'
 })
 if ($forbidden.Count) { throw "Test files or third-party plugin fixtures found in payload: $($forbidden.FullName -join ', ')" }
 
 if (Test-Path -LiteralPath $portableZip) {
     Remove-Item -LiteralPath $portableZip -Force
 }
+
+# Explicit legacy payload allowlist. No wildcard or recursive removal at install time.
+$legacyFiles = @(Get-ChildItem -LiteralPath $stageRoot -File -Recurse | ForEach-Object {
+    $relative = $_.FullName.Substring($stageRoot.Length + 1).Replace('\', '/')
+    $relative.Replace('LightHostModern.WinUI', 'LightHost.WinUI').Replace('LightHostModernWinUI', 'LightHostWinUI').Replace('LightHostModernScanner', 'LightHostScanner').Replace('LightHostModernUpdateHelper', 'LightHostUpdateHelper').Replace('LightHostModern.exe', 'Light Host Modern.exe')
+} | Sort-Object -Unique)
+# This installer-owned file was created after extracting the 1.2.x ZIP, so it
+# is absent from the application payload inventory. Back it up; never run it.
+$legacyFiles = @($legacyFiles + 'Uninstall-LightHostModern.ps1' | Sort-Object -Unique)
+ConvertTo-Json -InputObject $legacyFiles | Set-Content -LiteralPath (Join-Path $stageRoot 'legacy-payload-files.json') -Encoding UTF8
 
 Compress-Archive -Path (Join-Path $stageRoot "*") -DestinationPath $portableZip -Force
 
@@ -1336,11 +658,13 @@ if (Test-Path -LiteralPath $legacyInstallerExe) {
 
 New-WixMsiPackage -SourceDir $stageRoot -WorkDir $installerWork -TargetMsi $installerMsi -IconPath $releaseIcon
 Sign-ReleaseFile -Path $installerMsi
+Copy-Item -LiteralPath $installerMsi -Destination $installerAlias -Force
+if ((Get-FileHash -LiteralPath $installerMsi).Hash -ne (Get-FileHash -LiteralPath $installerAlias).Hash) { throw "Installer compatibility alias differs" }
 
-$artifactMetadata = foreach ($pair in @(@($installerMsi, 'installed'), @($portableZip, 'portable'))) {
+$artifactMetadata = foreach ($pair in @(@($installerMsi, 'installed'), @($installerAlias, 'installed'), @($portableZip, 'portable'))) {
     $file = Get-Item -LiteralPath $pair[0]
     $digest = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-    & (Join-Path $hostOutput 'LightHostUpdateHelper.exe') --mode validate --operation $outRoot --package $file.FullName --version $appVersion --size $file.Length --sha256 $digest --distribution $pair[1]
+    & (Join-Path $hostOutput 'LightHostModernUpdateHelper.exe') --mode validate --operation $outRoot --package $file.FullName --version $appVersion --size $file.Length --sha256 $digest --distribution $pair[1]
     if ($LASTEXITCODE -ne 0) { throw "Package inspection failed: $(Get-Content -LiteralPath (Join-Path $outRoot 'update-result.json') -Raw)" }
     [ordered]@{ name = $file.Name; version = $appVersion; architecture = $Platform; distribution = $pair[1]; size = $file.Length; digest = "sha256:$digest" }
 }

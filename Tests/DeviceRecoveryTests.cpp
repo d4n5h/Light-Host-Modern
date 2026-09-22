@@ -2,7 +2,7 @@
 #include "GuardedAudioDeviceManager.h"
 #include "ScenarioRunner.h"
 
-void lightHostLog(const juce::String&) {}
+void lightHostModernLog(const juce::String&) {}
 
 namespace
 {
@@ -91,7 +91,7 @@ struct Scenario
     DeviceController controller{manager, settings, {}, {}, [this] { return now; }};
     Scenario(const String& mode)
     {
-        manager.policy = [this](const auto& backend, const auto& in, const auto& out) { return controller.isAudioDeviceChoiceAllowed(backend, in, out); };
+        manager.policy = [this](const auto& backend, const auto& in, const auto& out) { return controller.isAudioDeviceCreationAllowed(backend, in, out); };
         settings.setValue("audioPersistenceMode", mode);
         settings.setValue("audioPersistenceRetrySeconds", 1);
         settings.setValue("audioPersistenceRetryAttempts", 3);
@@ -110,6 +110,18 @@ int main()
 {
     using scenarios::require;
     scenarios::Runner tests;
+    tests.run("disabled never substitutes an available device for the saved missing one", [] {
+        Scenario scenario("disabled");
+        XmlElement state("DEVICESETUP"); state.setAttribute("deviceType", "Simulated");
+        state.setAttribute("audioInputDeviceName", "Missing"); state.setAttribute("audioOutputDeviceName", "Missing");
+        scenario.settings.setValue("audioDeviceState", &state);
+        scenario.controller.start(false, false);
+        require(!scenario.manager.getCurrentAudioDevice(), "Missing selection fell back to default");
+        const auto attempts = scenario.manager.hardware.creations;
+        for (int i=0;i<20;++i) scenario.advance();
+        require(scenario.manager.hardware.creations <= attempts + 1 && scenario.manager.hardware.opens == 0,"Disabled kept retrying or opened a replacement");
+        require(!scenario.controller.isAudioDeviceCreationAllowed("Simulated", "A", "A"), "Internal fallback policy admitted another device");
+    });
     tests.run("all modes preserve explicit suspension and never open blocked drivers", [] {
         for (const auto mode : {"disabled", "lastSelected", "custom"})
         {
@@ -210,10 +222,10 @@ int main()
         selected.setup.useDefaultInputChannels = selected.setup.useDefaultOutputChannels = false;
         selected.setup.sampleRate = 96000; selected.setup.bufferSize = 64;
         selected.expectedGeneration = scenario.controller.getGeneration();
-        auto value = lightHost::audioSelection::setupJson(selected.backend, selected.setup);
+        auto value = lightHostModern::audioSelection::setupJson(selected.backend, selected.setup);
         value.getDynamicObject()->setProperty("expectedGeneration", String(selected.expectedGeneration));
         AudioDeviceSelection parsed;
-        require(lightHost::audioSelection::parse(value, parsed), "Complete named request was rejected");
+        require(lightHostModern::audioSelection::parse(value, parsed), "Complete named request was rejected");
         require(scenario.controller.selectConfiguration(parsed), "Named selection failed");
         const auto result = scenario.controller.selectionState();
         require(result["configured"]["input"].toString() == "B" && result["effective"]["output"].toString() == "A", "Names or direction were changed");
@@ -223,7 +235,7 @@ int main()
         require(!scenario.controller.selectConfiguration(parsed) && scenario.manager.hardware.creations == calls && scenario.manager.hardware.opens == opens,
             "Stale generation accessed a driver");
         value.getDynamicObject()->setProperty("inputMask", String::repeatedString("1", 257));
-        require(!lightHost::audioSelection::parse(value, parsed), "More than 256 channels were accepted");
+        require(!lightHostModern::audioSelection::parse(value, parsed), "More than 256 channels were accepted");
         selected.expectedGeneration = scenario.controller.getGeneration();
         selected.setup.useDefaultInputChannels = selected.setup.useDefaultOutputChannels = true;
         selected.setup.inputChannels.clear(); selected.setup.outputChannels.clear();
@@ -246,7 +258,11 @@ int main()
     });
     tests.run("opening a suspended backend resets obsolete default channel requirements", [] {
         Scenario scenario("disabled");
+        // Seed JUCE's obsolete defaults before installing the controller guard.
+        const auto strictPolicy = scenario.manager.policy;
+        scenario.manager.policy = [](const auto&, const auto&, const auto&) { return true; };
         require(scenario.manager.initialise(0, 2, nullptr, false).isEmpty(), "Could not seed an output-only manager");
+        scenario.manager.policy = strictPolicy;
         scenario.manager.closeAudioDevice(); scenario.controller.start(false, true);
         AudioDeviceSelection selected; selected.backend = "Simulated";
         selected.setup.inputDeviceName = selected.setup.outputDeviceName = "A";
@@ -286,6 +302,26 @@ int main()
         const auto calls = scenario.manager.hardware.creations;
         for (int i = 0; i < 5; ++i) scenario.advance();
         require(calls == scenario.manager.hardware.creations && scenario.settings.getBoolValue("audioSelectionSuspended"), "Explicit None restarted automatically");
+    });
+    tests.run("mono and UI preferences follow device identity rather than active channel masks", [] {
+        Scenario scenario("disabled"); scenario.controller.start(false, true);
+        AudioDeviceSelection selected; selected.backend = "Simulated";
+        selected.setup.inputDeviceName = selected.setup.outputDeviceName = "A";
+        selected.setup.inputChannels = selected.setup.outputChannels = BigInteger(3);
+        selected.setup.useDefaultInputChannels = selected.setup.useDefaultOutputChannels = false;
+        const auto apply = [&] { selected.expectedGeneration = scenario.controller.getGeneration(); return scenario.controller.selectConfiguration(selected); };
+        require(apply(), "Device A did not open");
+        const auto inputKey = scenario.controller.monoInputsKey(), outputKey = scenario.controller.monoOutputKey();
+        require(inputKey.isNotEmpty() && outputKey.isNotEmpty() && inputKey != outputKey, "Mono controls share a preference");
+        scenario.settings.setValue(outputKey, true);
+        require(static_cast<bool>(scenario.controller.selectionState()["mainOutputPairActive"]), "Principal pair not detected");
+        selected.setup.outputChannels = BigInteger(5); require(apply(), "Sparse outputs did not open");
+        require(!static_cast<bool>(scenario.controller.selectionState()["mainOutputPairActive"]), "Output 3 was mistaken for output 2");
+        require(scenario.controller.monoOutputKey() == outputKey && scenario.controller.selectionState()["preferenceKey"].toString() == inputKey, "Channel mask changed preference identity");
+        selected.setup.inputDeviceName = selected.setup.outputDeviceName = "B"; require(apply(), "Device B did not open");
+        require(scenario.controller.monoOutputKey() != outputKey && !scenario.settings.getBoolValue(scenario.controller.monoOutputKey(), false), "New device inherited mono");
+        selected.setup.inputDeviceName = selected.setup.outputDeviceName = "A"; require(apply(), "Device A did not reopen");
+        require(scenario.settings.getBoolValue(scenario.controller.monoOutputKey(), false), "Returning to device lost preference");
     });
     return tests.result();
 }

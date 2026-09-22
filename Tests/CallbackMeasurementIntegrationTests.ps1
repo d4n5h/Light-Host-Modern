@@ -12,7 +12,7 @@ function Mutate([string]$Command,[array]$Arguments=@()) {
     Wait-HostOperation $script:pipe (Send-HostRequest $script:pipe $Command $Arguments -Session $script:hostSession)
 }
 try {
-    $process=Start-Process -FilePath "$repo\out\build\windows-vs2022\LightHost_artefacts\Release\Light Host Modern.exe" -ArgumentList @("--test-profile=$name",('--profile-root="'+$root+'"')) -WindowStyle Hidden -PassThru
+    $process=Start-Process -FilePath "$repo\out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe" -ArgumentList @("--test-profile=$name",('--profile-root="'+$root+'"')) -WindowStyle Hidden -PassThru
     $metadata=Join-Path $profile 'profile.json'
     $deadline=[DateTime]::UtcNow.AddSeconds(30)
     while (!(Test-Path -LiteralPath $metadata)) {

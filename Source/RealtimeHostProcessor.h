@@ -112,15 +112,20 @@ public:
 	void setDiagnosticsEnabled(bool enabled);
 	bool setGlobalMuted(bool value) { return globalControls.setMuted(value); }
 	bool setGlobalBypassed(bool value) { return globalControls.setBypassed(value); }
-	bool isGlobalMuted() const { return globalControls.isMuted(); }
+	void setMonoInputs(bool value) noexcept { monoInputs.store(value, std::memory_order_relaxed); }
+    bool isMonoInputs() const noexcept { return monoInputs.load(std::memory_order_relaxed); }
+    void setMonoOutput(bool value) noexcept { monoOutput.store(value, std::memory_order_relaxed); }
+    bool isMonoOutput() const noexcept { return monoOutput.load(std::memory_order_relaxed); }
+    void configureOutputChannels(const BigInteger& physicalChannels);
+    bool isGlobalMuted() const { return globalControls.isMuted(); }
 	bool isGlobalBypassed() const { return globalControls.isBypassed(); }
-	lightHost::MeterSnapshot getInputMeters() const noexcept { return inputMeters.snapshot(); }
-	lightHost::MeterSnapshot getOutputMeters() const noexcept { return outputMeters.snapshot(); }
+	lightHostModern::MeterSnapshot getInputMeters() const noexcept { return inputMeters.snapshot(); }
+	lightHostModern::MeterSnapshot getOutputMeters() const noexcept { return outputMeters.snapshot(); }
 	// Read by the meter transport without touching the driver or controller.
 	std::pair<float, float> getMeterPeaks() const noexcept
 	{
 		if (processingSuspended.load(std::memory_order_acquire)) return {0.0f, 0.0f};
-		return {lastInputLevel.load(std::memory_order_relaxed), lastOutputLevel.load(std::memory_order_relaxed)};
+		return {inputPresentation.read(), outputPresentation.read()};
 	}
 	void resetClipping(bool input, bool output, int channel = -1) noexcept
 	{ if (input) inputMeters.resetClipping(channel); if (output) outputMeters.resetClipping(channel); }
@@ -128,7 +133,7 @@ public:
 	double getCurrentSampleRateForPlugins() const { std::lock_guard<std::recursive_mutex> lock(controlMutex); return currentSampleRate; }
 	int getCurrentBlockSizeForPlugins() const { std::lock_guard<std::recursive_mutex> lock(controlMutex); return currentBlockSize; }
 
-	const String getName() const override { return "Light Host Modern Serial Chain"; }
+	const String getName() const override { return "LightHostModern Serial Chain"; }
 	void prepareToPlay(double sampleRate, int maximumExpectedSamplesPerBlock) override;
 	void releaseResources() override;
 	bool isBusesLayoutSupported(const BusesLayout& layout) const override
@@ -172,7 +177,7 @@ private:
 	std::atomic<uint64> processFailureCount { 0 };
 	std::atomic<uint64> midiOverflowCount { 0 };
 	std::atomic<uint64> processedBlocks { 0 }, processedSamples { 0 }, inputMidiEvents { 0 }, outputMidiEvents { 0 };
-	lightHost::AudioMeters inputMeters, outputMeters;
+	lightHostModern::AudioMeters inputMeters, outputMeters;
 	std::atomic<bool> midiStorageNeedsRepair { false };
 	std::atomic<float> lastInputLevel { 0.0f };
 	std::atomic<float> lastOutputLevel { 0.0f };
@@ -182,9 +187,16 @@ private:
 	std::array<AudioBuffer<float>, maxScratchChannels + 1> segmentViews;
 	std::array<AudioBuffer<float>, maxScratchChannels + 1> expandedViews;
 	MidiBuffer segmentMidi, filteredMidi, outputMidi;
-	static constexpr int midiCapacity = lightHost::midiCapacityBytes;
+	static constexpr int midiCapacity = lightHostModern::midiCapacityBytes;
 	MidiBuffer* preparedMidiDestination = nullptr;
-	int preparedHostChannels = 2;
+	int preparedHostChannels = 2, preparedInputChannels = 2;
+    int preparedOutputChannels = 2, mainOutputLeft = 0, mainOutputRight = 1;
+    std::atomic<bool> monoOutput{false};
+    float outputMonoMix = 0.0f;
+    std::atomic<bool> monoInputs{false};
+    float monoMix = 0.0f;
+    std::vector<float> monoGains;
+    lightHostModern::PresentationPeak inputPresentation, outputPresentation;
 	mutable std::recursive_mutex controlMutex;
 	std::atomic<bool> processingSuspended { false };
 	std::atomic<unsigned> callbacksInFlight { 0 };

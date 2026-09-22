@@ -97,7 +97,7 @@ try {
         $current=Snapshot
         Send-HostRequest $script:info.pipe 'quit-host' -Session $current.hostSession | Out-Null
         Get-Process -Id $script:info.hostPid -ErrorAction SilentlyContinue | Wait-Process -Timeout 15
-        $hostProcess=Start-Process -FilePath "$repo\out\build\windows-vs2022\LightHost_artefacts\Release\Light Host Modern.exe" -ArgumentList @("--test-profile=$($script:info.name)", ('--profile-root="'+$script:info.root+'"')) -WindowStyle Hidden -PassThru
+        $hostProcess=Start-Process -FilePath "$repo\out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe" -ArgumentList @("--test-profile=$($script:info.name)", ('--profile-root="'+$script:info.root+'"')) -WindowStyle Hidden -PassThru
         $script:info.hostPid=$hostProcess.Id
         $script:info | ConvertTo-Json | Set-Content $metadata -Encoding UTF8
         $deadline=[DateTime]::UtcNow.AddSeconds(15)

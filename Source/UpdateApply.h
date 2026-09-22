@@ -2,7 +2,7 @@
 #include "UpdateContract.h"
 #include <chrono>
 
-namespace lightHost::update
+namespace lightHostModern::update
 {
 struct ApplyEnvironment
 {

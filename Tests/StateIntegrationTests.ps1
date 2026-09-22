@@ -1,4 +1,4 @@
-param([string] $HostExecutable = "$PSScriptRoot\..\out\build\windows-vs2022\LightHost_artefacts\Release\Light Host Modern.exe")
+param([string] $HostExecutable = "$PSScriptRoot\..\out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe")
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\HostProtocol.ps1"
 $repo = (Resolve-Path -LiteralPath "$PSScriptRoot\..").Path
@@ -6,7 +6,7 @@ $root = Join-Path $repo 'out\test-profiles'
 $name = 'state-' + [guid]::NewGuid().ToString('N')
 $directory = Join-Path $root $name
 New-Item -ItemType Directory -Path $directory -Force | Out-Null
-rtk proxy "$repo\out\build\windows-vs2022\Release\LightHostPluginInstanceTests.exe" --write-legacy-fixture (Join-Path $directory 'Light Host Modern.settings')
+rtk proxy "$repo\out\build\windows-vs2022\Release\LightHostModernPluginInstanceTests.exe" --write-legacy-fixture (Join-Path $directory 'LightHostModern.settings')
 if ($LASTEXITCODE -ne 0) { throw 'Fixture failed.' }
 $process = $null
 $eventPipe = $null

@@ -1,8 +1,9 @@
 #include "UpdatePackage.h"
 #include "UpdateApply.h"
+#include "LegacyInstallMigration.h"
 #include <shellapi.h>
 
-using namespace lightHost::update;
+using namespace lightHostModern::update;
 namespace
 {
 void writeResult(const std::filesystem::path& directory, const std::string& state, uint32_t code = 0,
@@ -53,6 +54,11 @@ int main(int argc, char** argv)
 {
     (void)argc; (void)argv;
     int count = 0; auto* command = CommandLineToArgvW(GetCommandLineW(), &count);
+    if (command && count == 2 && std::wstring(command[1]) == L"--migrate-legacy-install") {
+        LocalFree(command);
+        try { return lightHostModern::migration::run(processPath(GetCurrentProcess()).parent_path()); }
+        catch (...) { return 1; }
+    }
     std::map<std::wstring, std::wstring> options;
     for (int index = 1; command && index + 1 < count; index += 2) options.emplace(command[index], command[index + 1]);
     if (command) LocalFree(command);
@@ -65,7 +71,7 @@ int main(int argc, char** argv)
         Artifact artifact;
         require(options[L"--distribution"] == L"installed" || options[L"--distribution"] == L"portable", "invalid_arguments");
         artifact.distribution = options[L"--distribution"] == L"installed" ? Distribution::installed : Distribution::portable;
-        artifact.name = artifactName(artifact.distribution); artifact.version = options[L"--version"];
+        artifact.name = std::filesystem::path(options[L"--package"]).filename().wstring(); artifact.version = options[L"--version"];
         artifact.digest = options[L"--sha256"]; artifact.bytes = std::stoull(options[L"--size"]);
         artifact.url = L"https://github.com/heide-oficial/Light-Host-Modern/releases/download/" + artifact.version + L"/" + artifact.name;
         FileInput lock(package); // Keep this handle until Windows Installer has completed.
@@ -76,11 +82,11 @@ int main(int argc, char** argv)
         environment.operation = operation; environment.package = package;
         environment.host = processHandle(static_cast<DWORD>(std::stoul(options[L"--host-pid"])), std::stoull(options[L"--host-created"]));
         environment.ui = processHandle(static_cast<DWORD>(std::stoul(options[L"--ui-pid"])), std::stoull(options[L"--ui-created"]));
-        require(processPath(environment.host.value).filename() == L"Light Host Modern.exe"
-            && processPath(environment.ui.value).filename() == L"LightHostWinUI.exe", "process_mismatch");
+        require(processPath(environment.host.value).filename() == L"LightHostModern.exe"
+            && processPath(environment.ui.value).filename() == L"LightHostModernWinUI.exe", "process_mismatch");
         require(detectDistribution(processPath(environment.host.value)) == Distribution::installed, "distribution_mismatch");
         const auto events = options[L"--events"];
-        require(events.rfind(L"Local\\LightHostUpdate-", 0) == 0 && events.size() <= 100, "invalid_arguments");
+        require(events.rfind(L"Local\\LightHostModernUpdate-", 0) == 0 && events.size() <= 100, "invalid_arguments");
         environment.armEvent = Handle(OpenEventW(SYNCHRONIZE, FALSE, (events + L"-arm").c_str()));
         environment.cancelEvent = Handle(OpenEventW(SYNCHRONIZE, FALSE, (events + L"-cancel").c_str()));
         Handle ready(OpenEventW(EVENT_MODIFY_STATE, FALSE, (events + L"-ready").c_str()));

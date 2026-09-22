@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace lightHost::ipc
+namespace lightHostModern::ipc
 {
 enum class OperationState { queued, running, completed, failed, cancelled };
 inline const char* stateName(OperationState state)

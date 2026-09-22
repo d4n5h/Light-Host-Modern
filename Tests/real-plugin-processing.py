@@ -39,7 +39,7 @@ def main():
         if not archive.exists():
             if not args.download:
                 raise RuntimeError(f'Missing {filename}; use --download to fetch the official fixture')
-            request = urllib.request.Request(source, headers={'User-Agent': 'LightHost-plugin-validation/1.2.2'})
+            request = urllib.request.Request(source, headers={'User-Agent': 'LightHostModern-plugin-validation/1.2.2'})
             with urllib.request.urlopen(request, timeout=30) as response:
                 archive.write_bytes(response.read())
         if hashlib.sha256(archive.read_bytes()).hexdigest() != digest:
@@ -61,7 +61,7 @@ def main():
     modules = [module for module in modules if args.match in module.name and module.name not in args.exclude]
     if not modules:
         raise RuntimeError('No fixture matched')
-    executable = REPO / 'out/build/windows-vs2022/Release/LightHostRealPluginTests.exe'
+    executable = REPO / 'out/build/windows-vs2022/Release/LightHostModernRealPluginTests.exe'
     environment = os.environ.copy()
     overrides = {}
     if args.vmware_no_llvmpipe:

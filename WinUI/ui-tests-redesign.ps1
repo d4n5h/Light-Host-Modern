@@ -1,4 +1,4 @@
-﻿# Focused visual/interaction validation against Tests/UiRedesignFakeHost.py.
+# Focused visual/interaction validation against Tests/UiRedesignFakeHost.py.
 # The fixture supplies known meter levels without opening any audio device.
 param([Parameter(Mandatory)][string]$ProfileInfo,
       [Parameter(Mandatory)][string]$OutputDirectory)
@@ -24,7 +24,7 @@ function UI([string[]]$Arguments) {
     }
     return $parsed
 }
-$window=(UI @('list-windows') | Where-Object { $_.title.StartsWith('Light Host Modern [Test:') } | Select-Object -First 1).hwnd
+$window=(UI @('list-windows') | Where-Object { $_.title.StartsWith('LightHostModern [Test:') } | Select-Object -First 1).hwnd
 if (!$window) { throw 'Test window missing.' }
 function Page([string]$Name) {
     UI @('click',('Nav'+$Name)) | Out-Null

@@ -1,7 +1,7 @@
 #pragma once
 #include "PluginInstances.h"
 
-namespace lightHost
+namespace lightHostModern
 {
 // A catalogue alias belongs to the stable module/class identity, never its name
 // or current scan position. JUCE descriptions and processor state stay original.

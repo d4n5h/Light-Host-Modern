@@ -1,0 +1,8 @@
+namespace LightHostModernWinUI
+{
+    [default_interface]
+    runtimeclass DatabasePageView : Microsoft.UI.Xaml.Controls.UserControl
+    {
+        DatabasePageView();
+    }
+}

@@ -5,7 +5,7 @@
 #include <iostream>
 #include <thread>
 
-using namespace lightHost::ipc;
+using namespace lightHostModern::ipc;
 using namespace std::chrono_literals;
 
 static void require(bool condition, const char* message)
@@ -55,7 +55,7 @@ static void lifetimeTests()
 
 static void pipeTests()
 {
-    const auto name = L"\\\\.\\pipe\\LightHost-test-" + std::to_wstring(GetCurrentProcessId());
+    const auto name = L"\\\\.\\pipe\\LightHostModern-test-" + std::to_wstring(GetCurrentProcessId());
     Handle server(CreateNamedPipeW(name.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
         PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
         1, 4096, 4096, 1000, nullptr));

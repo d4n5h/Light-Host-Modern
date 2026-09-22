@@ -4,7 +4,7 @@
 
 int main()
 {
-    using namespace lightHost::ipc;
+    using namespace lightHostModern::ipc;
     using scenarios::require;
     scenarios::Runner runner;
     auto clock = OperationRegistry::Clock::time_point{};

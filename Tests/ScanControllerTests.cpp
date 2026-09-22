@@ -34,7 +34,7 @@ static bool createTestJunction(const File& link, const File& target)
     header.printLength = static_cast<WORD>(print.size() * sizeof(wchar_t));
     std::memcpy(data.data() + sizeof(Header), substitute.c_str(), (substitute.size() + 1) * sizeof(wchar_t));
     std::memcpy(data.data() + sizeof(Header) + header.printOffset, print.c_str(), (print.size() + 1) * sizeof(wchar_t));
-    lightHost::ipc::Handle directory(CreateFileW(link.getFullPathName().toWideCharPointer(), GENERIC_WRITE, 0, nullptr,
+    lightHostModern::ipc::Handle directory(CreateFileW(link.getFullPathName().toWideCharPointer(), GENERIC_WRITE, 0, nullptr,
         OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr));
     DWORD returned = 0;
     return directory && DeviceIoControl(directory.get(), FSCTL_SET_REPARSE_POINT, data.data(), static_cast<DWORD>(data.size()), nullptr, 0, &returned, nullptr);
@@ -105,7 +105,7 @@ int main()
         const File output { String(arguments[2]) };
         LocalFree(arguments);
         if (!request) return 2;
-        if (request->getStringAttribute("mode") == "enumerate") return lightHost::scan::enumerate(*request, output, [](const String& root) {
+        if (request->getStringAttribute("mode") == "enumerate") return lightHostModern::scan::enumerate(*request, output, [](const String& root) {
             if (root.contains("enum-hang")) Sleep(INFINITE);
             return root.contains("denied-fixture") ? String("access_denied") : String();
         });
@@ -113,7 +113,7 @@ int main()
         if (path.contains("hang")) { Sleep(INFINITE); return 3; }
         if (path.contains("crash")) { TerminateProcess(GetCurrentProcess(), 44); return 44; }
         XmlElement response("SCAN");
-        response.setAttribute("version", lightHost::scan::scannerProtocolVersion);
+        response.setAttribute("version", lightHostModern::scan::scannerProtocolVersion);
         response.setAttribute("mode", "probe");
         response.setAttribute("fingerprint", request->getStringAttribute("fingerprint"));
         response.setAttribute("id", path.contains("bad") ? "incorrect" : request->getStringAttribute("id"));
@@ -134,7 +134,7 @@ int main()
             plugin.deprecatedUid = i + 1;
             plugin.numInputChannels = plugin.numOutputChannels = 2;
             auto* entry = response.createNewChildElement("ENTRY");
-            entry->setAttribute("knownId", lightHost::knownPluginId(plugin));
+            entry->setAttribute("knownId", lightHostModern::knownPluginId(plugin));
             entry->setAttribute("verifiedMetadata", "verified");
             entry->setAttribute("declaredMetadata", "unavailable");
             if (path.contains("partial") && i == 1) entry->setAttribute("error", "identity_changed");
@@ -150,7 +150,7 @@ int main()
         return response.writeTo(output) ? 0 : 4;
     }
     if (arguments) LocalFree(arguments);
-    const auto root = File::getSpecialLocation(File::tempDirectory).getChildFile("LightHostScanTest-" + Uuid().toString());
+    const auto root = File::getSpecialLocation(File::tempDirectory).getChildFile("LightHostModernScanTest-" + Uuid().toString());
     const StringArray names { "a-multi.dll", "b-one.dll", "c-bad.dll", "d-crash.dll", "z-hang.dll" };
     struct Cleanup {
         File root; StringArray names;
@@ -187,7 +187,7 @@ int main()
         require(status.completed == 5 && status.failures.size() == 3, "per-file crash/hang/malformed errors");
         auto plugins = controller.takeResults();
         require(plugins.size() == 3, "validate multiple plugins from a single module");
-        const auto busMetadata = XmlDocument::parse(controller.metadata(lightHost::knownPluginId(plugins.front())));
+        const auto busMetadata = XmlDocument::parse(controller.metadata(lightHostModern::knownPluginId(plugins.front())));
         require(busMetadata && busMetadata->getChildByName("BUS") && busMetadata->getStringAttribute("verifiedMetadata") == "verified",
             "verified bus metadata unavailable");
         Array<PluginDescription> known;
@@ -298,7 +298,7 @@ int main()
             // A nonexistent share on this machine exercises the actual UNC
             // filesystem path without contacting another machine or changing
             // network configuration. A blocked redirector remains job-bounded.
-            const File missingShare(String("\\\\localhost\\LightHostScanAbsent-") + Uuid().toString());
+            const File missingShare(String("\\\\localhost\\LightHostModernScanAbsent-") + Uuid().toString());
             require(controller.begin(), "begin unavailable UNC scenario");
             FileSearchPath paths; paths.add(root.getChildFile("a-multi.dll")); paths.add(missingShare);
             paths.add(root.getChildFile("b-one.dll"));
@@ -348,7 +348,7 @@ int main()
                 } restore {path, previous, restoreError};
                 std::error_code error;
                 std::filesystem::directory_iterator iterator(std::filesystem::path(path), error);
-                require(error && lightHost::scan::filesystemFailure(error) == "access_denied", "NTFS must actually reject enumeration");
+                require(error && lightHostModern::scan::filesystemFailure(error) == "access_denied", "NTFS must actually reject enumeration");
                 require(controller.begin(), "begin actual access-denied scan");
                 FileSearchPath paths; paths.add(directory); paths.add(root.getChildFile("b-one.dll"));
                 controller.enqueue(paths, "VST", {}, true);
@@ -362,9 +362,9 @@ int main()
             std::error_code error;
             std::filesystem::directory_iterator readable(std::filesystem::path(path), error);
             require(!error, "fixture permissions were not restored");
-            require(lightHost::scan::filesystemFailure(std::make_error_code(std::errc::io_error)) == "enumeration",
+            require(lightHostModern::scan::filesystemFailure(std::make_error_code(std::errc::io_error)) == "enumeration",
                 "generic I/O error was mistaken for a Win32 access-denied code");
-            require(lightHost::scan::filesystemFailure(std::error_code(ERROR_BAD_NETPATH, std::system_category())) == "network_unavailable",
+            require(lightHostModern::scan::filesystemFailure(std::error_code(ERROR_BAD_NETPATH, std::system_category())) == "network_unavailable",
                 "Win32 network failure was not distinguished");
         }
         {

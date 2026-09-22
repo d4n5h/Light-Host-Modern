@@ -18,10 +18,10 @@ $repo=(Resolve-Path -LiteralPath "$PSScriptRoot\..").Path
 $root=Join-Path $repo 'out\test-profiles'
 $protocol=if ($Variant -eq 'baseline') { 3 } else { 4 }
 $comparison=[IO.Path]::GetFullPath((Join-Path $repo $ComparisonDirectory))
-$hostExe=if ($Variant -eq 'baseline') { Join-Path $comparison 'bld\LightHost_artefacts\Release\Light Host Modern.exe' } else { Join-Path $repo 'out\build\windows-vs2022\LightHost_artefacts\Release\Light Host Modern.exe' }
-$uiDirectory=Join-Path $repo 'WinUI\x64\Release\LightHost.WinUI'
-$baselineUi=Join-Path $repo 'out\baselines\completion-20260908-release\host\WinUI\x64\Release\LightHost.WinUI'
-$profileFiles=@((Join-Path $env:APPDATA 'Light Host Modern\Light Host Modern.settings'),(Join-Path $env:LOCALAPPDATA 'LightHostModern\ui-settings.ini'))
+$hostExe=if ($Variant -eq 'baseline') { Join-Path $comparison 'bld\LightHostModern_artefacts\Release\LightHostModern.exe' } else { Join-Path $repo 'out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe' }
+$uiDirectory=Join-Path $repo 'WinUI\x64\Release\LightHostModern.WinUI'
+$baselineUi=Join-Path $repo 'out\baselines\completion-20260908-release\host\WinUI\x64\Release\LightHostModern.WinUI'
+$profileFiles=@((Join-Path $env:APPDATA 'LightHostModern\LightHostModern.settings'),(Join-Path $env:LOCALAPPDATA 'LightHostModern\ui-settings.ini'))
 $profileFiles+=@('','.bak','.pending','.backup-pending' | ForEach-Object { $profileFiles[0]+'.session.json'+$_ })
 $profileFiles+=@('.pre-session.bak','.pre-session.bak.pending' | ForEach-Object { $profileFiles[0]+$_ })
 function Production-Files {
@@ -39,14 +39,14 @@ if ($Variant -eq 'baseline') {
     }
     $uiDirectory=Join-Path $comparison 'ui'
     if (!(Test-Path -LiteralPath $uiDirectory)) { Copy-Item -LiteralPath $baselineUi -Destination $uiDirectory -Recurse }
-    if ((Get-FileHash -LiteralPath (Join-Path $uiDirectory 'LightHostWinUI.exe') -Algorithm SHA256).Hash -ne '18001958FB6B5961ECFE1EDE143573DA71452BE232C9C80CD89800ADCF646B8D') { throw 'The comparison UI is not the frozen executable.' }
+    if ((Get-FileHash -LiteralPath (Join-Path $uiDirectory 'LightHostModernWinUI.exe') -Algorithm SHA256).Hash -ne '18001958FB6B5961ECFE1EDE143573DA71452BE232C9C80CD89800ADCF646B8D') { throw 'The comparison UI is not the frozen executable.' }
 }
 if (!(Test-Path -LiteralPath $hostExe)) { throw 'Build the requested Release host before measuring.' }
 if ($ExpectedPlugins -and !$PreferencesFixture) { throw 'Loaded-plugin scenarios require a preferences fixture.' }
 if ($PreferencesFixture) { $PreferencesFixture=(Resolve-Path -LiteralPath $PreferencesFixture).Path }
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $report=[ordered]@{variant=$Variant;uiState=$UiState;windowPresentation=$WindowPresentation;hostSha256=(Get-FileHash -LiteralPath $hostExe -Algorithm SHA256).Hash;
-    uiSha256=(Get-FileHash -LiteralPath (Join-Path $uiDirectory 'LightHostWinUI.exe') -Algorithm SHA256).Hash;
+    uiSha256=(Get-FileHash -LiteralPath (Join-Path $uiDirectory 'LightHostModernWinUI.exe') -Algorithm SHA256).Hash;
     warmupSeconds=$WarmupSeconds;measurementSeconds=$MeasurementSeconds;repetitions=$Repetitions;
     expectedPlugins=$ExpectedPlugins;backend='Windows Audio';output=$OutputDevice;sampleRate=48000;bufferSize=$BufferSize;
     fixtureSha256=$(if($PreferencesFixture){(Get-FileHash -LiteralPath $PreferencesFixture -Algorithm SHA256).Hash}else{$null});
@@ -75,21 +75,21 @@ for ($runIndex=1;$runIndex -le $Repetitions;$runIndex++) {
     $name='perf-'+$Variant+'-'+[guid]::NewGuid().ToString('N')
     $directory=Join-Path $root $name
     New-Item -ItemType Directory -Force -Path (Join-Path $directory 'Temp'),(Join-Path $directory 'EnvLocal\LightHostModern') | Out-Null
-    if ($PreferencesFixture) { Copy-Item -LiteralPath $PreferencesFixture -Destination (Join-Path $directory 'Light Host Modern.settings') }
+    if ($PreferencesFixture) { Copy-Item -LiteralPath $PreferencesFixture -Destination (Join-Path $directory 'LightHostModern.settings') }
     $run=[ordered]@{number=$runIndex;profile=$directory;status='running';startedUtc=[DateTime]::UtcNow.ToString('o');samples=[Collections.Generic.List[object]]::new()}
     $report.runs.Add($run)
     $hostProcess=$null; $script:uiPid=0; $script:pipe=''; $script:hostSession=''; $uiProcess=$null
     $originalEnvironment=@{LOCALAPPDATA=$env:LOCALAPPDATA;TEMP=$env:TEMP;TMP=$env:TMP}
     try {
         if ((Get-FileHash -LiteralPath $hostExe -Algorithm SHA256).Hash -ne $report.hostSha256 -or
-            (Get-FileHash -LiteralPath (Join-Path $uiDirectory 'LightHostWinUI.exe') -Algorithm SHA256).Hash -ne $report.uiSha256 -or
+            (Get-FileHash -LiteralPath (Join-Path $uiDirectory 'LightHostModernWinUI.exe') -Algorithm SHA256).Hash -ne $report.uiSha256 -or
             ($PreferencesFixture -and (Get-FileHash -LiteralPath $PreferencesFixture -Algorithm SHA256).Hash -ne $report.fixtureSha256)) {
             throw 'A measured artifact changed between repetitions.'
         }
         # Only this harness process and its children see these environment values.
         $env:LOCALAPPDATA=Join-Path $directory 'EnvLocal'; $env:TEMP=Join-Path $directory 'Temp'; $env:TMP=$env:TEMP
         $hostProcess=Start-Process -FilePath $hostExe -ArgumentList @("--test-profile=$name",('--profile-root="'+$root+'"')) -WindowStyle Hidden -PassThru
-        $script:pipe=if ($protocol -eq 3) { '\\.\pipe\LightHost-'+$hostProcess.Id } else { '' }
+        $script:pipe=if ($protocol -eq 3) { '\\.\pipe\LightHostModern-'+$hostProcess.Id } else { '' }
         $deadline=[DateTime]::UtcNow.AddSeconds(180)
         do {
             try {
@@ -111,7 +111,7 @@ for ($runIndex=1;$runIndex -le $Repetitions;$runIndex++) {
             if ((Measurement).driverAvailable) { throw 'The comparison watchdog opened a default device.' }
         }
         if ($UiState -ne 'closed') {
-            $launch=rtk proxy winapp run $uiDirectory --manifest "$repo\WinUI\LightHost.WinUI\Package.appxmanifest" --exe LightHostWinUI.exe --detach --json -- "--test-profile=$name" "--profile-root=$root" "--host-pipe=$script:pipe" | ConvertFrom-Json
+            $launch=rtk proxy winapp run $uiDirectory --manifest "$repo\WinUI\LightHostModern.WinUI\Package.appxmanifest" --exe LightHostModernWinUI.exe --detach --json -- "--test-profile=$name" "--profile-root=$root" "--host-pipe=$script:pipe" | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0 -or !$launch.ProcessId) { throw 'The performance UI did not start.' }
             $script:uiPid=$launch.ProcessId; $uiProcess=Get-Process -Id $script:uiPid
             $run.uiActualPath=$uiProcess.Path
@@ -154,7 +154,7 @@ for ($runIndex=1;$runIndex -le $Repetitions;$runIndex++) {
                 } catch { $gpu=$null; $gpuAvailable=$false; $gpuError=$_.Exception.Message }
                 $lastGpu=[DateTime]::UtcNow
             }
-            $workers=@(Get-Process -Name LightHostScanner,LightHostUpdateHelper -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith((Split-Path $hostExe -Parent)+'\',[StringComparison]::OrdinalIgnoreCase) })
+            $workers=@(Get-Process -Name LightHostModernScanner,LightHostModernUpdateHelper -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith((Split-Path $hostExe -Parent)+'\',[StringComparison]::OrdinalIgnoreCase) })
             $run.samples.Add([pscustomobject]@{phase=$measurement.phase;utc=[DateTime]::UtcNow.ToString('o');intervalSeconds=$interval;
                 hostCpuPercent=100*($hostCpu-$lastHost)/$interval/[Environment]::ProcessorCount;uiCpuPercent=$(if($uiProcess){100*($uiCpu-$lastUi)/$interval/[Environment]::ProcessorCount}else{$null});
                 hostPrivateBytes=$hostProcess.PrivateMemorySize64;hostWorkingSetBytes=$hostProcess.WorkingSet64;
@@ -172,7 +172,7 @@ for ($runIndex=1;$runIndex -le $Repetitions;$runIndex++) {
         $final=Request 'snapshot'; $run.measurement=$measurement; $run.finalDiagnostics=$final.diagnostics; $run.gpuError=$gpuError
         $run.transportAfter=if ($protocol -eq 4) { Request 'transport-diagnostics' } else { $null }
         if ((Get-FileHash -LiteralPath $hostExe -Algorithm SHA256).Hash -ne $report.hostSha256 -or
-            (Get-FileHash -LiteralPath (Join-Path $uiDirectory 'LightHostWinUI.exe') -Algorithm SHA256).Hash -ne $report.uiSha256) { throw 'A measured artifact changed during the run.' }
+            (Get-FileHash -LiteralPath (Join-Path $uiDirectory 'LightHostModernWinUI.exe') -Algorithm SHA256).Hash -ne $report.uiSha256) { throw 'A measured artifact changed during the run.' }
         if ($uiProcess -and (Get-FileHash -LiteralPath $run.uiActualPath -Algorithm SHA256).Hash -ne $run.uiActualSha256) { throw 'The launched UI changed during the run.' }
         $run.processedWork=if ($protocol -eq 4) { @{blocks=$final.diagnostics.processedBlocks;samples=$final.diagnostics.processedSamples;midiInputEvents=$final.diagnostics.inputMidiEvents;midiOutputEvents=$final.diagnostics.outputMidiEvents} } else { @{blocks=$measurement.processedBlocks;samples=$measurement.processedSamples;midiInputEvents=$measurement.midiInputEvents;midiOutputEvents=$null} }
         if (!$measurement.hostAllocationAuditAvailable -or $measurement.thirdPartyAllocationAuditAvailable) { throw 'The callback audit coverage is unavailable or misreported.' }

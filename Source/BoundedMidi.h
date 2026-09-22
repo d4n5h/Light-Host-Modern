@@ -1,7 +1,7 @@
 #pragma once
 #include <juce_audio_basics/juce_audio_basics.h>
 
-namespace lightHost
+namespace lightHostModern
 {
 inline constexpr int midiCapacityBytes = 1024 * 1024;
 

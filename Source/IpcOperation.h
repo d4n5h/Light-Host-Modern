@@ -9,7 +9,7 @@
 
 // The queued closure owns its result. A caller may abandon its wait without
 // invalidating either the closure or its completion notification.
-namespace lightHost::ipc
+namespace lightHostModern::ipc
 {
 template <typename Result>
 class Operation

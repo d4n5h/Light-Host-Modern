@@ -3,7 +3,7 @@
 #include <future>
 #include <iostream>
 
-using namespace lightHost::ipc;
+using namespace lightHostModern::ipc;
 static void require(bool value, const char* reason) { if (!value) throw std::runtime_error(reason); }
 int main()
 {

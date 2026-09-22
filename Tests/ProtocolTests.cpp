@@ -2,7 +2,7 @@
 #include "PluginInstanceId.h"
 #include <iostream>
 
-using namespace lightHost::ipc;
+using namespace lightHostModern::ipc;
 static void require(bool condition, const char* message)
 {
     if (!condition) throw std::runtime_error(message);

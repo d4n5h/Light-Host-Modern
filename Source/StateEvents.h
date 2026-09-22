@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace lightHost::ipc
+namespace lightHostModern::ipc
 {
 using StateRevisions = std::array<uint64_t, 5>;
 inline constexpr const char* revisionNames[] {"chain", "database", "devices", "scan", "operations"};

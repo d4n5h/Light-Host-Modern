@@ -16,12 +16,12 @@ foreach ($count in $Counts) {
     New-Item -ItemType Directory -Path $profile -Force | Out-Null
     $hostProcess=$null; $appPid=0; $pipe=''
     try {
-        $fixtureArguments=@('--write-ui-fixture',(Join-Path $profile 'Light Host Modern.settings'),$count)
-        if ($ProcessorCache) { $fixtureArguments=@('--write-loaded-ui-fixture',(Join-Path $profile 'Light Host Modern.settings'),$count,$ProcessorCache) }
-        rtk proxy "$repo\out\build\windows-vs2022\Release\LightHostPluginInstanceTests.exe" @fixtureArguments
+        $fixtureArguments=@('--write-ui-fixture',(Join-Path $profile 'LightHostModern.settings'),$count)
+        if ($ProcessorCache) { $fixtureArguments=@('--write-loaded-ui-fixture',(Join-Path $profile 'LightHostModern.settings'),$count,$ProcessorCache) }
+        rtk proxy "$repo\out\build\windows-vs2022\Release\LightHostModernPluginInstanceTests.exe" @fixtureArguments
         if ($LASTEXITCODE -ne 0) { throw 'Fixture generation failed.' }
         $clock = [Diagnostics.Stopwatch]::StartNew()
-        $hostProcess = Start-Process -FilePath "$repo\out\build\windows-vs2022\LightHost_artefacts\Release\Light Host Modern.exe" -ArgumentList @("--test-profile=$name", ('--profile-root="'+$root+'"')) -PassThru -WindowStyle Hidden
+        $hostProcess = Start-Process -FilePath "$repo\out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe" -ArgumentList @("--test-profile=$name", ('--profile-root="'+$root+'"')) -PassThru -WindowStyle Hidden
         $metadata = Join-Path $profile 'profile.json'
         $deadline = [DateTime]::UtcNow.AddSeconds($(if ($ProcessorCache) { 180 } else { 30 }))
         while (!(Test-Path -LiteralPath $metadata)) {
@@ -34,7 +34,7 @@ foreach ($count in $Counts) {
         if ($snapshot.activePlugins.Count -ne $count -or $snapshot.knownPluginList.Count -ne $count) { throw 'Host fixture count mismatch.' }
         if ($ProcessorCache -and $snapshot.diagnostics.loadedPlugins -ne $count) { throw 'The host did not load every simulated processor.' }
         if ($snapshot.diagnostics.deviceName -notin @('none','None','')) { throw 'Fixture unexpectedly opened an audio device.' }
-        $launch = rtk proxy winapp run "$repo\WinUI\x64\Release\LightHost.WinUI" --manifest "$repo\WinUI\LightHost.WinUI\Package.appxmanifest" --exe LightHostWinUI.exe --detach --json -- "--test-profile=$name" "--profile-root=$root" "--host-pipe=$pipe" | ConvertFrom-Json
+        $launch = rtk proxy winapp run "$repo\WinUI\x64\Release\LightHostModern.WinUI" --manifest "$repo\WinUI\LightHostModern.WinUI\Package.appxmanifest" --exe LightHostModernWinUI.exe --detach --json -- "--test-profile=$name" "--profile-root=$root" "--host-pipe=$pipe" | ConvertFrom-Json
         if ($LASTEXITCODE -ne 0) { throw 'UI failed to launch.' }
         $script:appPid=$launch.ProcessId
         @{hostPid=$hostProcess.Id;uiPid=$script:appPid;name=$name;root=$root;profile=$profile;pipe=$pipe} | ConvertTo-Json |

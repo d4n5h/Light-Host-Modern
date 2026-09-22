@@ -1,0 +1,8 @@
+namespace LightHostModernWinUI
+{
+    [default_interface]
+    runtimeclass SupportPageView : Microsoft.UI.Xaml.Controls.UserControl
+    {
+        SupportPageView();
+    }
+}

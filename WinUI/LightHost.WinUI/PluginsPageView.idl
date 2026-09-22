@@ -1,8 +1,0 @@
-namespace LightHostWinUI
-{
-    [default_interface]
-    runtimeclass PluginsPageView : Microsoft.UI.Xaml.Controls.UserControl
-    {
-        PluginsPageView();
-    }
-}

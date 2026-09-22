@@ -8,7 +8,7 @@
 #include <intrin.h>
 #endif
 
-namespace lightHost
+namespace lightHostModern
 {
 // One audio writer; configuration and stop require a stopped device. The fixed
 // histogram is read only after completion/stop, so the callback needs no locks,

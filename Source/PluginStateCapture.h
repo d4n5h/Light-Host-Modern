@@ -2,7 +2,7 @@
 #include "PluginInstances.h"
 #include <stdexcept>
 
-namespace lightHost
+namespace lightHostModern
 {
 // Validate the instance returned by the format before passing it saved bytes.
 // A replaced single-class VST2 DLL can instantiate despite a stale requested

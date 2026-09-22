@@ -7,14 +7,14 @@ $portugueseLanguageName = 'Portugu' + [char]0x00EA + 's (Brasil)'
 New-Item -ItemType Directory -Force -Path $screenshots | Out-Null
 
 $windows = rtk winapp ui list-windows -a $AppPid --json | ConvertFrom-Json
-$window = @($windows | Where-Object { $_.title -eq 'Light Host Modern' })[0]
-if ($null -eq $window) { throw 'Main Light Host Modern window not found.' }
+$window = @($windows | Where-Object { $_.title -eq 'LightHostModern' })[0]
+if ($null -eq $window) { throw 'Main LightHostModern window not found.' }
 $hwnd = [IntPtr]$window.hwnd
 
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
-public static class LightHostWindowTest {
+public static class LightHostModernWindowTest {
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool MoveWindow(IntPtr hWnd, int x, int y, int width, int height, bool repaint);
 }
@@ -47,7 +47,7 @@ Assert-Command 'Start with Windows state label exists' { rtk winapp ui wait-for 
 Assert-Command 'Close to tray state label exists' { rtk winapp ui wait-for CloseToTrayState -w $window.hwnd -t 3000 }
 Assert-Command 'VST2 state label exists' { rtk winapp ui wait-for EnableVst2State -w $window.hwnd -t 3000 }
 
-[LightHostWindowTest]::MoveWindow($hwnd, 80, 60, 1000, 760, $true) | Out-Null
+[LightHostModernWindowTest]::MoveWindow($hwnd, 80, 60, 1000, 760, $true) | Out-Null
 Start-Sleep -Milliseconds 800
 rtk winapp ui screenshot -w $window.hwnd -o (Join-Path $screenshots '01-settings-narrow.png') | Out-Null
 
@@ -91,7 +91,7 @@ Start-Sleep -Milliseconds 400
 rtk winapp ui screenshot -w $window.hwnd --capture-screen -o (Join-Path $screenshots '08-sort-flyout.png') | Out-Null
 rtk winapp ui send-keys escape -w $window.hwnd | Out-Null
 
-[LightHostWindowTest]::MoveWindow($hwnd, 8, 8, 1880, 920, $true) | Out-Null
+[LightHostModernWindowTest]::MoveWindow($hwnd, 8, 8, 1880, 920, $true) | Out-Null
 Start-Sleep -Milliseconds 800
 Assert-Command 'Open plugin database actions' { rtk winapp ui invoke PluginDatabaseActions -w $window.hwnd }
 Assert-Command 'Open scan paths dialog' { rtk winapp ui invoke ManageScanPaths -w $window.hwnd }
@@ -115,7 +115,7 @@ if ($focusedAfterBlankPath -match 'ScanPathEditor') { throw 'The untouched blank
 Write-Output 'PASS: Untouched blank scan path is discarded on focus loss'
 Assert-Command 'Cancel scan paths dialog' { rtk winapp ui invoke CloseButton -w $window.hwnd }
 
-[LightHostWindowTest]::MoveWindow($hwnd, 80, 60, 1000, 760, $true) | Out-Null
+[LightHostModernWindowTest]::MoveWindow($hwnd, 80, 60, 1000, 760, $true) | Out-Null
 Start-Sleep -Milliseconds 800
 Assert-Command 'Navigate back to Settings' { rtk winapp ui click NavSettings -w $window.hwnd }
 Assert-Command 'Switch to Portuguese (Brazil)' { Set-ComboIndex AppLanguage 1 }
@@ -132,7 +132,7 @@ Assert-Command 'Repeated Portuguese switch completes' { rtk winapp ui wait-for P
 Assert-Command 'Repeat switch back to English without closing UI' { Set-ComboIndex AppLanguage 0 }
 Assert-Command 'Repeated English switch completes' { rtk winapp ui wait-for PageTitle -w $window.hwnd --value 'Settings' -t 10000 }
 
-[LightHostWindowTest]::MoveWindow($hwnd, 80, 60, 1460, 920, $true) | Out-Null
+[LightHostModernWindowTest]::MoveWindow($hwnd, 80, 60, 1460, 920, $true) | Out-Null
 Start-Sleep -Milliseconds 800
 rtk winapp ui screenshot -w $window.hwnd -o (Join-Path $screenshots '12-settings-wide.png') | Out-Null
 

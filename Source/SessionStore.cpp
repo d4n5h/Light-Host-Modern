@@ -3,7 +3,7 @@
 #include <stdexcept>
 #include <Windows.h>
 
-namespace lightHost
+namespace lightHostModern
 {
 namespace
 {

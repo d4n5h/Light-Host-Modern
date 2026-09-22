@@ -3,7 +3,7 @@
 #include "ScenarioRunner.h"
 
 using namespace juce;
-using namespace lightHost;
+using namespace lightHostModern;
 using scenarios::require;
 
 static PluginDescription plugin(int uid = 42)
@@ -34,7 +34,7 @@ int main(int argc, char** argv)
             const auto* description = entry ? entry->getChildByName("PLUGIN") : nullptr;
             if (!description || entry->getStringAttribute("verifiedMetadata") != "verified"
                 || !simulatedProcessor.loadFromXml(*description)
-                || simulatedProcessor.name != "LightHost Scenario Fixture" || simulatedProcessor.manufacturerName != "LightHost Tests"
+                || simulatedProcessor.name != "LightHostModern Scenario Fixture" || simulatedProcessor.manufacturerName != "LightHostModern Tests"
                 || !File(simulatedProcessor.fileOrIdentifier).existsAsFile()) return 3;
         }
         XmlElement properties("PROPERTIES");

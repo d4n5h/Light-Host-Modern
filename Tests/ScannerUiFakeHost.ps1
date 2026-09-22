@@ -1,5 +1,5 @@
 # Simulated IPC peer only; no plugins, devices or host preferences.
-param([string]$PipeName = 'LightHost-scan-ui-test')
+param([string]$PipeName = 'LightHostModern-scan-ui-test')
 $ErrorActionPreference = 'Stop'
 $testRoot = Join-Path $PSScriptRoot '../out/scan-ui-test'
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null

@@ -2,6 +2,8 @@
 #include "IconMenu.hpp"
 #include "DebugLog.h"
 #include "RuntimeProfile.h"
+#include "ProductIdentity.h"
+#include "PreferenceMigration.h"
 
 #if JUCE_WINDOWS
  #ifndef NOMINMAX
@@ -22,25 +24,38 @@ public:
 
     void initialise (const String&) override
     {
-        const auto& profile = lightHost::RuntimeProfile::current();
+        const auto& profile = lightHostModern::RuntimeProfile::current();
         profile.createDirectories();
         const bool debugEnabled = hasParameter("--debug") || hasParameter("-debug");
-        setLightHostDebugEnabled(debugEnabled);
-        openLightHostDebugConsoleIfNeeded();
-        installLightHostCrashDiagnostics();
+        setLightHostModernDebugEnabled(debugEnabled);
+        openLightHostModernDebugConsoleIfNeeded();
+        installLightHostModernCrashDiagnostics();
 #if LIGHTHOST_REALTIME_AUDIT
-        if (!installRealtimeAllocationAudit()) lightHostLog("Realtime allocation audit is unavailable: executable CRT imports could not be instrumented.");
+        if (!installRealtimeAllocationAudit()) lightHostModernLog("Realtime allocation audit is unavailable: executable CRT imports could not be instrumented.");
 #endif
 
-        lightHostLog("initialise()");
+        lightHostModernLog("initialise()");
 
         PropertiesFile::Options options;
-        options.applicationName     = "Light Host Modern";
+        options.applicationName     = lightHostModern::identity::name;
         if (profile.test) options.folderName = String(profile.directory.wstring().c_str());
         options.filenameSuffix      = "settings";
         options.osxLibrarySubFolder = "Preferences";
 
         checkArguments(&options);
+
+        if (!profile.test)
+        {
+            auto legacy = options;
+            legacy.applicationName = lightHostModern::identity::legacyName;
+            const auto migration = lightHostModern::migratePreferences(legacy.getDefaultFile(), options.getDefaultFile());
+            if (migration.failed())
+            {
+                const auto message = "Could not migrate the previous preferences. Original data has been preserved.\n" + migration.getErrorMessage();
+                MessageBoxW(nullptr, message.toWideCharPointer(), L"LightHostModern", MB_OK | MB_ICONWARNING);
+                quit(); return;
+            }
+        }
 
         if (hasParameter("--reset-settings") || hasParameter("-reset-settings"))
             resetSettings(options);
@@ -71,11 +86,11 @@ public:
 
     void shutdown() override
     {
-        lightHostLog("shutdown()");
+        lightHostModernLog("shutdown()");
         mainWindow = nullptr;
         appProperties = nullptr;
         LookAndFeel::setDefaultLookAndFeel (nullptr);
-        lightHostLog("Debug log saved to: " + getLightHostDebugLogPath());
+        lightHostModernLog("Debug log saved to: " + getLightHostModernDebugLogPath());
     }
 
     void systemRequestedQuit() override
@@ -84,8 +99,8 @@ public:
     }
 
     const String getApplicationName() override       {
-        const auto& profile = lightHost::RuntimeProfile::current();
-        return profile.test ? "Light Host Modern-profile-" + String(profile.key.c_str()) : "Light Host Modern";
+        const auto& profile = lightHostModern::RuntimeProfile::current();
+        return profile.test ? "LightHostModern-profile-" + String(profile.key.c_str()) : "LightHostModern";
     }
     const String getApplicationVersion() override    { return ProjectInfo::versionString; }
     bool moreThanOneInstanceAllowed() override       {
@@ -162,8 +177,8 @@ private:
 
             settings->saveIfNeeded();
 
-            auto storage = std::make_shared<lightHost::DiskSessionStorage>(settings->getFile());
-            const auto recovered = lightHost::SessionStore::recover(*storage);
+            auto storage = std::make_shared<lightHostModern::DiskSessionStorage>(settings->getFile());
+            const auto recovered = lightHostModern::SessionStore::recover(*storage);
             if (recovered.document)
             {
                 auto document = *recovered.document;
@@ -173,11 +188,11 @@ private:
                     record.loading = "unloaded";
                     // State and recovery bytes are preserved for the next load.
                 }
-                lightHost::SessionStore writer(std::move(storage), recovered);
+                lightHostModern::SessionStore writer(std::move(storage), recovered);
                 writer.submit(std::move(document.instances), document.intentionalEmpty, document.migrationId);
-                if (!writer.flush()) lightHostLog("Could not save the cleared plugin failure markers: " + writer.status().error);
+                if (!writer.flush()) lightHostModernLog("Could not save the cleared plugin failure markers: " + writer.status().error);
             }
-            else if (recovered.found) lightHostLog("Failed plugin markers were retained because session recovery is incomplete");
+            else if (recovered.found) lightHostModernLog("Failed plugin markers were retained because session recovery is incomplete");
         }
     }
 };

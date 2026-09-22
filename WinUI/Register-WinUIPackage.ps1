@@ -8,16 +8,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$manifest = Join-Path $PSScriptRoot "LightHost.WinUI\$Platform\$Configuration\LightHost.WinUI\AppxManifest.xml"
+$manifest = Join-Path $PSScriptRoot "LightHostModern.WinUI\$Platform\$Configuration\LightHostModern.WinUI\AppxManifest.xml"
 if (-not (Test-Path -LiteralPath $manifest)) {
-    $manifest = Join-Path $PSScriptRoot "$Platform\$Configuration\LightHost.WinUI\AppxManifest.xml"
+    $manifest = Join-Path $PSScriptRoot "$Platform\$Configuration\LightHostModern.WinUI\AppxManifest.xml"
 }
 if (-not (Test-Path -LiteralPath $manifest)) {
-    throw "Generated AppxManifest.xml was not found. Build WinUI\LightHost.WinUI.sln first."
+    throw "Generated AppxManifest.xml was not found. Build WinUI\LightHostModern.WinUI.sln first."
 }
 
-$packageRoot = Join-Path $PSScriptRoot 'LightHost.WinUI\AppPackages\LightHost.WinUI'
-$testPackage = Get-ChildItem -Path $packageRoot -Directory -Filter "LightHost.WinUI_*_${Platform}_${Configuration}_Test" |
+$packageRoot = Join-Path $PSScriptRoot 'LightHostModern.WinUI\AppPackages\LightHostModern.WinUI'
+$testPackage = Get-ChildItem -Path $packageRoot -Directory -Filter "LightHostModern.WinUI_*_${Platform}_${Configuration}_Test" |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 
@@ -40,12 +40,12 @@ foreach ($dependencyPath in $dependencyPaths) {
 
 Add-AppxPackage -Register $manifest -ForceApplicationShutdown
 
-$package = Get-AppxPackage -Name 'LightHost.WinUI' | Select-Object -First 1
+$package = Get-AppxPackage -Name 'LightHostModern.WinUI' | Select-Object -First 1
 if ($null -eq $package) {
-    throw 'LightHost.WinUI package registration did not complete.'
+    throw 'LightHostModern.WinUI package registration did not complete.'
 }
 
 $aumid = "$($package.PackageFamilyName)!App"
 Set-Content -LiteralPath (Join-Path $PSScriptRoot 'packaged-aumid.txt') -Value $aumid -Encoding ASCII
-Write-Host "Registered LightHost.WinUI"
+Write-Host "Registered LightHostModern.WinUI"
 Write-Host "AUMID: $aumid"

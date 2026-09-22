@@ -7,7 +7,7 @@ $testRoot=Join-Path (Get-Location).Path $OutputDirectory
 $name='preferences-'+[guid]::NewGuid().ToString('N')
 $profile=Join-Path $testRoot $name
 New-Item -ItemType Directory -Force -Path $profile | Out-Null
-& $FixtureExecutable --write-ui-fixture (Join-Path $profile 'Light Host Modern.settings') 2
+& $FixtureExecutable --write-ui-fixture (Join-Path $profile 'LightHostModern.settings') 2
 if ($LASTEXITCODE -ne 0) { throw 'Could not write the simulated catalogue.' }
 $hostProcess=$null
 function Start-TestHost {

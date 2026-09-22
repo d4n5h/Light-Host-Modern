@@ -1,0 +1,54 @@
+<?xml version='1.0' encoding='utf-8'?>
+<UserControl xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="LightHostModernWinUI.SupportPageView" xmlns:local="using:LightHostModernWinUI">
+    <StackPanel x:Name="SupportPanel" Visibility="Collapsed" Spacing="8">
+        <TextBlock x:Name="SupportDonateTitleText" Style="{StaticResource SubtitleTextBlockStyle}" Text="Support by donating via Ko-fi" />
+        <StackPanel Spacing="8">
+            <Border MinHeight="112" Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="24">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition x:Name="SupportDonateActionColumn" Width="294" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="SupportDonateDescriptionText" VerticalAlignment="Center" Text="If you enjoy the app and would like to support its continued development, you can make a donation through Ko-fi." TextWrapping="WrapWholeWords" />
+                    <Button x:Name="KoFiButton" Grid.Column="1" AutomationProperties.AutomationId="SupportKoFiButton" AutomationProperties.Name="Support me on Ko-fi" Width="294" Height="60" HorizontalAlignment="Right" VerticalAlignment="Center" Padding="0" ToolTipService.ToolTip="Support me on Ko-fi">
+                        <Image Width="286" Height="52" Margin="4" Source="Assets/support-me-on-kofi.png" Stretch="Uniform" />
+                    </Button>
+                </Grid>
+            </Border>
+            <TextBlock x:Name="SupportRepositoryTitleText" Margin="0,16,0,0" Style="{StaticResource SubtitleTextBlockStyle}" Text="Support by starring the GitHub repository" />
+            <Border MinHeight="112" Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="24">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition x:Name="SupportRepositoryActionColumn" Width="294" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="SupportRepositoryDescriptionText" VerticalAlignment="Center" Text="If you enjoy the app and want to support the project, consider giving the repository a star on GitHub." TextWrapping="WrapWholeWords" />
+                    <Button x:Name="SupportRepositoryButton" Grid.Column="1" AutomationProperties.AutomationId="SupportRepositoryButton" AutomationProperties.Name="Go to the LightHostModern repository" Width="294" HorizontalAlignment="Right" VerticalAlignment="Center" Content="Go to repo" />
+                </Grid>
+            </Border>
+            <TextBlock x:Name="SupportShowcaseTitleText" Margin="0,16,0,0" Style="{StaticResource SubtitleTextBlockStyle}" Text="Support by showcasing the app" />
+            <Border MinHeight="144" Style="{StaticResource AppCardStyle}">
+                <Grid ColumnSpacing="24">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition x:Name="SupportShowcaseActionColumn" Width="294" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="SupportShowcaseDescriptionText" VerticalAlignment="Center" Text="If you create a video about the app, I’d be happy to help give it more visibility." TextWrapping="WrapWholeWords" />
+                    <Button x:Name="SupportShowcaseButton" Grid.Column="1" AutomationProperties.AutomationId="SupportShowcaseButton" AutomationProperties.Name="Create a video showcase post" Width="294" HorizontalAlignment="Right" VerticalAlignment="Center" Content="Create video showcase post" />
+                </Grid>
+            </Border>
+        </StackPanel>
+    </StackPanel>
+</UserControl>

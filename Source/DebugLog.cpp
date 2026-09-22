@@ -31,7 +31,7 @@ namespace
 			.getChildFile("LightHostModern")
 			.getChildFile("Logs");
 
-		const auto& profile = lightHost::RuntimeProfile::current();
+		const auto& profile = lightHostModern::RuntimeProfile::current();
 		if (profile.test) logsDirectory = File((profile.directory / L"Logs").wstring().c_str());
 		logsDirectory.createDirectory();
 
@@ -52,7 +52,7 @@ namespace
 		debugLogFile.appendText(line + newLine, false, false, "\n");
 	}
 
-	class LightHostDebugLogger final : public Logger
+	class LightHostModernDebugLogger final : public Logger
 	{
 	public:
 		void logMessage(const String& message) override
@@ -60,7 +60,7 @@ namespace
 			if (!debugEnabled)
 				return;
 
-			const auto line = "[LightHostLogger] " + message;
+			const auto line = "[LightHostModernLogger] " + message;
 			appendDebugLogLine(line);
 
 			if (consoleOpened)
@@ -68,7 +68,7 @@ namespace
 		}
 	};
 
-	LightHostDebugLogger debugLogger;
+	LightHostModernDebugLogger debugLogger;
 
 	void writeFatalCrashLog(const String& reason, void* address = nullptr, uint32 code = 0)
 	{
@@ -76,22 +76,22 @@ namespace
 			return;
 
 		const ScopedLock lock(crashContextLock);
-		lightHostLog("Fatal crash diagnostic: " + reason);
+		lightHostModernLog("Fatal crash diagnostic: " + reason);
 
 		if (code != 0)
-			lightHostLog("Fatal crash exception code: 0x" + String::toHexString((int) code));
+			lightHostModernLog("Fatal crash exception code: 0x" + String::toHexString((int) code));
 
 		if (address != nullptr)
-			lightHostLog("Fatal crash address: " + String::toHexString((pointer_sized_int) address));
+			lightHostModernLog("Fatal crash address: " + String::toHexString((pointer_sized_int) address));
 
 		if (crashContext.isNotEmpty())
-			lightHostLog("Fatal crash context: " + crashContext);
+			lightHostModernLog("Fatal crash context: " + crashContext);
 
 		std::cout.flush();
 	}
 
 #if JUCE_WINDOWS
-	LONG WINAPI lightHostUnhandledExceptionFilter(EXCEPTION_POINTERS* exceptionInfo)
+	LONG WINAPI lightHostModernUnhandledExceptionFilter(EXCEPTION_POINTERS* exceptionInfo)
 	{
 		uint32 code = 0;
 		void* address = nullptr;
@@ -107,14 +107,14 @@ namespace
 	}
 #endif
 
-	void lightHostTerminateHandler()
+	void lightHostModernTerminateHandler()
 	{
 		writeFatalCrashLog("std::terminate called");
 		std::abort();
 	}
 }
 
-void setLightHostDebugEnabled(bool enabled)
+void setLightHostModernDebugEnabled(bool enabled)
 {
 	debugEnabled = enabled;
 
@@ -124,7 +124,7 @@ void setLightHostDebugEnabled(bool enabled)
 		if (debugLogFile == File())
 		{
 			debugLogFile = createDebugLogFile();
-			debugLogFile.replaceWithText("Light Host Modern debug log" + newLine, false, false, "\n");
+			debugLogFile.replaceWithText("LightHostModern debug log" + newLine, false, false, "\n");
 			debugLogFile.appendText("Started: " + Time::getCurrentTime().toString(true, true, true, true) + newLine, false, false, "\n");
 			debugLogFile.appendText("Process: " + File::getSpecialLocation(File::currentExecutableFile).getFullPathName() + newLine, false, false, "\n");
 			debugLogFile.appendText(newLine, false, false, "\n");
@@ -138,18 +138,18 @@ void setLightHostDebugEnabled(bool enabled)
 	}
 }
 
-bool isLightHostDebugEnabled()
+bool isLightHostModernDebugEnabled()
 {
 	return debugEnabled;
 }
 
-String getLightHostDebugLogPath()
+String getLightHostModernDebugLogPath()
 {
 	const ScopedLock lock(debugFileLock);
 	return debugLogFile.getFullPathName();
 }
 
-void openLightHostDebugConsoleIfNeeded()
+void openLightHostModernDebugConsoleIfNeeded()
 {
 #if JUCE_WINDOWS
 	if (!debugEnabled || consoleOpened)
@@ -159,7 +159,7 @@ void openLightHostDebugConsoleIfNeeded()
 		return;
 
 	consoleOpened = true;
-	SetConsoleTitleW(L"Light Host Modern Debug Console");
+	SetConsoleTitleW(L"LightHostModern Debug Console");
 
 	FILE* stream = nullptr;
 	freopen_s(&stream, "CONOUT$", "w", stdout);
@@ -171,37 +171,37 @@ void openLightHostDebugConsoleIfNeeded()
 	std::cerr.clear();
 	std::clog.clear();
 
-	lightHostLog("Debug console opened.");
-	lightHostLog("Debug log file: " + getLightHostDebugLogPath());
+	lightHostModernLog("Debug console opened.");
+	lightHostModernLog("Debug log file: " + getLightHostModernDebugLogPath());
 #endif
 }
 
-void installLightHostCrashDiagnostics()
+void installLightHostModernCrashDiagnostics()
 {
 	if (!debugEnabled || crashDiagnosticsInstalled)
 		return;
 
 	crashDiagnosticsInstalled = true;
-	std::set_terminate(lightHostTerminateHandler);
+	std::set_terminate(lightHostModernTerminateHandler);
 
 #if JUCE_WINDOWS
-	SetUnhandledExceptionFilter(lightHostUnhandledExceptionFilter);
+	SetUnhandledExceptionFilter(lightHostModernUnhandledExceptionFilter);
 #endif
 
-	lightHostLog("Crash diagnostics installed.");
+	lightHostModernLog("Crash diagnostics installed.");
 }
 
-void lightHostLog(const String& message)
+void lightHostModernLog(const String& message)
 {
 	if (!debugEnabled)
 		return;
 
-	const auto line = "[LightHost] " + message;
+	const auto line = "[LightHostModern] " + message;
 	appendDebugLogLine(line);
 	std::cout << line << std::endl;
 }
 
-void setLightHostCrashContext(const String& context)
+void setLightHostModernCrashContext(const String& context)
 {
 	if (!debugEnabled)
 		return;
@@ -210,7 +210,7 @@ void setLightHostCrashContext(const String& context)
 	crashContext = context;
 }
 
-void clearLightHostCrashContext()
+void clearLightHostModernCrashContext()
 {
 	if (!debugEnabled)
 		return;

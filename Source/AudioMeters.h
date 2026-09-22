@@ -7,8 +7,28 @@
 #include <stdexcept>
 #include <vector>
 
-namespace lightHost
+namespace lightHostModern
 {
+// Short peak retention for the independent 20 Hz UI transport. Fixed work per
+// callback, no locks or allocations, and no session/lifetime maximum.
+class PresentationPeak
+{
+public:
+    void reset() noexcept { level = 0; remaining = 0; published.store(0); }
+    void process(float peak, int samples, double rate) noexcept
+    {
+        if (!std::isfinite(peak) || peak < 0) peak = 0;
+        if (peak >= level) { level = peak; remaining = static_cast<int>(rate * 0.075); }
+        else if ((remaining -= samples) <= 0) level = peak;
+        published.store(level, std::memory_order_relaxed);
+    }
+    float read() const noexcept { return published.load(std::memory_order_relaxed); }
+private:
+    std::atomic<float> published{0};
+    float level = 0;
+    int remaining = 0;
+};
+
 struct AudioMeasurement
 {
     float rms = 0, peak = 0, peakHold = 0;

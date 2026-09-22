@@ -41,9 +41,9 @@ public:
 	KnownPluginList& getKnownPluginList() noexcept { return knownPluginList; }
 
 	std::vector<PluginDescription> getActivePluginsSorted() const;
-	const std::vector<lightHost::PluginInstanceRecord>& getPluginInstances() const { return instances.records; }
+	const std::vector<lightHostModern::PluginInstanceRecord>& getPluginInstances() const { return instances.records; }
 	String getSessionRecoveryError() const { return instances.recoveryError; }
-	lightHost::SessionSaveStatus getSessionSaveStatus() const { return sessionStore ? sessionStore->status() : lightHost::SessionSaveStatus{}; }
+	lightHostModern::SessionSaveStatus getSessionSaveStatus() const { return sessionStore ? sessionStore->status() : lightHostModern::SessionSaveStatus{}; }
 	const StringArray& getStateCaptureFailures() const { return stateCaptureFailures; }
 	bool isSessionWritable() const { return instances.writable && !sessionLoadSuppressed; }
 	bool flushSession();
@@ -51,7 +51,11 @@ public:
 	int findPluginIndexById(const PluginInstanceId& id) const;
 	void setGlobalMuted(bool value) { if (hostProcessor.setGlobalMuted(value)) ++chainVersion; }
 	void setGlobalBypassed(bool value) { if (hostProcessor.setGlobalBypassed(value)) ++chainVersion; }
-	bool isGlobalMuted() const { return hostProcessor.isGlobalMuted(); }
+	bool isMonoInputs() const { return hostProcessor.isMonoInputs(); }
+    void setMonoInputs(bool value);
+    bool isMonoOutput() const { return hostProcessor.isMonoOutput(); }
+    void setMonoOutput(bool value);
+    bool isGlobalMuted() const { return hostProcessor.isGlobalMuted(); }
 	bool isGlobalBypassed() const { return hostProcessor.isGlobalBypassed(); }
 	void resetClipping(bool input, bool output, int channel = -1)
 	{ hostProcessor.resetClipping(input, output, channel); }
@@ -124,8 +128,8 @@ public:
 	bool renamePlugin(int sortedIndex, const String& name);
 	bool renameKnownPlugin(int sortedIndex, const String& name);
 	String getKnownPluginCustomName(const PluginDescription& plugin) const
-	{ return lightHost::knownPluginCustomName(*getAppProperties().getUserSettings(), plugin); }
-	bool isDiagnosticsEnabled() const { return lightHost::diagnosticsCollectionEnabled.load(); }
+	{ return lightHostModern::knownPluginCustomName(*getAppProperties().getUserSettings(), plugin); }
+	bool isDiagnosticsEnabled() const { return lightHostModern::diagnosticsCollectionEnabled.load(); }
 	void setDiagnosticsEnabled(bool enabled);
 	void deletePluginStates();
 	void savePluginStates();
@@ -139,7 +143,7 @@ public:
 	DiagnosticsSnapshot getDiagnosticsSnapshot() const;
 	std::pair<float, float> getMeterPeaks() const noexcept { return hostProcessor.getMeterPeaks(); }
     bool configureCallbackMeasurement(unsigned warmupSeconds, unsigned durationSeconds);
-    lightHost::CallbackMeasurement::Snapshot getCallbackMeasurement() const { return player.callbackMeasurement().snapshot(); }
+    lightHostModern::CallbackMeasurement::Snapshot getCallbackMeasurement() const { return player.callbackMeasurement().snapshot(); }
 	uint64 getChainVersion() const noexcept { return chainVersion; }
 	uint64 getPluginDatabaseVersion() const noexcept { return pluginDatabaseVersion; }
 	uint64 getAudioConfigVersion() const noexcept { return deviceController.getVersion(); }
@@ -193,8 +197,8 @@ private:
 	DeviceController deviceController;
 	AudioPluginFormatManager formatManager;
 	KnownPluginList knownPluginList;
-	lightHost::PluginInstances instances;
-	std::unique_ptr<lightHost::SessionStore> sessionStore;
+	lightHostModern::PluginInstances instances;
+	std::unique_ptr<lightHostModern::SessionStore> sessionStore;
 	String sessionMigrationId;
 	StringArray stateCaptureFailures;
 	uint64 lastSessionStatusSerial = 0;
@@ -203,7 +207,9 @@ private:
 	KnownPluginList::SortMethod pluginSortMethod = KnownPluginList::sortByManufacturer;
 	RealtimeHostProcessor hostProcessor;
 	HostAudioPlayer player;
-	mutable lightHost::CpuUsageSampler hostCpuSampler, workerCpuSampler;
+	mutable lightHostModern::ProcessMemory cachedMemory;
+    mutable uint64_t lastMemorySample = 0;
+    mutable lightHostModern::CpuUsageSampler hostCpuSampler, workerCpuSampler;
 };
 
 #endif /* AudioEngine_h */

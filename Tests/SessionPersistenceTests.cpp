@@ -6,7 +6,7 @@
 #include <atomic>
 
 using namespace juce;
-using namespace lightHost;
+using namespace lightHostModern;
 using scenarios::require;
 using Slot = SessionStorage::Slot;
 

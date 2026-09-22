@@ -1,11 +1,11 @@
 @echo off
 setlocal
 
-set "SETTINGS_DIR=%APPDATA%\Light Host Modern"
-set "SETTINGS_FILE=%SETTINGS_DIR%\Light Host Modern.settings"
+set "SETTINGS_DIR=%APPDATA%\LightHostModern"
+set "SETTINGS_FILE=%SETTINGS_DIR%\LightHostModern.settings"
 set "CRASHED_PLUGINS_FILE=%SETTINGS_DIR%\RecentlyCrashedPluginsList"
 
-echo Reset settings for Light Host Modern?
+echo Reset settings for LightHostModern?
 choice /C YN /M "Delete saved settings"
 if errorlevel 2 (
     echo Settings not altered.

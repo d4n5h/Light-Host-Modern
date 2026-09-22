@@ -4,7 +4,7 @@
 #include <cmath>
 #include <limits>
 
-namespace lightHost::ipc
+namespace lightHostModern::ipc
 {
 struct Request
 {

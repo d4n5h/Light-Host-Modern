@@ -1,0 +1,8 @@
+namespace LightHostModernWinUI
+{
+    [default_interface]
+    runtimeclass AudioPageView : Microsoft.UI.Xaml.Controls.UserControl
+    {
+        AudioPageView();
+    }
+}

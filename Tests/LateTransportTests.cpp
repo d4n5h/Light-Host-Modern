@@ -1,7 +1,7 @@
 #include "HostTransport.h"
 #include "ScenarioRunner.h"
 
-using namespace lightHost::ipc;
+using namespace lightHostModern::ipc;
 
 static std::string reply(const std::string& wire, const wchar_t* status, const wchar_t* session = L"host-one")
 {

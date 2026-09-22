@@ -9,8 +9,8 @@ class HostAudioPlayer final : public juce::AudioIODeviceCallback
 {
 public:
     void setProcessor(RealtimeHostProcessor* value) noexcept { processor = value; }
-    lightHost::CallbackMeasurement& callbackMeasurement() noexcept { return measurement; }
-    const lightHost::CallbackMeasurement& callbackMeasurement() const noexcept { return measurement; }
+    lightHostModern::CallbackMeasurement& callbackMeasurement() noexcept { return measurement; }
+    const lightHostModern::CallbackMeasurement& callbackMeasurement() const noexcept { return measurement; }
 
     void audioDeviceAboutToStart(juce::AudioIODevice* device) override
     {
@@ -23,6 +23,7 @@ public:
         storage.setSize(channels, blockSize);
         view.setDataToReferTo(storage.getArrayOfWritePointers(), channels, blockSize);
         processor->setPlayConfigDetails(inputs, outputs, device->getCurrentSampleRate(), blockSize);
+        processor->configureOutputChannels(device->getActiveOutputChannels());
         processor->prepareToPlay(device->getCurrentSampleRate(), blockSize);
         processor->prepareMidiBuffer(midi);
     }
@@ -37,14 +38,14 @@ public:
     void audioDeviceIOCallbackWithContext(const float* const* input, int inputChannels,
         float* const* output, int outputChannels, int samples, const juce::AudioIODeviceCallbackContext&) override
     {
-        lightHost::realtimeAudit::Scope audit(lightHost::realtimeAudit::Origin::host);
+        lightHostModern::realtimeAudit::Scope audit(lightHostModern::realtimeAudit::Origin::host);
         struct TimedCallback
         {
-            lightHost::CallbackMeasurement& measurement;
+            lightHostModern::CallbackMeasurement& measurement;
             bool active;
             uint64 started;
             unsigned samples;
-            TimedCallback(lightHost::CallbackMeasurement& value, int count) noexcept
+            TimedCallback(lightHostModern::CallbackMeasurement& value, int count) noexcept
                 : measurement(value), active(value.enabled()), started(active ? static_cast<uint64>(juce::Time::getHighResolutionTicks()) : 0), samples(static_cast<unsigned>(juce::jmax(0, count))) {}
             ~TimedCallback() { if (active) measurement.record(started, static_cast<uint64>(juce::Time::getHighResolutionTicks()), samples); }
         } timed(measurement, samples);
@@ -75,5 +76,5 @@ private:
     int channels = 0, blockSize = 1;
     juce::AudioBuffer<float> storage, view;
     juce::MidiBuffer midi;
-    lightHost::CallbackMeasurement measurement;
+    lightHostModern::CallbackMeasurement measurement;
 };

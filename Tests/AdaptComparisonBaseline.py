@@ -35,32 +35,32 @@ def main():
 
     # Complete the partial profile isolation already captured in preparation.
     replace('Source/DebugLog.cpp', '\t\tlogsDirectory.createDirectory();',
-            '\t\tif (lightHost::RuntimeProfile::current().test)\n'
-            '\t\t\tlogsDirectory = File((lightHost::RuntimeProfile::current().directory / L"Logs").wstring().c_str());\n'
+            '\t\tif (lightHostModern::RuntimeProfile::current().test)\n'
+            '\t\t\tlogsDirectory = File((lightHostModern::RuntimeProfile::current().directory / L"Logs").wstring().c_str());\n'
             '\t\tlogsDirectory.createDirectory();')
     replace('Source/IconMenu.cpp', '#include "DebugLog.h"', '#include "DebugLog.h"\n#include "RuntimeProfile.h"')
-    replace('Source/IconMenu.cpp', '\t\treturn FindWindowW(nullptr, L"Light Host Modern");',
+    replace('Source/IconMenu.cpp', '\t\treturn FindWindowW(nullptr, L"LightHostModern");',
             '\t\t// The harness owns and closes the exact baseline UI process.\n'
-            '\t\tif (lightHost::RuntimeProfile::current().test) return nullptr;\n'
-            '\t\treturn FindWindowW(nullptr, L"Light Host Modern");')
-    replace('Source/IconMenu.cpp', '\tlightHostLog("Open New UI clicked.");',
-            '\tif (lightHost::RuntimeProfile::current().test) return; // Launch only through the isolated harness.\n'
-            '\tlightHostLog("Open New UI clicked.");')
+            '\t\tif (lightHostModern::RuntimeProfile::current().test) return nullptr;\n'
+            '\t\treturn FindWindowW(nullptr, L"LightHostModern");')
+    replace('Source/IconMenu.cpp', '\tlightHostModernLog("Open New UI clicked.");',
+            '\tif (lightHostModern::RuntimeProfile::current().test) return; // Launch only through the isolated harness.\n'
+            '\tlightHostModernLog("Open New UI clicked.");')
     replace('Source/HostIpcServer.cpp', '#include "DebugLog.h"', '#include "DebugLog.h"\n#include "RuntimeProfile.h"')
     for function in ('isStartWithWindowsEnabled()', 'setStartWithWindows(bool enabled)'):
         replace('Source/HostIpcServer.cpp', '\tbool '+function+'\n\t{',
-                '\tbool '+function+'\n\t{\n\t\tif (lightHost::RuntimeProfile::current().test) return false;')
+                '\tbool '+function+'\n\t{\n\t\tif (lightHostModern::RuntimeProfile::current().test) return false;')
     replace('Source/HostStartup.cpp', '#include "RuntimeProfile.h"', '#include "RuntimeProfile.h"\n#include "RealtimeAudit.h"')
     replace('Source/HostStartup.cpp', '        profile.createDirectories();',
             '        if (!profile.test) throw std::runtime_error("This comparison binary requires a test profile");\n'
             '        profile.createDirectories();\n        installRealtimeAllocationAudit();')
     replace('Source/AudioEngine.cpp', '#include "AudioEngine.h"', '#include "AudioEngine.h"\n#include "RuntimeProfile.h"')
     replace('Source/AudioEngine.cpp', '\tconst auto startupRecoveryConfig = getAudioRecoveryConfiguration();',
-            '\tif (!lightHost::RuntimeProfile::current().noAudio)\n\t{\n\tconst auto startupRecoveryConfig = getAudioRecoveryConfiguration();')
+            '\tif (!lightHostModern::RuntimeProfile::current().noAudio)\n\t{\n\tconst auto startupRecoveryConfig = getAudioRecoveryConfiguration();')
     replace('Source/AudioEngine.cpp', '\tplayer.setProcessor(&hostProcessor);', '\t}\n\tplayer.setProcessor(&hostProcessor);')
     replace('Source/AudioEngine.cpp', '\tif (timerId == audioWatchdogTimerId)\n\t{',
             '\tif (timerId == audioWatchdogTimerId)\n\t{\n'
-            '\t\tif (lightHost::RuntimeProfile::current().test && !comparisonAudioSelected) return;')
+            '\t\tif (lightHostModern::RuntimeProfile::current().test && !comparisonAudioSelected) return;')
 
     # Same clock, histogram, audit implementation and forwarding timer as the
     # final build. Original player, chain, buses, metering and UI remain intact.
@@ -89,7 +89,7 @@ def main():
 
 String AudioEngine::configureComparison(const String& configuration)
 {
-    if (!lightHost::RuntimeProfile::current().test || deviceManager.getCurrentAudioDevice())
+    if (!lightHostModern::RuntimeProfile::current().test || deviceManager.getCurrentAudioDevice())
         throw std::runtime_error("Arm only a stopped comparison test profile");
     const auto value = JSON::parse(configuration);
     const auto output = value["output"].toString();
@@ -123,10 +123,10 @@ String AudioEngine::configureComparison(const String& configuration)
 
 String AudioEngine::comparisonMeasurement()
 {
-    if (!lightHost::RuntimeProfile::current().test) throw std::runtime_error("A comparison profile is required");
+    if (!lightHostModern::RuntimeProfile::current().test) throw std::runtime_error("A comparison profile is required");
     auto result = comparisonMeasurementReply(player.measurement.snapshot());
     auto* data = result.getDynamicObject();
-    data->setProperty("testProfile", String(lightHost::RuntimeProfile::current().name.c_str()));
+    data->setProperty("testProfile", String(lightHostModern::RuntimeProfile::current().name.c_str()));
     data->setProperty("processedBlocks", String(hostProcessor.comparisonBlocks.load()));
     data->setProperty("processedSamples", String(hostProcessor.comparisonSamples.load()));
     data->setProperty("midiInputEvents", String(hostProcessor.comparisonMidi.load()));

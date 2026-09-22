@@ -42,7 +42,7 @@ def main():
         raise RuntimeError('The comparison copy must be a new directory under this workspace out/.')
     if destination.exists():
         raise RuntimeError('Refusing to overwrite an existing comparison copy.')
-    if digest(FROZEN / 'host/Light Host Modern.exe') != HOST_SHA256:
+    if digest(FROZEN / 'host/LightHostModern.exe') != HOST_SHA256:
         raise RuntimeError('The frozen host no longer matches its recorded baseline digest.')
     manifest = json.loads((FROZEN / 'manifest.json').read_text(encoding='utf-8-sig'))
     for entry in manifest['files']:

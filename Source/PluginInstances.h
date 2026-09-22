@@ -6,7 +6,7 @@
 #include <set>
 #include <vector>
 
-namespace lightHost
+namespace lightHostModern
 {
 inline bool normalizeInstanceName(const juce::String& input, juce::String& normalized)
 {

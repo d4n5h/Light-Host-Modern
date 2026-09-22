@@ -40,12 +40,12 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Compile the UI before the host stages it. Both entry points resolve to the
-# same output through LightHost.Output.props and validate its source stamp.
+# same output through LightHostModern.Output.props and validate its source stamp.
 $vswherePath = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
 if (!(Test-Path -LiteralPath $vswherePath)) { throw "Visual Studio Installer (vswhere) was not found." }
 $uiMSBuild = & $vswherePath -latest -products * -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1
 if (!$uiMSBuild) { throw "MSBuild with WinUI tooling was not found." }
-$uiSolution = Join-Path $PSScriptRoot "..\WinUI\LightHost.WinUI.sln"
+$uiSolution = Join-Path $PSScriptRoot "..\WinUI\LightHostModern.WinUI.sln"
 & $uiMSBuild $uiSolution /m "/p:Configuration=$Configuration" /p:Platform=x64 /verbosity:minimal /nologo
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

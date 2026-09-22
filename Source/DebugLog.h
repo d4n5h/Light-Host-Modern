@@ -3,13 +3,13 @@
 
 #include <JuceHeader.h>
 
-void setLightHostDebugEnabled(bool enabled);
-bool isLightHostDebugEnabled();
-String getLightHostDebugLogPath();
-void openLightHostDebugConsoleIfNeeded();
-void lightHostLog(const String& message);
-void installLightHostCrashDiagnostics();
-void setLightHostCrashContext(const String& context);
-void clearLightHostCrashContext();
+void setLightHostModernDebugEnabled(bool enabled);
+bool isLightHostModernDebugEnabled();
+String getLightHostModernDebugLogPath();
+void openLightHostModernDebugConsoleIfNeeded();
+void lightHostModernLog(const String& message);
+void installLightHostModernCrashDiagnostics();
+void setLightHostModernCrashContext(const String& context);
+void clearLightHostModernCrashContext();
 
 #endif /* DebugLog_h */

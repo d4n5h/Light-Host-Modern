@@ -28,8 +28,8 @@ def main():
     parser.add_argument("--formats", nargs="+", choices=("VST", "VST3"), default=["VST", "VST3"])
     args = parser.parse_args()
     build = args.build_dir.resolve()
-    runner = build / "Release/LightHostScanControllerTests.exe"
-    scanner = build / "LightHost_artefacts/Release/LightHostScanner.exe"
+    runner = build / "Release/LightHostModernScanControllerTests.exe"
+    scanner = build / "LightHostModern_artefacts/Release/LightHostModernScanner.exe"
     if not runner.is_file() or not scanner.is_file():
         raise RuntimeError("Build scanner and controller tests in Release first")
     root = REPO / "out/real-plugin-test"

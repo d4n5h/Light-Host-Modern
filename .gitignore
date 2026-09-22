@@ -78,6 +78,8 @@ WinUI/**/obj/
 WinUI/**/bin/
 WinUI/packaged-aumid.txt
 WinUI/**/*_h.h
+WinUI/**/XamlMetaDataProvider.cpp
+WinUI/**/XamlMetaDataProvider.idl
 WinUI/test-screenshots/
 
 # Test and analysis output

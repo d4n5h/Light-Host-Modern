@@ -1,0 +1,12 @@
+namespace LightHostModernWinUI
+{
+    [default_interface]
+    runtimeclass PageState : Microsoft.UI.Xaml.Data.INotifyPropertyChanged
+    {
+        PageState();
+        Boolean AudioLoaded;
+        Boolean PluginsLoaded;
+        Boolean SupportLoaded;
+        Boolean SettingsLoaded;
+    }
+}

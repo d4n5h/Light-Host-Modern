@@ -22,8 +22,8 @@ if ($ExistingProfile) {
     $name=$Purpose+'-'+[guid]::NewGuid().ToString('N')
     $directory=Join-Path $testRoot $name
     New-Item -ItemType Directory -Force -Path $directory | Out-Null
-    if ($PreferencesFixture) { Copy-Item -LiteralPath $PreferencesFixture -Destination (Join-Path $directory 'Light Host Modern.settings') }
-    $hostProcess=Start-Process -FilePath "$repo\out\build\windows-vs2022\LightHost_artefacts\Release\Light Host Modern.exe" -ArgumentList @("--test-profile=$name", ('--profile-root="'+$testRoot+'"')) -WindowStyle Hidden -PassThru
+    if ($PreferencesFixture) { Copy-Item -LiteralPath $PreferencesFixture -Destination (Join-Path $directory 'LightHostModern.settings') }
+    $hostProcess=Start-Process -FilePath "$repo\out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe" -ArgumentList @("--test-profile=$name", ('--profile-root="'+$testRoot+'"')) -WindowStyle Hidden -PassThru
     $startedHost=$true
     $metadata=Join-Path $directory 'profile.json'
     $deadline=[DateTime]::UtcNow.AddSeconds(30)
@@ -42,7 +42,7 @@ if ($ExistingProfile) {
         $info | ConvertTo-Json
         return
     }
-    $launch=rtk proxy winapp run "$repo\WinUI\x64\Release\LightHost.WinUI" --manifest "$repo\WinUI\LightHost.WinUI\Package.appxmanifest" --exe LightHostWinUI.exe --detach --json -- "--test-profile=$($info.name)" "--profile-root=$($info.root)" "--host-pipe=$($info.pipe)" | ConvertFrom-Json
+    $launch=rtk proxy winapp run "$repo\WinUI\x64\Release\LightHostModern.WinUI" --manifest "$repo\WinUI\LightHostModern.WinUI\Package.appxmanifest" --exe LightHostModernWinUI.exe --detach --json -- "--test-profile=$($info.name)" "--profile-root=$($info.root)" "--host-pipe=$($info.pipe)" | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0 -or !$launch.ProcessId) { throw 'The isolated UI did not start.' }
     $info.uiPid=$launch.ProcessId
     $uiStarted=$true

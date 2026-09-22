@@ -4,7 +4,7 @@
 #include <msiquery.h>
 #include <set>
 
-namespace lightHost::update
+namespace lightHostModern::update
 {
 struct MsiHandle
 {
@@ -30,7 +30,10 @@ inline void validateMsi(const std::filesystem::path& file, const Artifact& artif
     MsiHandle database, summary;
     require(MsiOpenDatabaseW(file.c_str(), reinterpret_cast<LPCWSTR>(0), &database.value) == ERROR_SUCCESS, "package_invalid");
     require(parseVersion(msiProperty(database.value, L"ProductVersion")) == parseVersion(artifact.version), "version_mismatch");
-    require(msiProperty(database.value, L"ProductName") == L"Light Host Modern", "artifact_mismatch");
+    const auto product = msiProperty(database.value, L"ProductName");
+    const bool legacy = product == L"Light Host Modern" && *parseVersion(artifact.version) < std::array<unsigned,3>{1,4,0};
+    // ProductName remains the MSI compatibility identity during the transition.
+    require(product == L"LightHostModern" || product == L"Light Host Modern", "artifact_mismatch");
     require(_wcsicmp(msiProperty(database.value, L"UpgradeCode").c_str(), upgradeCode) == 0, "artifact_mismatch");
     require(MsiGetSummaryInformationW(database.value, nullptr, 0, &summary.value) == ERROR_SUCCESS, "package_invalid");
     UINT type = 0; INT number = 0; FILETIME time{}; wchar_t value[1024]{}; DWORD size = 1024;
@@ -50,7 +53,9 @@ inline void validateMsi(const std::filesystem::path& file, const Artifact& artif
         if (bar != std::wstring::npos) name.erase(0, bar + 1);
         names.insert(std::move(name));
     }
-    for (const auto* name : {L"Light Host Modern.exe", L"LightHostWinUI.exe", L"LightHostScanner.exe", L"LightHostUpdateHelper.exe"})
+    const auto required = legacy ? std::vector<std::wstring>{L"Light Host Modern.exe", L"LightHostWinUI.exe", L"LightHostScanner.exe", L"LightHostUpdateHelper.exe"}
+        : std::vector<std::wstring>{L"LightHostModern.exe", L"LightHostModernWinUI.exe", L"LightHostModernScanner.exe", L"LightHostModernUpdateHelper.exe"};
+    for (const auto& name : required)
         require(names.count(name) != 0, "package_incomplete");
 }
 inline void validatePe(juce::InputStream& stream)
@@ -86,11 +91,11 @@ inline void validateZip(const std::filesystem::path& path, const Artifact& artif
     auto manifestStream = std::unique_ptr<juce::InputStream>(zip.createStreamForEntry(manifestIndex));
     require(manifestStream != nullptr, "package_invalid");
     const auto manifest = juce::JSON::parse(manifestStream->readEntireStreamAsString());
-    require(manifest.isObject() && manifest["name"].toString() == "Light Host Modern", "artifact_mismatch");
+    require(manifest.isObject() && manifest["name"].toString() == "LightHostModern", "artifact_mismatch");
     require(parseVersion(manifest["version"].toString().toWideCharPointer()) == parseVersion(artifact.version), "version_mismatch");
     require(manifest["platform"].toString() == "x64", "architecture_mismatch");
-    for (const auto& name : {juce::String("Light Host Modern.exe"), juce::String("LightHostScanner.exe"), juce::String("LightHostUpdateHelper.exe"),
-                            juce::String("WinUI/x64/Release/LightHost.WinUI/LightHostWinUI.exe")})
+    for (const auto& name : {juce::String("LightHostModern.exe"), juce::String("LightHostModernScanner.exe"), juce::String("LightHostModernUpdateHelper.exe"),
+                            juce::String("WinUI/x64/Release/LightHostModern.WinUI/LightHostModernWinUI.exe")})
     {
         // Compress-Archive uses backslashes on some PowerShell versions.
         int index = zip.getIndexOfFileName(name);

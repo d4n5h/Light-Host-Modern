@@ -15,6 +15,6 @@ if ($OutputFile) { $snapshot | ConvertTo-Json -Depth 20 | Set-Content -LiteralPa
 [ordered]@{profile=$info.name;hostPid=$info.hostPid;hostSession=$snapshot.hostSession;
     globalMuted=$snapshot.globalMuted;globalBypassed=$snapshot.globalBypassed;
     driverAvailable=$snapshot.audioSelection.driverAvailable;loadedPlugins=$snapshot.diagnostics.loadedPlugins;
-    uiProcesses=@(Get-CimInstance Win32_Process -Filter "Name='LightHostWinUI.exe'" | Where-Object {
+    uiProcesses=@(Get-CimInstance Win32_Process -Filter "Name='LightHostModernWinUI.exe'" | Where-Object {
         $_.CommandLine.Contains('--test-profile='+$info.name)
     } | Select-Object ProcessId,ExecutablePath,CommandLine)} | ConvertTo-Json -Depth 5

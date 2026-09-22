@@ -18,26 +18,26 @@ Realloc realRealloc = nullptr;
 Free realFree = nullptr;
 void* __cdecl auditedMalloc(size_t bytes)
 {
-    if (!cppAllocation) lightHost::realtimeAudit::allocation();
+    if (!cppAllocation) lightHostModern::realtimeAudit::allocation();
     return realMalloc(bytes);
 }
 void* __cdecl auditedCalloc(size_t count, size_t bytes)
 {
-    if (!cppAllocation) lightHost::realtimeAudit::allocation();
+    if (!cppAllocation) lightHostModern::realtimeAudit::allocation();
     return realCalloc(count, bytes);
 }
 void* __cdecl auditedRealloc(void* value, size_t bytes)
 {
     if (!cppAllocation)
     {
-        if (value) lightHost::realtimeAudit::release();
-        if (bytes) lightHost::realtimeAudit::allocation();
+        if (value) lightHostModern::realtimeAudit::release();
+        if (bytes) lightHostModern::realtimeAudit::allocation();
     }
     return realRealloc(value, bytes);
 }
 void __cdecl auditedFree(void* value)
 {
-    if (value && !cppAllocation) lightHost::realtimeAudit::release();
+    if (value && !cppAllocation) lightHostModern::realtimeAudit::release();
     realFree(value);
 }
 struct CppScope { bool previous = cppAllocation; CppScope() { cppAllocation = true; } ~CppScope() { cppAllocation = previous; } };
@@ -48,7 +48,7 @@ struct CppScope { bool previous = cppAllocation; CppScope() { cppAllocation = tr
 // processBlock scope, including Release builds where CRT debug hooks don't work.
 bool installRealtimeAllocationAudit()
 {
-    if (lightHost::realtimeAudit::available.load()) return true;
+    if (lightHostModern::realtimeAudit::available.load()) return true;
     auto* base = reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr));
     const auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
     const auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
@@ -79,13 +79,13 @@ bool installRealtimeAllocationAudit()
         }
     }
     const bool complete = installed >= 3 && realMalloc && realRealloc && realFree;
-    lightHost::realtimeAudit::available.store(complete);
+    lightHostModern::realtimeAudit::available.store(complete);
     return complete;
 }
 
 void* operator new(size_t bytes)
 {
-    lightHost::realtimeAudit::allocation();
+    lightHostModern::realtimeAudit::allocation();
     CppScope scope;
     for (;;)
     {
@@ -98,7 +98,7 @@ void* operator new(size_t bytes)
 void* operator new[](size_t bytes) { return ::operator new(bytes); }
 void operator delete(void* value) noexcept
 {
-    if (value) lightHost::realtimeAudit::release();
+    if (value) lightHostModern::realtimeAudit::release();
     CppScope scope;
     std::free(value);
 }
@@ -111,7 +111,7 @@ void operator delete(void* value, const std::nothrow_t&) noexcept { ::operator d
 void operator delete[](void* value, const std::nothrow_t&) noexcept { ::operator delete(value); }
 void* operator new(size_t bytes, std::align_val_t alignment)
 {
-    lightHost::realtimeAudit::allocation();
+    lightHostModern::realtimeAudit::allocation();
     CppScope scope;
     for (;;)
     {
@@ -124,7 +124,7 @@ void* operator new(size_t bytes, std::align_val_t alignment)
 void* operator new[](size_t bytes, std::align_val_t alignment) { return ::operator new(bytes, alignment); }
 void operator delete(void* value, std::align_val_t) noexcept
 {
-    if (value) lightHost::realtimeAudit::release();
+    if (value) lightHostModern::realtimeAudit::release();
     CppScope scope;
     _aligned_free(value);
 }

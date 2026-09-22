@@ -6,9 +6,9 @@ $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\HostProtocol.ps1"
 $repo = (Resolve-Path -LiteralPath "$PSScriptRoot\..").Path
 $profileRoot = Join-Path $repo 'out\test-profiles'
-$executable = Join-Path $repo 'out\build\windows-vs2022\LightHost_artefacts\Release\Light Host Modern.exe'
+$executable = Join-Path $repo 'out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe'
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
-$productionFiles = @((Join-Path $env:APPDATA 'Light Host Modern\Light Host Modern.settings'), (Join-Path $env:LOCALAPPDATA 'LightHostModern\ui-settings.ini'))
+$productionFiles = @((Join-Path $env:APPDATA 'LightHostModern\LightHostModern.settings'), (Join-Path $env:LOCALAPPDATA 'LightHostModern\ui-settings.ini'))
 $productionBefore = @{}
 foreach ($file in $productionFiles) { $productionBefore[$file] = if (Test-Path -LiteralPath $file) { (Get-FileHash -LiteralPath $file).Hash } else { '' } }
 $results = [Collections.Generic.List[object]]::new()

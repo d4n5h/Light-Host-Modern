@@ -2,7 +2,7 @@
 # Without -Execute, this script inspects packages and writes the reviewable plan.
 param([Parameter(Mandatory)][string]$CurrentMsi,
       [string]$PreviousMsi='',
-      [string]$ExpectedVersion='1.3.1',
+      [string]$ExpectedVersion='1.4.0',
       [string]$OutputDirectory='out/msi-lifecycle',
       [switch]$Execute,
       [string]$DisposableComputerName='')
@@ -26,7 +26,7 @@ function Package([string]$Path) {
         }
         $summary=$database.SummaryInformation(0)
         try { $values.architecture=$summary.Property(7) } finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($summary) }
-        if ($values.UpgradeCode -ne $expectedUpgrade -or $values.ALLUSERS -ne '1' -or !$values.architecture.StartsWith('x64;')) { throw 'Package identity, scope or architecture does not match Light Host Modern.' }
+        if ($values.UpgradeCode -ne $expectedUpgrade -or $values.ALLUSERS -ne '1' -or !$values.architecture.StartsWith('x64;')) { throw 'Package identity, scope or architecture does not match LightHostModern.' }
         [pscustomobject]$values
     } finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($database) }
 }
@@ -45,25 +45,27 @@ function Msi([string]$Name,[string[]]$Arguments) {
 function InstalledRoot([string]$Code) {
     if ($installer.ProductState($Code) -ne 5) { throw "The product is not installed: $Code" }
     $path=[IO.Path]::GetFullPath($installer.ProductInfo($Code,'InstallLocation')).TrimEnd('\')
-    $allowed=[IO.Path]::GetFullPath((Join-Path $env:ProgramFiles 'Light Host Modern')).TrimEnd('\')
+    $productFolder=if ([version]$installer.ProductInfo($Code,'VersionString') -lt [version]'1.4.0') { 'Light Host Modern' } else { 'LightHostModern' }
+    $allowed=[IO.Path]::GetFullPath((Join-Path $env:ProgramFiles $productFolder)).TrimEnd('\')
     if (!$path.Equals($allowed,[StringComparison]::OrdinalIgnoreCase)) { throw "Unexpected installation directory: $path" }
     $path
 }
 function Verify-Payload([string]$Code,[switch]$Current) {
     $directory=InstalledRoot $Code
-    $payload=@('Light Host Modern.exe','WinUI\x64\Release\LightHost.WinUI\LightHostWinUI.exe')
-    if ($Current) { $payload+=@('LightHostScanner.exe','LightHostUpdateHelper.exe') }
+    $payload=if ($Current) { @('LightHostModern.exe','WinUI\x64\Release\LightHostModern.WinUI\LightHostModernWinUI.exe') } else { @('Light Host Modern.exe','WinUI\x64\Release\LightHost.WinUI\LightHostWinUI.exe') }
+    if ($Current) { $payload+=@('LightHostModernScanner.exe','LightHostModernUpdateHelper.exe') }
     foreach ($relative in $payload) {
         if (!(Test-Path -LiteralPath (Join-Path $directory $relative) -PathType Leaf)) { throw "Installed payload is missing $relative" }
     }
+    if (!$Current) { return $directory }
     $shell=New-Object -ComObject WScript.Shell
     try {
         foreach ($relative in @(
-            (Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'Light Host Modern\Light Host Modern.lnk'),
-            (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Light Host Modern.lnk'))) {
+            (Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'LightHostModern\LightHostModern.lnk'),
+            (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'LightHostModern.lnk'))) {
             if (!(Test-Path -LiteralPath $relative)) { throw "Installed shortcut is missing: $relative" }
             $shortcut=$shell.CreateShortcut($relative)
-            try { if ($shortcut.TargetPath -ne (Join-Path $directory 'Light Host Modern.exe')) { throw 'A shortcut targets an obsolete installation.' } }
+            try { if ($shortcut.TargetPath -ne (Join-Path $directory 'LightHostModern.exe')) { throw 'A shortcut targets an obsolete installation.' } }
             finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut) }
         }
     } finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
@@ -83,8 +85,8 @@ try {
     if (!$previous -or !$DisposableComputerName -or $env:COMPUTERNAME -ne $DisposableComputerName) { throw 'Execution requires an earlier MSI and the exact disposable Windows computer name.' }
     $principal=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     if (!$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Run the test from an elevated terminal inside the disposable Windows machine.' }
-    if (@($installer.RelatedProducts($expectedUpgrade)).Count) { throw 'Use a fresh disposable machine without a registered Light Host Modern installation.' }
-    $prefs=Join-Path $env:APPDATA 'Light Host Modern\Light Host Modern.settings'
+    if (@($installer.RelatedProducts($expectedUpgrade)).Count) { throw 'Use a fresh disposable machine without a registered LightHostModern installation.' }
+    $prefs=Join-Path $env:APPDATA 'LightHostModern\LightHostModern.settings'
     if (Test-Path -LiteralPath $prefs) { throw 'The disposable machine already contains application preferences.' }
     Scenario 'Install the previous MSI with its existing machine scope and shortcuts' {
         $installedByTest.Add($previous.ProductCode)
@@ -103,7 +105,7 @@ try {
         if ((Get-FileHash -LiteralPath $prefs).Hash -ne $prefsHash) { throw 'Upgrade changed user preferences.' }
     }
     Scenario 'Repair restores the exact current scanner payload' {
-        $scanner=[IO.Path]::GetFullPath((Join-Path $script:installRoot 'LightHostScanner.exe'))
+        $scanner=[IO.Path]::GetFullPath((Join-Path $script:installRoot 'LightHostModernScanner.exe'))
         $saved=[IO.Path]::GetFullPath((Join-Path $outputRoot ('repair-scanner-'+[guid]::NewGuid().ToString('N')+'.exe')))
         if (!$scanner.StartsWith($script:installRoot+'\',[StringComparison]::OrdinalIgnoreCase) -or !$saved.StartsWith($outputRoot+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'Repair fixture paths escaped their verified directories.' }
         $before=(Get-FileHash -LiteralPath $scanner).Hash
@@ -114,7 +116,7 @@ try {
     }
     Scenario 'Uninstall removes registration and application files and preserves preferences' {
         Msi 'uninstall-current' @('/x',$current.ProductCode)
-        if ($installer.ProductState($current.ProductCode) -eq 5 -or (Test-Path -LiteralPath (Join-Path $script:installRoot 'Light Host Modern.exe'))) { throw 'Uninstall left an installed product or executable.' }
+        if ($installer.ProductState($current.ProductCode) -eq 5 -or (Test-Path -LiteralPath (Join-Path $script:installRoot 'LightHostModern.exe'))) { throw 'Uninstall left an installed product or executable.' }
         if ((Get-FileHash -LiteralPath $prefs).Hash -ne $prefsHash) { throw 'Uninstall changed user preferences.' }
     }
 } finally {

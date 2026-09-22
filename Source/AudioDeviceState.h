@@ -16,6 +16,7 @@ struct DiagnosticsSnapshot
 	String recoveryTargetOutputDevice;
 	double cpuUsagePercent = 0.0;
 	std::optional<double> hostCpuPercent, workerCpuPercent;
+    std::optional<double> hostResidentMiB, hostCommittedMiB, workerResidentMiB, workerCommittedMiB;
 	bool driverAvailable = false;
 	int xRunCount = 0;
 	double sampleRate = 0.0;
@@ -41,7 +42,7 @@ struct DiagnosticsSnapshot
 	uint64 processFailures = 0;
 	uint64 midiOverflow = 0;
 	uint64 processedBlocks = 0, processedSamples = 0, inputMidiEvents = 0, outputMidiEvents = 0;
-	lightHost::MeterSnapshot inputMeters, outputMeters;
+	lightHostModern::MeterSnapshot inputMeters, outputMeters;
 	uint64 reusedSlots = 0;
 	uint64 rebuiltSlots = 0;
 };

@@ -69,7 +69,7 @@ def compare(baseline, current):
     def window_sizes(report):
         return sorted({(w["elements"][0]["width"], w["elements"][0]["height"])
                        for r in report["runs"] for w in r.get("window", {}).get("windows", [])
-                       if w.get("elements") and w["title"].startswith("Light Host Modern")})
+                       if w.get("elements") and w["title"].startswith("LightHostModern")})
     if window_sizes(baseline) != window_sizes(current):
         findings.append({"kind": "incomparable", "metric": "windowSize", "baseline": window_sizes(baseline), "current": window_sizes(current)})
     runs = {label: [summarize_run(r) for r in report["runs"]] for label, report in (("baseline", baseline), ("current", current))}

@@ -1,4 +1,4 @@
-﻿param([Parameter(Mandatory)][string]$ProfileInfo,
+param([Parameter(Mandatory)][string]$ProfileInfo,
       [Parameter(Mandatory)][string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 $info=Get-Content -LiteralPath $ProfileInfo -Raw | ConvertFrom-Json
@@ -7,7 +7,7 @@ if (!$process -or !$process.CommandLine.Contains('--test-profile='+$info.name)) 
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,WindowsBase
 $AppPid=[int]$info.uiPid
 rtk proxy winapp ui click NavDashboard -a $AppPid --json | Out-Null
-$window=(rtk proxy winapp ui list-windows -a $AppPid --json | ConvertFrom-Json | Where-Object { $_.title.StartsWith('Light Host Modern [Test:') } | Select-Object -First 1).hwnd
+$window=(rtk proxy winapp ui list-windows -a $AppPid --json | ConvertFrom-Json | Where-Object { $_.title.StartsWith('LightHostModern [Test:') } | Select-Object -First 1).hwnd
 $root=[Windows.Automation.AutomationElement]::FromHandle([IntPtr][long]$window)
 function Element([string]$Id) {
     $condition=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty,$Id)

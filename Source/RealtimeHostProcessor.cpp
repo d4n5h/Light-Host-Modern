@@ -4,8 +4,8 @@
 #include <thread>
 #include <stdexcept>
 
-void lightHostLog(const String& message);
-void setLightHostCrashContext(const String& context);
+void lightHostModernLog(const String& message);
+void setLightHostModernCrashContext(const String& context);
 
 PluginSlot::PluginSlot(PluginDescription descriptionIn, std::unique_ptr<AudioPluginInstance> processorIn)
 	: description(std::move(descriptionIn)),
@@ -25,7 +25,7 @@ PluginSlot::~PluginSlot()
 {
 	if (processor) processor->removeListener(this);
 	try { release(); }
-	catch (...) { lightHostLog("Plugin threw during release; processor destruction continues"); }
+	catch (...) { lightHostModernLog("Plugin threw during release; processor destruction continues"); }
 }
 
 void PluginSlot::prepare(double sampleRateIn, int blockSizeIn, int hostChannels)
@@ -130,6 +130,9 @@ RealtimeHostProcessor::ScopedSuspension::~ScopedSuspension()
 void RealtimeHostProcessor::prepareBuffers()
 {
     preparedHostChannels = jlimit(1, maxScratchChannels, jmax(getTotalNumInputChannels(), getTotalNumOutputChannels()));
+    preparedInputChannels = jlimit(0, maxScratchChannels, getTotalNumInputChannels());
+    preparedOutputChannels = jlimit(0, maxScratchChannels, getTotalNumOutputChannels());
+    monoGains.resize(static_cast<size_t>(currentBlockSize));
     scratchBuffer.setSize(maxScratchChannels, currentBlockSize, false, false, true);
     // JUCE reallocates channel-pointer storage when a view grows beyond its current
     // channel count. Keep one fixed-count view per layout, including 32+ channels.
@@ -215,10 +218,10 @@ RealtimeHostStats RealtimeHostProcessor::getStats() const
     stats.processedSamples = processedSamples.load(std::memory_order_relaxed);
     stats.inputMidiEvents = inputMidiEvents.load(std::memory_order_relaxed);
     stats.outputMidiEvents = outputMidiEvents.load(std::memory_order_relaxed);
-    stats.hostAllocations = lightHost::realtimeAudit::hostAllocations.load();
-    stats.hostFrees = lightHost::realtimeAudit::hostFrees.load();
-    stats.pluginAllocations = lightHost::realtimeAudit::pluginAllocations.load();
-    stats.pluginFrees = lightHost::realtimeAudit::pluginFrees.load();
+    stats.hostAllocations = lightHostModern::realtimeAudit::hostAllocations.load();
+    stats.hostFrees = lightHostModern::realtimeAudit::hostFrees.load();
+    stats.pluginAllocations = lightHostModern::realtimeAudit::pluginAllocations.load();
+    stats.pluginFrees = lightHostModern::realtimeAudit::pluginFrees.load();
 
 	if (auto snapshot = getActiveSnapshot())
 	{
@@ -255,6 +258,7 @@ void RealtimeHostProcessor::prepareToPlay(double sampleRate, int maximumExpected
 {
 	ScopedSuspension suspension(*this);
 	lastInputLevel.store(0.0f); lastOutputLevel.store(0.0f);
+    inputPresentation.reset(); outputPresentation.reset();
 	currentSampleRate = std::isfinite(sampleRate) && sampleRate > 0.0 ? sampleRate : 44100.0;
 	currentBlockSize = jmax(1, maximumExpectedSamplesPerBlock);
 	prepareBuffers();
@@ -267,6 +271,7 @@ void RealtimeHostProcessor::releaseResources()
 {
 	ScopedSuspension suspension(*this);
 	lastInputLevel.store(0.0f); lastOutputLevel.store(0.0f);
+    inputPresentation.reset(); outputPresentation.reset();
 	if (auto snapshot = getActiveSnapshot())
 		for (auto& slot : snapshot->slots)
 			if (slot != nullptr)
@@ -275,7 +280,7 @@ void RealtimeHostProcessor::releaseResources()
 
 void RealtimeHostProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiMessages)
 {
-    lightHost::realtimeAudit::Scope audit(lightHost::realtimeAudit::Origin::host);
+    lightHostModern::realtimeAudit::Scope audit(lightHostModern::realtimeAudit::Origin::host);
     ScopedNoDenormals noDenormals;
     // The second check closes the race with a controller suspending between the
     // first check and admission. Only the controller waits for in-flight work.
@@ -285,9 +290,10 @@ void RealtimeHostProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&
     if (processingSuspended.load()) { buffer.clear(); return; }
     const int channels = buffer.getNumChannels();
     if (channels > preparedHostChannels || channels == 0) { buffer.clear(); return; }
-    const bool collect = lightHost::diagnosticsCollectionEnabled.load(std::memory_order_relaxed);
+    const bool collect = lightHostModern::diagnosticsCollectionEnabled.load(std::memory_order_relaxed);
     lastInputLevel.store(collect ? inputMeters.process(buffer.getArrayOfReadPointers(), channels, buffer.getNumSamples())
                                 : buffer.getMagnitude(0, buffer.getNumSamples()), std::memory_order_relaxed);
+    inputPresentation.process(lastInputLevel.load(std::memory_order_relaxed), buffer.getNumSamples(), currentSampleRate);
     if (collect) inputMidiEvents.fetch_add(static_cast<uint64>(midiMessages.getNumEvents()), std::memory_order_relaxed);
     auto* const snapshot = realtimeSnapshot.load(std::memory_order_acquire);
     if (resumeFade.exchange(false)) resumeGain = 0.0f;
@@ -299,9 +305,27 @@ void RealtimeHostProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&
         const int count = jmin(currentBlockSize, buffer.getNumSamples() - offset);
         auto& segment = segmentViews[(size_t) channels];
         segment.setDataToReferTo(buffer.getArrayOfWritePointers(), channels, offset, count);
+        // Morph the input matrix, retaining continuity and the same dry/wet route.
+        const float target = monoInputs.load(std::memory_order_relaxed) ? 1.0f : 0.0f;
+        const float step = static_cast<float>(1.0 / (currentSampleRate * 0.005));
+        const int inputs = jmin(preparedInputChannels, channels);
+        for (int sample = 0; sample < count; ++sample)
+        {
+            monoMix += jlimit(-step, step, target - monoMix);
+            monoGains[static_cast<size_t>(sample)] = monoMix;
+            if (monoMix == 0.0f) continue;
+            float sum = 0.0f;
+            for (int ch = 0; ch < inputs; ++ch) sum += segment.getSample(ch, sample);
+            // Main stereo route only: never duplicate the mix into auxiliary channels.
+            for (int ch = 0; ch < jmin(2, channels); ++ch)
+            {
+                auto& value = segment.getWritePointer(ch)[sample];
+                value += (sum - value) * monoMix;
+            }
+        }
         globalControls.capture(segment);
         segmentMidi.clear();
-        dropped += lightHost::copyBoundedMidi(segmentMidi, midiMessages, offset, count, -offset, midiCapacity);
+        dropped += lightHostModern::copyBoundedMidi(segmentMidi, midiMessages, offset, count, -offset, midiCapacity);
         if (snapshot) for (auto& slot : snapshot->slots)
         {
             if (!slot || !slot->processor || !slot->prepared) continue;
@@ -309,12 +333,26 @@ void RealtimeHostProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&
             processSlot(*slot, segment, segmentMidi);
             if (segmentMidi.data.getAllocatedCapacity() < midiCapacity) midiStorageNeedsRepair.store(true);
             filteredMidi.clear();
-            dropped += lightHost::copyBoundedMidi(filteredMidi, segmentMidi, 0, count, 0, midiCapacity);
+            dropped += lightHostModern::copyBoundedMidi(filteredMidi, segmentMidi, 0, count, 0, midiCapacity);
             segmentMidi.swapWith(filteredMidi);
             slot->mixDry(segment, slot->bypassed.load(std::memory_order_relaxed));
         }
         globalControls.mix(segment);
-        dropped += lightHost::copyBoundedMidi(outputMidi, segmentMidi, 0, count, offset, midiCapacity);
+        // Physical outputs 1/2 remain the principal pair even when JUCE packs
+        // a sparse output mask. Never mix an auxiliary output into this pair.
+        const bool hasPair = mainOutputLeft >= 0 && mainOutputRight >= 0
+            && mainOutputLeft < preparedOutputChannels && mainOutputRight < preparedOutputChannels;
+        const float outputTarget = monoOutput.load(std::memory_order_relaxed) && hasPair ? 1.0f : 0.0f;
+        for (int i = 0; i < count; ++i) {
+            outputMonoMix += jlimit(-step, step, outputTarget - outputMonoMix);
+            if (!hasPair || outputMonoMix == 0.0f) continue;
+            auto& left = segment.getWritePointer(mainOutputLeft)[i];
+            auto& right = segment.getWritePointer(mainOutputRight)[i];
+            const float average = 0.5f * left + 0.5f * right;
+            left += (average - left) * outputMonoMix;
+            right += (average - right) * outputMonoMix;
+        }
+        dropped += lightHostModern::copyBoundedMidi(outputMidi, segmentMidi, 0, count, offset, midiCapacity);
         for (int i = 0; i < count && resumeGain < 1.0f; ++i)
         {
             resumeGain = jmin(1.0f, resumeGain + (float) (1.0 / (currentSampleRate * 0.005)));
@@ -322,9 +360,14 @@ void RealtimeHostProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&
         }
     }
     midiMessages.clear();
-    dropped += lightHost::copyBoundedMidi(midiMessages, outputMidi, 0, buffer.getNumSamples(), 0, destinationCapacity);
-    lastOutputLevel.store(collect ? outputMeters.process(buffer.getArrayOfReadPointers(), channels, buffer.getNumSamples())
-                                 : buffer.getMagnitude(0, buffer.getNumSamples()), std::memory_order_relaxed);
+    dropped += lightHostModern::copyBoundedMidi(midiMessages, outputMidi, 0, buffer.getNumSamples(), 0, destinationCapacity);
+    float outputPeak = 0.0f;
+    if (!collect)
+        for (int ch = 0; ch < jmin(preparedOutputChannels, channels); ++ch)
+            outputPeak = jmax(outputPeak, buffer.getMagnitude(ch, 0, buffer.getNumSamples()));
+    lastOutputLevel.store(collect ? outputMeters.process(buffer.getArrayOfReadPointers(), jmin(preparedOutputChannels, channels), buffer.getNumSamples())
+                                 : outputPeak, std::memory_order_relaxed);
+    outputPresentation.process(lastOutputLevel.load(std::memory_order_relaxed), buffer.getNumSamples(), currentSampleRate);
     if (collect) {
         midiOverflowCount.fetch_add(dropped, std::memory_order_relaxed);
         outputMidiEvents.fetch_add(static_cast<uint64>(midiMessages.getNumEvents()), std::memory_order_relaxed);
@@ -336,8 +379,20 @@ void RealtimeHostProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&
 void RealtimeHostProcessor::setDiagnosticsEnabled(bool enabled)
 {
     ScopedSuspension suspension(*this, false);
-    lightHost::diagnosticsCollectionEnabled.store(enabled, std::memory_order_relaxed);
+    lightHostModern::diagnosticsCollectionEnabled.store(enabled, std::memory_order_relaxed);
     inputMeters.clearHistory(); outputMeters.clearHistory();
+}
+
+void RealtimeHostProcessor::configureOutputChannels(const BigInteger& physicalChannels)
+{
+    ScopedSuspension suspension(*this, false);
+    mainOutputLeft = mainOutputRight = -1;
+    int packed = 0;
+    for (int physical = physicalChannels.findNextSetBit(0); physical >= 0; physical = physicalChannels.findNextSetBit(physical + 1), ++packed) {
+        if (physical == 0) mainOutputLeft = packed;
+        if (physical == 1) mainOutputRight = packed;
+    }
+    outputMonoMix = 0.0f;
 }
 
 void RealtimeHostProcessor::prepareMidiBuffer(MidiBuffer& buffer)
@@ -349,7 +404,7 @@ void RealtimeHostProcessor::prepareMidiBuffer(MidiBuffer& buffer)
 
 void RealtimeHostProcessor::prepareSnapshot(ChainSnapshot& snapshot)
 {
-	lightHostLog("RealtimeHostProcessor prepareSnapshot begin slots=" + String((int) snapshot.slots.size()));
+	lightHostModernLog("RealtimeHostProcessor prepareSnapshot begin slots=" + String((int) snapshot.slots.size()));
 	snapshot.sampleRate = currentSampleRate;
 	snapshot.blockSize = currentBlockSize;
 	snapshot.maxPluginChannels = jmax(snapshot.inputChannels, snapshot.outputChannels);
@@ -364,28 +419,28 @@ void RealtimeHostProcessor::prepareSnapshot(ChainSnapshot& snapshot)
 
 		try
 		{
-			setLightHostCrashContext("RealtimeHostProcessor::prepareSnapshot prepare '" + slot->description.name
+			setLightHostModernCrashContext("RealtimeHostProcessor::prepareSnapshot prepare '" + slot->description.name
 				+ "' sampleRate=" + String(currentSampleRate)
 				+ " blockSize=" + String(currentBlockSize)
 				+ " inputs=" + String(slot->inputChannels)
 				+ " outputs=" + String(slot->outputChannels));
-			lightHostLog("RealtimeHostProcessor prepare slot begin '" + slot->description.name + "'");
+			lightHostModernLog("RealtimeHostProcessor prepare slot begin '" + slot->description.name + "'");
 			slot->prepare(currentSampleRate, currentBlockSize, preparedHostChannels);
-			lightHostLog("RealtimeHostProcessor prepare slot completed '" + slot->description.name + "'");
+			lightHostModernLog("RealtimeHostProcessor prepare slot completed '" + slot->description.name + "'");
 		}
 		catch (const std::exception& e)
 		{
-			lightHostLog("RealtimeHostProcessor prepare slot C++ exception '" + slot->description.name + "': " + String(e.what()));
+			lightHostModernLog("RealtimeHostProcessor prepare slot C++ exception '" + slot->description.name + "': " + String(e.what()));
 			slot->processDisabled.store(true, std::memory_order_release);
 			slot->processFailed.store(true, std::memory_order_release);
-			if (lightHost::diagnosticsCollectionEnabled.load(std::memory_order_relaxed)) processFailureCount.fetch_add(1, std::memory_order_relaxed);
+			if (lightHostModern::diagnosticsCollectionEnabled.load(std::memory_order_relaxed)) processFailureCount.fetch_add(1, std::memory_order_relaxed);
 		}
 		catch (...)
 		{
-			lightHostLog("RealtimeHostProcessor prepare slot unknown exception '" + slot->description.name + "'");
+			lightHostModernLog("RealtimeHostProcessor prepare slot unknown exception '" + slot->description.name + "'");
 			slot->processDisabled.store(true, std::memory_order_release);
 			slot->processFailed.store(true, std::memory_order_release);
-			if (lightHost::diagnosticsCollectionEnabled.load(std::memory_order_relaxed)) processFailureCount.fetch_add(1, std::memory_order_relaxed);
+			if (lightHostModern::diagnosticsCollectionEnabled.load(std::memory_order_relaxed)) processFailureCount.fetch_add(1, std::memory_order_relaxed);
 		}
 
 		snapshot.totalLatencySamples += slot->getLatencySamples();
@@ -393,7 +448,7 @@ void RealtimeHostProcessor::prepareSnapshot(ChainSnapshot& snapshot)
 
 	setLatencySamples(snapshot.totalLatencySamples);
     globalControls.prepare(preparedHostChannels, currentBlockSize, snapshot.totalLatencySamples, currentSampleRate);
-	lightHostLog("RealtimeHostProcessor prepareSnapshot completed latencySamples=" + String(snapshot.totalLatencySamples));
+	lightHostModernLog("RealtimeHostProcessor prepareSnapshot completed latencySamples=" + String(snapshot.totalLatencySamples));
 }
 
 void RealtimeHostProcessor::processSlot(PluginSlot& slot, AudioBuffer<float>& buffer, MidiBuffer& midiMessages)
@@ -406,7 +461,7 @@ void RealtimeHostProcessor::processSlot(PluginSlot& slot, AudioBuffer<float>& bu
     {
         slot.processDisabled.store(true);
         slot.processFailed.store(true);
-        if (lightHost::diagnosticsCollectionEnabled.load(std::memory_order_relaxed)) processFailureCount.fetch_add(1);
+        if (lightHostModern::diagnosticsCollectionEnabled.load(std::memory_order_relaxed)) processFailureCount.fetch_add(1);
         slot.processBypass(buffer);
         return;
     }
@@ -430,7 +485,7 @@ void RealtimeHostProcessor::processSlot(PluginSlot& slot, AudioBuffer<float>& bu
     {
         slot.processDisabled.store(true);
         slot.processFailed.store(true);
-        if (lightHost::diagnosticsCollectionEnabled.load(std::memory_order_relaxed)) processFailureCount.fetch_add(1);
+        if (lightHostModern::diagnosticsCollectionEnabled.load(std::memory_order_relaxed)) processFailureCount.fetch_add(1);
         slot.processBypass(buffer);
         return;
     }
@@ -439,4 +494,7 @@ void RealtimeHostProcessor::processSlot(PluginSlot& slot, AudioBuffer<float>& bu
     const int copied = jmin(buffer.getNumChannels(), slot.mainOutputChannels);
     for (int channel = 0; channel < copied; ++channel) buffer.copyFrom(channel, 0, scratchBuffer, channel, 0, samples);
     for (int channel = copied; channel < buffer.getNumChannels(); ++channel) buffer.clear(channel, 0, samples);
+    if (slot.mainOutputChannels == 1 && buffer.getNumChannels() >= 2)
+        for (int sample = 0; sample < samples; ++sample)
+            buffer.setSample(1, sample, scratchBuffer.getSample(0, sample) * monoGains[static_cast<size_t>(sample)]);
 }

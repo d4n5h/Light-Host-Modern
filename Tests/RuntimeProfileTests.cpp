@@ -3,7 +3,7 @@
 
 int main()
 {
-    using lightHost::RuntimeProfile;
+    using lightHostModern::RuntimeProfile;
     using scenarios::require;
     scenarios::Runner runner;
     runner.run("production paths and explicit no-audio", [] {

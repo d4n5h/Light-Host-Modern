@@ -1,0 +1,11 @@
+import "PageState.idl";
+
+namespace LightHostModernWinUI
+{
+    [default_interface]
+    runtimeclass MainWindow : Microsoft.UI.Xaml.Window
+    {
+        MainWindow();
+        LightHostModernWinUI.PageState Pages{ get; };
+    }
+}

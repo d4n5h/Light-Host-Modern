@@ -1,8 +1,0 @@
-namespace LightHostWinUI
-{
-    [default_interface]
-    runtimeclass SupportPageView : Microsoft.UI.Xaml.Controls.UserControl
-    {
-        SupportPageView();
-    }
-}

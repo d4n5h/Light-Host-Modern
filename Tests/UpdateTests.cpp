@@ -4,7 +4,7 @@
 #include <cstring>
 #include <iostream>
 
-using namespace lightHost::update;
+using namespace lightHostModern::update;
 namespace
 {
 struct Bytes final : Input
@@ -70,10 +70,10 @@ std::filesystem::path zipFixture(const std::filesystem::path& parent, const char
     const auto add = [&](const juce::String& name, const std::string& contents) {
         builder.addEntry(new juce::MemoryInputStream(contents.data(), contents.size(), true), 6, name, juce::Time::getCurrentTime());
     };
-    add("release-info.json", std::string("{\"name\":\"Light Host Modern\",\"version\":\"") + version + "\",\"platform\":\"" + platform + "\"}");
-    add("Light Host Modern.exe", pe(!wrongPe)); add("LightHostScanner.exe", pe());
-    if (!omitHelper) add("LightHostUpdateHelper.exe", pe());
-    add("WinUI/x64/Release/LightHost.WinUI/LightHostWinUI.exe", pe());
+    add("release-info.json", std::string("{\"name\":\"LightHostModern\",\"version\":\"") + version + "\",\"platform\":\"" + platform + "\"}");
+    add("LightHostModern.exe", pe(!wrongPe)); add("LightHostModernScanner.exe", pe());
+    if (!omitHelper) add("LightHostModernUpdateHelper.exe", pe());
+    add("WinUI/x64/Release/LightHostModern.WinUI/LightHostModernWinUI.exe", pe());
     if (traversal) add("../escape.txt", "escape");
     juce::FileOutputStream output(juce::File(file.c_str()));
     scenarios::require(output.openedOk() && builder.writeToStream(output, nullptr), "Could not create ZIP fixture"); output.flush(); return file;
@@ -87,11 +87,11 @@ void msiFixture(const std::filesystem::path& path, const wchar_t* version = L"1.
         scenarios::require(MsiDatabaseOpenViewW(db.value, query.c_str(), &view.value) == ERROR_SUCCESS && MsiViewExecute(view.value, 0) == ERROR_SUCCESS, "MSI fixture SQL failed");
     };
     sql(L"CREATE TABLE `Property` (`Property` CHAR(72) NOT NULL, `Value` CHAR(0) LOCALIZABLE PRIMARY KEY `Property`)");
-    for (const auto& pair : {std::pair{L"ProductName", L"Light Host Modern"}, {L"ProductVersion", version}, {L"UpgradeCode", upgradeCode}})
+    for (const auto& pair : {std::pair{L"ProductName", L"LightHostModern"}, {L"ProductVersion", version}, {L"UpgradeCode", upgradeCode}})
         sql(std::wstring(L"INSERT INTO `Property` (`Property`, `Value`) VALUES ('") + pair.first + L"','" + pair.second + L"')");
     sql(L"CREATE TABLE `File` (`File` CHAR(72) NOT NULL, `FileName` CHAR(255) NOT NULL PRIMARY KEY `File`)");
     unsigned index = 0;
-    for (const auto* name : {L"Light Host Modern.exe", L"LightHostScanner.exe", L"LightHostWinUI.exe", L"LightHostUpdateHelper.exe"})
+    for (const auto* name : {L"LightHostModern.exe", L"LightHostModernScanner.exe", L"LightHostModernWinUI.exe", L"LightHostModernUpdateHelper.exe"})
         sql(L"INSERT INTO `File` (`File`, `FileName`) VALUES ('f" + std::to_wstring(++index) + L"','" + name + L"')");
     scenarios::require(MsiGetSummaryInformationW(db.value, nullptr, 1, &summary.value) == ERROR_SUCCESS
         && MsiSummaryInfoSetPropertyW(summary.value, 7, VT_LPSTR, 0, nullptr, architecture) == ERROR_SUCCESS
@@ -117,6 +117,16 @@ int main()
         invalid = good; invalid.url += L"?other"; expect("artifact_mismatch", [&] { invalid.validate(); });
         invalid = good; invalid.bytes = maximumPackageBytes + 1; expect("size_mismatch", [&] { invalid.validate(); });
         invalid = good; invalid.digest.clear(); expect("checksum_unavailable", [&] { invalid.validate(); });
+    });
+    runner.run("Versioned installer and exact compatibility alias", [] {
+        auto artifact = fixture("package"); artifact.distribution = Distribution::installed; artifact.version = L"v1.4.0";
+        for (const auto& name : {versionedArtifactName(artifact.distribution, artifact.version), artifactName(artifact.distribution)}) {
+            artifact.name = name;
+            artifact.url = L"https://github.com/heide-oficial/Light-Host-Modern/releases/download/v1.4.0/" + name;
+            artifact.validate();
+        }
+        artifact.name = L"LightHostModern-9.9.9-Setup.msi";
+        expect("artifact_mismatch", [&] { artifact.validate(); });
     });
     runner.run("Bounded streaming SHA-256 and exact byte progress", [] {
         const std::string bytes(3 * transferCapacity + 43, 'x'); auto artifact = fixture(bytes);

@@ -34,7 +34,7 @@ function Assert-Visible([string]$Id,[string]$Name='') {
         $bounds[1]+$bounds[3] -gt $script:windowBounds.y+$script:windowBounds.height) { throw "The control is clipped by the actual window: $Id ($($properties.BoundingRectangle))." }
 }
 $tree=UI @('inspect','-d','1')
-$window=@($tree.windows | Where-Object { $_.title.StartsWith('Light Host Modern [Test:') })
+$window=@($tree.windows | Where-Object { $_.title.StartsWith('LightHostModern [Test:') })
 if ($window.Count -ne 1) { throw 'Exactly one isolated application window is required.' }
 $handle=$window[0].hwnd
 $script:windowBounds=$window[0].elements[0]
@@ -45,7 +45,7 @@ if (!$metrics.withinWorkArea) { throw 'The initial application window extends ou
 $initial=Send-HostRequest $PipeName 'snapshot'
 if ($initial.audioSelection.driverAvailable) { throw 'Layout validation requires a suspended temporary audio profile.' }
 foreach ($language in @('en-us','pt-br')) {
-    $catalog=Get-Content -LiteralPath "$PSScriptRoot\LightHost.WinUI\Locales\$language.json" -Encoding UTF8 -Raw | ConvertFrom-Json
+    $catalog=Get-Content -LiteralPath "$PSScriptRoot\LightHostModern.WinUI\Locales\$language.json" -Encoding UTF8 -Raw | ConvertFrom-Json
     Scenario "$language language can change in a retained Settings page" {
         UI @('invoke','NavSettings') | Out-Null
         Choose 'AppLanguage' $catalog.'Language.DisplayName'
@@ -99,7 +99,7 @@ foreach ($language in @('en-us','pt-br')) {
         UI @('wait-for','DashboardGlobalBypass','--value',$(if ($before.globalBypassed) { 'On' } else { 'Off' }),'-t','5000') | Out-Null
     }
 }
-$english=Get-Content -LiteralPath "$PSScriptRoot\LightHost.WinUI\Locales\en-us.json" -Encoding UTF8 -Raw | ConvertFrom-Json
+$english=Get-Content -LiteralPath "$PSScriptRoot\LightHostModern.WinUI\Locales\en-us.json" -Encoding UTF8 -Raw | ConvertFrom-Json
 UI @('invoke','NavSettings') | Out-Null
 Choose 'AppLanguage' $english.'Language.DisplayName'
 Choose 'LayoutMode' $english.'settings.layout.expanded'

@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace lightHost::ipc
+namespace lightHostModern::ipc
 {
 inline constexpr size_t maxMessageBytes = 4 * 1024 * 1024;
 

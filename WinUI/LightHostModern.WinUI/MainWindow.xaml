@@ -1,0 +1,191 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="LightHostModernWinUI.MainWindow" Title="LightHostModern" xmlns:local="using:LightHostModernWinUI">
+    <Grid x:Name="RootLayout" Background="Transparent" PointerPressed="RootLayout_PointerPressed">
+        <NavigationView x:Name="SidebarRail" AutomationProperties.AutomationId="RootNavigation" Background="Transparent" CompactPaneLength="64" IsBackButtonVisible="Collapsed" IsPaneOpen="False" IsPaneToggleButtonVisible="False" IsSettingsVisible="False" OpenPaneLength="280" PaneDisplayMode="Left">
+            <NavigationView.Resources>
+                <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
+                <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
+                <Thickness x:Key="NavigationViewContentGridBorderThickness">0</Thickness>
+            </NavigationView.Resources>
+            <NavigationView.PaneHeader>
+                <Grid x:Name="BrandHeaderGrid" MinHeight="40" Margin="12,12,12,16" ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="40" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Image x:Name="BrandLogoImage" Width="28" Height="28" HorizontalAlignment="Center" VerticalAlignment="Center" Source="Assets/logo.png" />
+                    <TextBlock x:Name="BrandTitleText" Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" Text="LightHostModern" TextTrimming="CharacterEllipsis" />
+                </Grid>
+            </NavigationView.PaneHeader>
+            <NavigationView.MenuItems>
+                <NavigationViewItem x:Name="CompactLogoNavItem" AutomationProperties.AutomationId="NavCompactLogo" IsEnabled="False" SelectsOnInvoked="False">
+                    <NavigationViewItem.Icon>
+                        <BitmapIcon x:Name="CompactLogoIcon" ShowAsMonochrome="False" UriSource="Assets/logo.png" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="DashboardButton" AutomationProperties.AutomationId="NavDashboard" Content="Dashboard" Icon="Home" Tag="Dashboard" />
+                <NavigationViewItem x:Name="PreferencesButton" AutomationProperties.AutomationId="NavAudio" Content="Audio" Icon="Audio" Tag="Audio" />
+                <NavigationViewItem x:Name="PluginsButton" AutomationProperties.AutomationId="NavPlugins" Content="Plugins" Tag="Plugins">
+                    <NavigationViewItem.Icon>
+                        <FontIcon FontFamily="Segoe Fluent Icons" Glyph="" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="DiagnosticsButton" AutomationProperties.AutomationId="NavDiagnostics" Content="Diagnostics" Tag="Diagnostics">
+                    <NavigationViewItem.Icon><FontIcon Glyph="&#xE9D9;" /></NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="SupportButton" AutomationProperties.AutomationId="NavSupport" Content="Support me" Tag="Support me">
+                    <NavigationViewItem.Icon>
+                        <SymbolIcon Symbol="Favorite" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="ConfigButton" AutomationProperties.AutomationId="NavSettings" Content="Settings" Icon="Setting" Tag="Settings" />
+            </NavigationView.MenuItems>
+            <NavigationView.PaneFooter>
+                <Grid Margin="12">
+                    <StackPanel x:Name="SidebarStatusPanel" Visibility="Collapsed">
+                        <TextBlock x:Name="ConnectionStatusText" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Connecting" />
+                        <TextBlock x:Name="SidebarStatusDetailText" Margin="0,4,0,0" Foreground="{ThemeResource AppTextSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="Waiting for snapshot" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button x:Name="SidebarToggleButton" AutomationProperties.AutomationId="BtnPaneToggle" AutomationProperties.Name="Collapse sidebar" MinWidth="40" Height="40" HorizontalAlignment="Stretch" Padding="0">
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon x:Name="SidebarToggleIcon" HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe Fluent Icons" Glyph="" />
+                            <TextBlock x:Name="SidebarToggleText" Grid.Column="1" VerticalAlignment="Center" Text="Collapse sidebar" />
+                        </Grid>
+                    </Button>
+                </Grid>
+            </NavigationView.PaneFooter>
+            <Grid x:Name="MainContent" Padding="24,48,24,24" RowSpacing="24">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Grid x:Name="HeaderGrid">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock x:Name="PageTitleText" AutomationProperties.AutomationId="PageTitle" Style="{StaticResource TitleTextBlockStyle}" Text="Dashboard" />
+                        <TextBlock x:Name="PageSubtitleText" AutomationProperties.AutomationId="PageSubtitle" Margin="0,4,0,0" Foreground="{ThemeResource AppTextSecondaryBrush}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="SessionPendingText" AutomationProperties.AutomationId="SessionPending" Visibility="Collapsed" Margin="0,4,0,0" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" />
+                        <InfoBar x:Name="DashboardAudioNotice" IsOpen="False" IsClosable="False" Severity="Warning" Margin="0,8,0,0" />
+                        <InfoBar x:Name="SessionStatusBanner" AutomationProperties.AutomationId="SessionStatus" IsOpen="False" IsClosable="True" Margin="0,8,0,0">
+                            <InfoBar.ActionButton><Button x:Name="RetrySessionSaveButton" AutomationProperties.AutomationId="RetrySessionSave" Content="Try saving again" /></InfoBar.ActionButton>
+                        </InfoBar>
+                    </StackPanel>
+                    <StackPanel x:Name="HeaderActions" Grid.Column="1" Orientation="Horizontal" Spacing="12" Visibility="Collapsed">
+                        <TextBlock x:Name="HeaderStatusText" Text="Online" VerticalAlignment="Center" />
+                        <Button x:Name="RefreshButton" Content="Refresh" />
+                    </StackPanel>
+                </Grid>
+                <ScrollViewer x:Name="ContentScrollViewer" HorizontalContentAlignment="Stretch" HorizontalScrollBarVisibility="Disabled" HorizontalScrollMode="Disabled" VerticalScrollBarVisibility="Auto" Grid.Row="1">
+                    <StackPanel x:Name="PageContentStack" HorizontalAlignment="Stretch" Spacing="24">
+                        <Grid>
+                            <StackPanel x:Name="DashboardPanel" Spacing="14">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Margin="0,0,8,0" Style="{StaticResource AppCardStyle}">
+                                        <StackPanel>
+                                            <TextBlock Foreground="{ThemeResource AppTextSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="Audio backend" />
+                                            <TextBlock x:Name="DashboardDeviceTypeText" Margin="0,8,0,0" Style="{StaticResource SubtitleTextBlockStyle}" Text="--" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="1" Margin="8,0,0,0" Style="{StaticResource AppCardStyle}">
+                                        <StackPanel>
+                                            <TextBlock Foreground="{ThemeResource AppTextSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="Format" />
+                                            <TextBlock x:Name="DashboardFormatText" Margin="0,8,0,0" Style="{StaticResource SubtitleTextBlockStyle}" Text="--" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                                <Border Style="{StaticResource AppCardStyle}">
+                                    <StackPanel Spacing="22">
+                                        <TextBlock x:Name="DashboardRoutingTitleText" Style="{StaticResource SubtitleTextBlockStyle}" Text="Input and Output" />
+                                        <Grid x:Name="DashboardInputDeviceGrid">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="380" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                            <StackPanel>
+                                                <TextBlock x:Name="DashboardInputDeviceLabel" Foreground="{ThemeResource AppTextSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="Input device" />
+                                                <TextBlock x:Name="DashboardInputDeviceText" Margin="0,4,0,0" Style="{StaticResource BodyStrongTextBlockStyle}" Text="--" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <StackPanel x:Name="InputMeterBarHost" Grid.Column="1" VerticalAlignment="Center" Margin="24,0,0,0" />
+                                        </Grid>
+                                        <Grid x:Name="DashboardOutputDeviceGrid">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="380" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                            <StackPanel>
+                                                <TextBlock x:Name="DashboardOutputDeviceLabel" Foreground="{ThemeResource AppTextSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="Output device" />
+                                                <TextBlock x:Name="DashboardOutputDeviceText" Margin="0,4,0,0" Style="{StaticResource BodyStrongTextBlockStyle}" Text="--" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <StackPanel x:Name="OutputMeterBarHost" Grid.Column="1" VerticalAlignment="Center" Margin="24,0,0,0" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Margin="0,0,8,0" Style="{StaticResource AppCardStyle}">
+                                        <StackPanel>
+                                            <TextBlock Foreground="{ThemeResource AppTextSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="Active plugins" />
+                                            <TextBlock x:Name="ActivePluginsText" Margin="0,8,0,0" Style="{StaticResource TitleTextBlockStyle}" Text="--" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="1" Margin="8,0,0,0" Style="{StaticResource AppCardStyle}">
+                                        <StackPanel>
+                                            <TextBlock Foreground="{ThemeResource AppTextSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="Installed plugins" />
+                                            <TextBlock x:Name="KnownPluginsText" Margin="0,8,0,0" Style="{StaticResource TitleTextBlockStyle}" Text="--" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </StackPanel>
+                            <ContentControl x:Name="AudioPageHost" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                            <ContentControl x:Name="SupportPageHost" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                            <ContentControl x:Name="DiagnosticsPageHost" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                            <ContentControl x:Name="SettingsPageHost" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                            <StackPanel Visibility="Collapsed">
+                                <TextBlock x:Name="DashboardDeviceText" />
+                                <TextBlock x:Name="DashboardRoutingText" />
+                                <TextBlock x:Name="DashboardChannelsText" />
+                                <TextBlock x:Name="DashboardLatencyText" />
+                                <TextBlock x:Name="PluginSummaryText" />
+                                <TextBlock x:Name="CpuText" />
+                                <TextBlock x:Name="HealthText" />
+                                <TextBlock x:Name="MeterStatusText" />
+                                <StackPanel x:Name="DebugSettingsPanel">
+                                    <TextBlock x:Name="DebugStatusText" />
+                                    <Button x:Name="CopyLogsButton" />
+                                    <Button x:Name="SaveLogButton" />
+                                </StackPanel>
+                                <StackPanel x:Name="InputDevicePanel" />
+                                <StackPanel x:Name="OutputDevicePanel" />
+                                <StackPanel x:Name="SampleRatePanel" />
+                                <StackPanel x:Name="BufferSizePanel" />
+                                <StackPanel x:Name="ThemeModeBoxHost" />
+                                <Button x:Name="DeletePluginStatesButton" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+                <ContentControl x:Name="PluginsPageHost" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Grid.Row="1" />
+            </Grid>
+        </NavigationView>
+        <Grid x:Name="AppTitleBar" Height="32" Margin="64,0,0,0" HorizontalAlignment="Stretch" VerticalAlignment="Top" Canvas.ZIndex="1" Background="Transparent" />
+        <Border x:Name="NotificationToast" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,24,24" MinWidth="280" MaxWidth="420" Padding="16" CornerRadius="{ThemeResource OverlayCornerRadius}" BorderThickness="1" BorderBrush="{ThemeResource AppFlyoutStrokeBrush}" Background="{ThemeResource AppFlyoutBrush}" BackgroundSizing="InnerBorderEdge" Visibility="Collapsed">
+            <TextBlock x:Name="NotificationText" Text="" TextWrapping="Wrap" Style="{StaticResource BodyStrongTextBlockStyle}" />
+        </Border>
+    </Grid>
+</Window>

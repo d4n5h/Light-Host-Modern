@@ -6,7 +6,7 @@ $repo = (Resolve-Path -LiteralPath "$PSScriptRoot\..").Path
 $expectedRoot = [IO.Path]::GetFullPath((Join-Path $repo 'out\test-profiles')) + '\'
 if (![IO.Path]::GetFullPath($info.profile).StartsWith($expectedRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'A workspace test profile is required.' }
 $script:AppPid = $info.uiPid
-$sessionFile = Join-Path $info.profile 'Light Host Modern.settings.session.json'
+$sessionFile = Join-Path $info.profile 'LightHostModern.settings.session.json'
 $snapshot = Send-HostRequest $info.pipe 'snapshot'
 $session = $snapshot.hostSession
 $id = $snapshot.activePlugins[0].instanceId
@@ -65,7 +65,7 @@ Scenario 'Closing and reopening UI preserves live global controls and session' {
     if (!$previousUi.WaitForExit(10000)) { throw 'UI process remained alive after closing.' }
     $live = Send-HostRequest $info.pipe 'snapshot'
     if ($live.hostSession -ne $session -or !$live.globalMuted -or !$live.globalBypassed) { throw 'Closing UI changed the live host.' }
-    $launch = rtk proxy winapp run WinUI/x64/Release/LightHost.WinUI --manifest WinUI/LightHost.WinUI/Package.appxmanifest --exe LightHostWinUI.exe --detach --json -- "--test-profile=$($info.name)" "--profile-root=$($info.root)" "--host-pipe=$($info.pipe)" | ConvertFrom-Json
+    $launch = rtk proxy winapp run WinUI/x64/Release/LightHostModern.WinUI --manifest WinUI/LightHostModern.WinUI/Package.appxmanifest --exe LightHostModernWinUI.exe --detach --json -- "--test-profile=$($info.name)" "--profile-root=$($info.root)" "--host-pipe=$($info.pipe)" | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0) { throw 'Could not reopen UI.' }
     $script:AppPid = $launch.ProcessId
     $info.uiPid = $script:AppPid

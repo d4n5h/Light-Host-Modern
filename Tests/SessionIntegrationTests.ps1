@@ -1,6 +1,6 @@
 param(
-    [string]$HostExecutable = "$PSScriptRoot\..\out\build\windows-vs2022\LightHost_artefacts\Release\Light Host Modern.exe",
-    [string]$FixtureWriter = "$PSScriptRoot\..\out\build\windows-vs2022\Release\LightHostPluginInstanceTests.exe"
+    [string]$HostExecutable = "$PSScriptRoot\..\out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe",
+    [string]$FixtureWriter = "$PSScriptRoot\..\out\build\windows-vs2022\Release\LightHostModernPluginInstanceTests.exe"
 )
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\HostProtocol.ps1"
@@ -9,7 +9,7 @@ $root = Join-Path $repo 'out\test-profiles'
 $name = 'session-' + [guid]::NewGuid().ToString('N')
 $directory = Join-Path $root $name
 New-Item -ItemType Directory -Path $directory -Force | Out-Null
-$settings = Join-Path $directory 'Light Host Modern.settings'
+$settings = Join-Path $directory 'LightHostModern.settings'
 $sessionFile = $settings + '.session.json'
 rtk proxy $FixtureWriter --write-legacy-fixture $settings
 if ($LASTEXITCODE -ne 0) { throw 'Could not write legacy fixture.' }
@@ -80,7 +80,7 @@ try {
     if ((Get-FileHash -LiteralPath $sessionFile).Hash -ne $durableHash) { throw 'Safe mode overwrote the saved session.' }
     $evidence.Add('Safe mode preserves ordered records and file bytes')
 
-    $sessionUtility=Join-Path (Split-Path $FixtureWriter -Parent) 'LightHostSessionTests.exe'
+    $sessionUtility=Join-Path (Split-Path $FixtureWriter -Parent) 'LightHostModernSessionTests.exe'
     rtk proxy $sessionUtility --mark-session-failed $settings
     if ($LASTEXITCODE -ne 0) { throw 'Could not prepare a valid failed-load marker.' }
     $marked=Get-Content -LiteralPath $sessionFile -Raw -Encoding UTF8 | ConvertFrom-Json

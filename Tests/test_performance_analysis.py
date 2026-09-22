@@ -76,7 +76,7 @@ class PerformanceAnalysisTests(unittest.TestCase):
         baseline, current = report(), report()
         for source, width in ((baseline, 1200), (current, 600)):
             for run in source["runs"]:
-                run["window"] = {"windows": [{"title": "Light Host Modern", "elements": [{"width": width, "height": 700}]}]}
+                run["window"] = {"windows": [{"title": "LightHostModern", "elements": [{"width": width, "height": 700}]}]}
         self.assertEqual(compare(baseline, current)["assessment"], "incomplete")
 
     def test_a_zero_baseline_does_not_hide_new_gpu_work(self):

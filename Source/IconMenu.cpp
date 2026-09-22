@@ -2,7 +2,7 @@
 #include "IconMenu.hpp"
 #include "DebugLog.h"
 #include "RuntimeProfile.h"
-#include "LightHostLocales.h"
+#include "LightHostModernLocales.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -18,15 +18,15 @@ namespace
 {
 	var trayLocale()
 	{
-		const auto settings = File(lightHost::RuntimeProfile::current().uiSettings().wstring().c_str());
+		const auto settings = File(lightHostModern::RuntimeProfile::current().uiSettings().wstring().c_str());
 		wchar_t language[32] {};
 		GetPrivateProfileStringW(L"Localization", L"Language", L"en-us", language, 32, settings.getFullPathName().toWideCharPointer());
 		const String fileName = String(language).equalsIgnoreCase("pt-br") ? "pt-br.json" : "en-us.json";
-		for (int i = 0; i < LightHostLocales::namedResourceListSize; ++i)
-			if (String(LightHostLocales::originalFilenames[i]).endsWith(fileName))
+		for (int i = 0; i < LightHostModernLocales::namedResourceListSize; ++i)
+			if (String(LightHostModernLocales::originalFilenames[i]).endsWith(fileName))
 			{
 				int size = 0;
-				const auto* data = LightHostLocales::getNamedResource(LightHostLocales::namedResourceList[i], size);
+				const auto* data = LightHostModernLocales::getNamedResource(LightHostModernLocales::namedResourceList[i], size);
 				return JSON::parse(String::fromUTF8(data, size));
 			}
 		return {};
@@ -34,7 +34,7 @@ namespace
 
 	HWND findWinUIWindow()
 	{
-		return FindWindowW(nullptr, lightHost::RuntimeProfile::current().windowTitle().c_str());
+		return FindWindowW(nullptr, lightHostModern::RuntimeProfile::current().windowTitle().c_str());
 	}
 
 	bool focusWinUIWindow()
@@ -67,10 +67,10 @@ IconMenu::IconMenu(bool startInSafeMode, bool debugEnabled, bool restoreActivePl
 	  debugMode(debugEnabled)
 {
 	ipcServer = std::make_unique<HostIpcServer>(*engine, [this] { setIcon(); });
-	lightHostLog("IconMenu created. safeMode=" + String(startInSafeMode ? "true" : "false")
+	lightHostModernLog("IconMenu created. safeMode=" + String(startInSafeMode ? "true" : "false")
 		+ " restoreActivePluginsOnStartup=" + String(restoreActivePluginsOnStartup ? "true" : "false"));
 	setIcon();
-	setIconTooltip(String(lightHost::RuntimeProfile::current().windowTitle().c_str()));
+	setIconTooltip(String(lightHostModern::RuntimeProfile::current().windowTitle().c_str()));
 }
 
 IconMenu::~IconMenu()
@@ -200,25 +200,25 @@ void IconMenu::showNativeContextMenu()
 
 void IconMenu::openWinUI()
 {
-	lightHostLog("Open New UI clicked.");
+	lightHostModernLog("Open New UI clicked.");
 
 	if (focusWinUIWindow())
 	{
-		lightHostLog("Focused existing WinUI window.");
+		lightHostModernLog("Focused existing WinUI window.");
 		return;
 	}
 
 	String parameters = "--host-pipe=\"" + ipcServer->getPipeName() + "\"";
-	parameters << String(lightHost::RuntimeProfile::current().arguments().c_str());
+	parameters << String(lightHostModern::RuntimeProfile::current().arguments().c_str());
 	if (debugMode)
 	{
 		parameters << " --debug";
-		const auto logPath = getLightHostDebugLogPath();
+		const auto logPath = getLightHostModernDebugLogPath();
 		if (logPath.isNotEmpty())
 			parameters << " --debug-log=\"" << logPath << "\"";
 	}
 
-	const auto executableName = "LightHostWinUI.exe";
+	const auto executableName = "LightHostModernWinUI.exe";
 	Array<File> searchRoots;
 	const auto executableDirectory = File::getSpecialLocation(File::currentExecutableFile).getParentDirectory();
 	// Packaged UI belongs to this host. Development fallbacks must identify a
@@ -227,7 +227,7 @@ void IconMenu::openWinUI()
 	auto current = executableDirectory;
 	for (int i = 0; i < 8; ++i)
 	{
-		if (current.getChildFile("WinUI/LightHost.WinUI.sln").existsAsFile()) searchRoots.addIfNotAlreadyThere(current);
+		if (current.getChildFile("WinUI/LightHostModern.WinUI.sln").existsAsFile()) searchRoots.addIfNotAlreadyThere(current);
 		const auto parent = current.getParentDirectory();
 		if (parent == current) break;
 		current = parent;
@@ -235,7 +235,7 @@ void IconMenu::openWinUI()
 
 	for (auto root : searchRoots)
 	{
-		lightHostLog("Search root: " + root.getFullPathName());
+		lightHostModernLog("Search root: " + root.getFullPathName());
 
 		StringArray configurations;
 		if (debugMode)
@@ -252,23 +252,23 @@ void IconMenu::openWinUI()
 		for (const auto& configuration : configurations)
 		{
 			Array<File> candidates;
-			// Match LightHost.Output.props and the distribution layout first.
+			// Match LightHostModern.Output.props and the distribution layout first.
 			candidates.add(root.getChildFile("WinUI")
 				.getChildFile("x64")
 				.getChildFile(configuration)
-				.getChildFile("LightHost.WinUI")
+				.getChildFile("LightHostModern.WinUI")
 				.getChildFile(executableName));
-			candidates.add(root.getChildFile("LightHost.WinUI").getChildFile(executableName));
-			candidates.add(root.getChildFile("WinUI").getChildFile("LightHost.WinUI").getChildFile(executableName));
+			candidates.add(root.getChildFile("LightHostModern.WinUI").getChildFile(executableName));
+			candidates.add(root.getChildFile("WinUI").getChildFile("LightHostModern.WinUI").getChildFile(executableName));
 			candidates.add(root.getChildFile("WinUI").getChildFile(executableName));
 
 			for (const auto& candidate : candidates)
 			{
-				lightHostLog("Checking WinUI candidate: " + candidate.getFullPathName());
+				lightHostModernLog("Checking WinUI candidate: " + candidate.getFullPathName());
 
 				if (candidate.existsAsFile())
 				{
-					lightHostLog("Found WinUI executable.");
+					lightHostModernLog("Found WinUI executable.");
 
 					const auto workingDirectory = candidate.getParentDirectory();
 					const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr,
@@ -278,7 +278,7 @@ void IconMenu::openWinUI()
 						workingDirectory.getFullPathName().toWideCharPointer(),
 						SW_SHOWNORMAL));
 
-					lightHostLog("ShellExecute result: " + String((int) result));
+					lightHostModernLog("ShellExecute result: " + String((int) result));
 
 					if (result <= 32)
 					{
@@ -286,7 +286,7 @@ void IconMenu::openWinUI()
 						auto message = locale["tray.uiLaunchFailed"].toString();
 						if (message.isEmpty()) message = "Could not open the application interface. Error: {code}";
 						AlertWindow::showMessageBoxAsync(AlertWindow::WarningIcon,
-							"Light Host Modern",
+							"LightHostModern",
 							message.replace("{code}", String((int) result)));
 					}
 
@@ -296,17 +296,17 @@ void IconMenu::openWinUI()
 		}
 	}
 
-	lightHostLog("Loose WinUI build not found; trying packaged WinUI app.");
+	lightHostModernLog("Loose WinUI build not found; trying packaged WinUI app.");
 	if (openPackagedWinUI(parameters))
 		return;
 
-	lightHostLog("WinUI executable not found.");
+	lightHostModernLog("WinUI executable not found.");
 	const auto locale = trayLocale();
 	auto message = locale["tray.uiMissing"].toString();
 	if (message.isEmpty()) message = "The application interface was not found. Repair the installation or extract the complete portable package.";
 
 	AlertWindow::showMessageBoxAsync(AlertWindow::WarningIcon,
-		"Light Host Modern",
+		"LightHostModern",
 		message);
 }
 
@@ -316,18 +316,18 @@ bool IconMenu::openPackagedWinUI(const String& parameters)
 
 	if (aumid.isEmpty())
 	{
-		lightHostLog("Packaged WinUI app not registered; falling back to loose executable.");
+		lightHostModernLog("Packaged WinUI app not registered; falling back to loose executable.");
 		return false;
 	}
 
-	lightHostLog("Found packaged WinUI AUMID: " + aumid);
+	lightHostModernLog("Found packaged WinUI AUMID: " + aumid);
 
 	const auto coInitResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 	const bool shouldUninitialise = SUCCEEDED(coInitResult);
 
 	if (FAILED(coInitResult) && coInitResult != RPC_E_CHANGED_MODE)
 	{
-		lightHostLog("CoInitializeEx failed. HRESULT=0x" + String::toHexString(static_cast<int>(coInitResult)));
+		lightHostModernLog("CoInitializeEx failed. HRESULT=0x" + String::toHexString(static_cast<int>(coInitResult)));
 		return false;
 	}
 
@@ -339,7 +339,7 @@ bool IconMenu::openPackagedWinUI(const String& parameters)
 
 	if (FAILED(createResult) || activationManager == nullptr)
 	{
-		lightHostLog("IApplicationActivationManager creation failed. HRESULT=0x" + String::toHexString(static_cast<int>(createResult)));
+		lightHostModernLog("IApplicationActivationManager creation failed. HRESULT=0x" + String::toHexString(static_cast<int>(createResult)));
 
 		if (shouldUninitialise)
 			CoUninitialize();
@@ -360,11 +360,11 @@ bool IconMenu::openPackagedWinUI(const String& parameters)
 
 	if (FAILED(activationResult))
 	{
-		lightHostLog("Packaged WinUI activation failed. HRESULT=0x" + String::toHexString(static_cast<int>(activationResult)));
+		lightHostModernLog("Packaged WinUI activation failed. HRESULT=0x" + String::toHexString(static_cast<int>(activationResult)));
 		return false;
 	}
 
-	lightHostLog("Packaged WinUI activated. pid=" + String(static_cast<int>(processId)));
+	lightHostModernLog("Packaged WinUI activated. pid=" + String(static_cast<int>(processId)));
 	return true;
 }
 
@@ -375,14 +375,14 @@ String IconMenu::resolvePackagedWinUIAumid()
 
 	if (!process.start(command, ChildProcess::wantStdOut | ChildProcess::wantStdErr))
 	{
-		lightHostLog("Failed to start PowerShell to resolve packaged WinUI AUMID.");
+		lightHostModernLog("Failed to start PowerShell to resolve packaged WinUI AUMID.");
 		return {};
 	}
 
 	if (!process.waitForProcessToFinish(5000))
 	{
 		process.kill();
-		lightHostLog("Timed out while resolving packaged WinUI AUMID.");
+		lightHostModernLog("Timed out while resolving packaged WinUI AUMID.");
 		return {};
 	}
 
@@ -391,7 +391,7 @@ String IconMenu::resolvePackagedWinUIAumid()
 
 	if (exitCode != 0)
 	{
-		lightHostLog("PowerShell failed while resolving packaged WinUI AUMID. exitCode=" + String(exitCode) + " output=" + output);
+		lightHostModernLog("PowerShell failed while resolving packaged WinUI AUMID. exitCode=" + String(exitCode) + " output=" + output);
 		return {};
 	}
 

@@ -4,7 +4,7 @@
 #include <set>
 #include <windows.h>
 
-namespace lightHost::scan
+namespace lightHostModern::scan
 {
 inline constexpr int scannerProtocolVersion = 2;
 inline constexpr int metadataCacheVersion = 2;

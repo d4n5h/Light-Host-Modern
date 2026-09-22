@@ -23,7 +23,7 @@ function Write-Fixture([bool] $CorruptDigest = $false) {
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $temp 'update-fixture.json') -Encoding UTF8
 }
 Write-Fixture
-$hostExe = Join-Path $repo 'out\build\windows-vs2022\LightHost_artefacts\Release\Light Host Modern.exe'
+$hostExe = Join-Path $repo 'out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe'
 $hostProcess = $null
 $pipe = ''
 $session = ''
@@ -44,7 +44,7 @@ function UI([string[]] $Arguments) {
     $result | ConvertFrom-Json
 }
 function Open-UI {
-    $launch = rtk proxy winapp run WinUI/x64/Release/LightHost.WinUI --manifest WinUI/LightHost.WinUI/Package.appxmanifest --exe LightHostWinUI.exe --detach --json -- "--test-profile=$testProfileName" "--profile-root=$root" "--host-pipe=$pipe" | ConvertFrom-Json
+    $launch = rtk proxy winapp run WinUI/x64/Release/LightHostModern.WinUI --manifest WinUI/LightHostModern.WinUI/Package.appxmanifest --exe LightHostModernWinUI.exe --detach --json -- "--test-profile=$testProfileName" "--profile-root=$root" "--host-pipe=$pipe" | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0) { throw 'Could not open update UI.' }
     $script:AppPid = $launch.ProcessId
     @{hostPid=$hostProcess.Id; uiPid=$script:AppPid; profile=$profile; pipe=$pipe; name=$testProfileName; root=$root} | ConvertTo-Json |

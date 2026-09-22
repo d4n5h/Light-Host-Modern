@@ -5,7 +5,7 @@
 #include <fstream>
 #include <filesystem>
 
-using lightHost::ipc::Handle;
+using lightHostModern::ipc::Handle;
 static std::wstring executablePath()
 {
     wchar_t path[32768] {};
@@ -22,13 +22,13 @@ int wmain(int argc, wchar_t** argv)
         if (std::wstring(argv[1]) == L"crash") { TerminateProcess(GetCurrentProcess(), 44); return 44; }
         if (argc == 3 && std::wstring(argv[1]) == L"owner")
         {
-            const auto result = lightHost::scan::run(executablePath(),
-                L"tree " + lightHost::scan::quoteArgument(argv[2]), [] { return false; }, 10000);
-            return result.outcome == lightHost::scan::Exit::success ? 0 : 92;
+            const auto result = lightHostModern::scan::run(executablePath(),
+                L"tree " + lightHostModern::scan::quoteArgument(argv[2]), [] { return false; }, 10000);
+            return result.outcome == lightHostModern::scan::Exit::success ? 0 : 92;
         }
         if (argc == 3 && std::wstring(argv[1]) == L"tree")
         {
-            auto command = lightHost::scan::quoteArgument(executablePath()) + L" hang";
+            auto command = lightHostModern::scan::quoteArgument(executablePath()) + L" hang";
             STARTUPINFOW startup {}; startup.cb = sizeof(startup);
             PROCESS_INFORMATION child {};
             if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
@@ -47,7 +47,7 @@ int wmain(int argc, wchar_t** argv)
     }
     try
     {
-        using namespace lightHost::scan;
+        using namespace lightHostModern::scan;
         wchar_t executable[32768] {};
         GetModuleFileNameW(nullptr, executable, 32768);
         const auto never = [] { return false; };

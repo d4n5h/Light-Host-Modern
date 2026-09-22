@@ -6,8 +6,8 @@
 #include <thread>
 #include <chrono>
 
-void lightHostLog(const String&) {}
-void setLightHostCrashContext(const String&) {}
+void lightHostModernLog(const String&) {}
+void setLightHostModernCrashContext(const String&) {}
 bool installRealtimeAllocationAudit();
 namespace
 {
@@ -166,7 +166,7 @@ int main()
         ScopedJuceInitialiser_GUI initialise;
         require(installRealtimeAllocationAudit(), "Host allocation audit could not be installed");
         int count = 0; auto** arguments = CommandLineToArgvW(GetCommandLineW(), &count);
-        require(arguments && (count == 4 || count == 5), "Usage: LightHostRealPluginTests <VST|VST3> <module> <result.json> [generic]");
+        require(arguments && (count == 4 || count == 5), "Usage: LightHostModernRealPluginTests <VST|VST3> <module> <result.json> [generic]");
         require(count == 4 || String(arguments[4]) == "generic", "Unknown editor option");
         const auto editorType = count == 5 ? PluginWindow::Generic : PluginWindow::Normal;
         const String format(arguments[1]); const File module{String(arguments[2])}, report{String(arguments[3])}; LocalFree(arguments);

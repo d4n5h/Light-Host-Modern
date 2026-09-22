@@ -10,7 +10,7 @@ namespace
 {
 File defaultCacheDirectory()
 {
-    const auto& profile = lightHost::RuntimeProfile::current();
+    const auto& profile = lightHostModern::RuntimeProfile::current();
     return profile.test ? File((profile.directory / L"Cache" / L"Plugins").wstring().c_str())
         : File::getSpecialLocation(File::userApplicationDataDirectory).getChildFile("LightHostModern/Cache/Plugins");
 }
@@ -20,23 +20,23 @@ struct ScanFiles
     int batches = 0;
     ScanFiles()
     {
-        const auto& profile = lightHost::RuntimeProfile::current();
+        const auto& profile = lightHostModern::RuntimeProfile::current();
         const auto root = profile.test ? File((profile.directory / L"Temp").wstring().c_str())
             : File::getSpecialLocation(File::tempDirectory);
-        folder = root.getChildFile("LightHostScan-" + Uuid().toString());
+        folder = root.getChildFile("LightHostModernScan-" + Uuid().toString());
         request = folder.getChildFile("request.xml");
         response = folder.getChildFile("response.xml");
     }
     ~ScanFiles()
     {
         request.deleteFile(); response.deleteFile();
-        for (int index = 0; index <= batches; ++index) lightHost::scan::batchFile(response, index).deleteFile();
+        for (int index = 0; index <= batches; ++index) lightHostModern::scan::batchFile(response, index).deleteFile();
         folder.deleteFile(); // Never recursively remove worker-created paths.
     }
 };
-String workerFailure(lightHost::scan::Result result)
+String workerFailure(lightHostModern::scan::Result result)
 {
-    using Exit = lightHost::scan::Exit;
+    using Exit = lightHostModern::scan::Exit;
     if (result.outcome == Exit::timeout) return "timeout";
     if (result.outcome == Exit::launchFailed) return "launch_failed";
     if (result.outcome == Exit::cancelled) return "cancelled";
@@ -48,13 +48,13 @@ String workerFailure(lightHost::scan::Result result)
 }
 std::wstring workerArguments(const ScanFiles& files)
 {
-    return lightHost::scan::quoteArgument(files.request.getFullPathName().toWideCharPointer()) + L" "
-        + lightHost::scan::quoteArgument(files.response.getFullPathName().toWideCharPointer());
+    return lightHostModern::scan::quoteArgument(files.request.getFullPathName().toWideCharPointer()) + L" "
+        + lightHostModern::scan::quoteArgument(files.response.getFullPathName().toWideCharPointer());
 }
 }
 
 PluginScanController::PluginScanController(File executable, unsigned timeout, File cache)
-    : scannerExecutable(executable == File() ? File::getSpecialLocation(File::currentExecutableFile).getSiblingFile("LightHostScanner.exe") : executable),
+    : scannerExecutable(executable == File() ? File::getSpecialLocation(File::currentExecutableFile).getSiblingFile("LightHostModernScanner.exe") : executable),
       cacheDirectory(cache == File() ? defaultCacheDirectory() : cache), timeoutMs(timeout), worker([this] { run(); }) {}
 PluginScanController::~PluginScanController()
 {
@@ -168,8 +168,8 @@ void PluginScanController::run()
     for (const auto& file : cacheDirectory.findChildFiles(File::findFiles, false, "*.xml"))
     {
         if (stopping.load()) return;
-        const auto cached = file.getSize() <= lightHost::scan::maximumResponseBytes ? XmlDocument::parse(file) : nullptr;
-        if (!cached || cached->getIntAttribute("cacheVersion") != lightHost::scan::metadataCacheVersion) continue;
+        const auto cached = file.getSize() <= lightHostModern::scan::maximumResponseBytes ? XmlDocument::parse(file) : nullptr;
+        if (!cached || cached->getIntAttribute("cacheVersion") != lightHostModern::scan::metadataCacheVersion) continue;
         for (const auto* item : cached->getChildIterator())
             if (item->hasTagName("ENTRY") && item->getStringAttribute("verifiedMetadata") == "verified")
             {
@@ -193,7 +193,7 @@ void PluginScanController::run()
 
 void PluginScanController::scan(const Work& work)
 {
-    using namespace lightHost::scan;
+    using namespace lightHostModern::scan;
     const auto cancelled = [&] { return stopping.load() || generation.load() != work.generation; };
     struct Candidate { String path, fingerprint; Time stamp; };
     std::vector<Candidate> candidates;
@@ -244,7 +244,7 @@ void PluginScanController::scan(const Work& work)
             file.deleteFile(); ++enumeration.batches;
         }
     };
-    const auto enumerated = lightHost::scan::run(scannerExecutable.getFullPathName().toWideCharPointer(), workerArguments(enumeration), cancelled, timeoutMs, consume,
+    const auto enumerated = lightHostModern::scan::run(scannerExecutable.getFullPathName().toWideCharPointer(), workerArguments(enumeration), cancelled, timeoutMs, consume,
         [&] { return static_cast<uint64_t>(currentRootIndex + 1); });
     consume();
     auto enumerationError = workerFailure(enumerated);
@@ -301,7 +301,7 @@ void PluginScanController::scan(const Work& work)
             else
             {
                 { std::lock_guard<std::mutex> lock(mutex); ++progress.examined; ++progress.revision; }
-                const auto result = lightHost::scan::run(scannerExecutable.getFullPathName().toWideCharPointer(), workerArguments(files), cancelled, timeoutMs);
+                const auto result = lightHostModern::scan::run(scannerExecutable.getFullPathName().toWideCharPointer(), workerArguments(files), cancelled, timeoutMs);
                 error = workerFailure(result);
                 if (error == "cancelled") break;
                 if (error.isEmpty())
@@ -324,8 +324,8 @@ void PluginScanController::scan(const Work& work)
                     || plugin.name.isEmpty() || plugin.pluginFormatName != work.format
                     || !belongsToModule(plugin.fileOrIdentifier, candidate.path, work.format)
                     || plugin.numInputChannels < 0 || plugin.numOutputChannels < 0
-                    || entry->getStringAttribute("knownId") != lightHost::knownPluginId(plugin)
-                    || !identities.insert(lightHost::knownPluginId(plugin)).second)
+                    || entry->getStringAttribute("knownId") != lightHostModern::knownPluginId(plugin)
+                    || !identities.insert(lightHostModern::knownPluginId(plugin)).second)
                 { error = "invalid_result"; continue; }
                 if (entry->getStringAttribute("error").isNotEmpty()) { error = entry->getStringAttribute("error"); continue; }
                 if (entry->getStringAttribute("verifiedMetadata") != "verified") { error = "unverified_metadata"; continue; }
@@ -335,7 +335,7 @@ void PluginScanController::scan(const Work& work)
                         || bus->getIntAttribute("channels", -1) < 0 || bus->getIntAttribute("defaultChannels", -1) < 0) busesValid = false;
                 if (!busesValid) { error = "invalid_buses"; continue; }
                 plugin.lastFileModTime = candidate.stamp;
-                metadata[lightHost::knownPluginId(plugin)] = entry->toString();
+                metadata[lightHostModern::knownPluginId(plugin)] = entry->toString();
                 validated.push_back(std::move(plugin));
             }
             if (validated.empty() && error.isEmpty()) error = "no_plugins";
@@ -352,7 +352,7 @@ void PluginScanController::scan(const Work& work)
             for (auto& item : metadata) pluginMetadata[item.first] = std::move(item.second);
             // Cache also restores entries removed from memory after a controller restart.
             if (!cached || std::any_of(validated.begin(), validated.end(), [&](const auto& plugin) {
-                return std::none_of(work.known.begin(), work.known.end(), [&](const auto& known) { return lightHost::knownPluginId(known) == lightHost::knownPluginId(plugin); });
+                return std::none_of(work.known.begin(), work.known.end(), [&](const auto& known) { return lightHostModern::knownPluginId(known) == lightHostModern::knownPluginId(plugin); });
             })) results.insert(results.end(), validated.begin(), validated.end());
             if (error.isEmpty()) for (auto& failure : progress.failures)
                 if (failure.path == candidate.path && failure.format == work.format) failure.resolved = true;

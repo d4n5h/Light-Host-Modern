@@ -5,7 +5,7 @@
 #include <optional>
 #include <thread>
 
-namespace lightHost
+namespace lightHostModern
 {
 struct SessionDocument
 {

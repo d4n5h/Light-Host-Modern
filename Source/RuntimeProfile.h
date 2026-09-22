@@ -17,7 +17,7 @@
 
 // Shared by the JUCE host and WinUI. Parsing has no filesystem side effects.
 // Production paths remain unchanged; test profiles never share writable state.
-namespace lightHost
+namespace lightHostModern
 {
 struct RuntimeProfile
 {
@@ -111,11 +111,11 @@ struct RuntimeProfile
     }
     std::wstring windowTitle() const
     {
-        return test ? L"Light Host Modern [Test: " + name + L" " + key + L"]" : L"Light Host Modern";
+        return test ? L"LightHostModern [Test: " + name + L" " + key + L"]" : L"LightHostModern";
     }
     std::wstring pipeName() const
     {
-        return test ? L"\\\\.\\pipe\\LightHost-profile-" + key : L"\\\\.\\pipe\\LightHost-" + std::to_wstring(GetCurrentProcessId());
+        return test ? L"\\\\.\\pipe\\LightHostModern-profile-" + key : L"\\\\.\\pipe\\LightHostModern-" + std::to_wstring(GetCurrentProcessId());
     }
     std::wstring arguments() const
     {

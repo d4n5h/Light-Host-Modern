@@ -1,4 +1,5 @@
 #include "AudioMeters.h"
+#include "MeterScale.h"
 #include "ProcessMetrics.h"
 #include <iostream>
 #include <limits>
@@ -8,7 +9,7 @@ static void require(bool condition, const char* message)
 { if (!condition) throw std::runtime_error(message); }
 int main()
 {
-    using namespace lightHost;
+    using namespace lightHostModern;
     try
     {
         CpuUsageSampler cpu;
@@ -60,6 +61,16 @@ int main()
             meter.process(nullptr, 0, static_cast<int>(sine.size()));
             require(meter.snapshot().aggregate.rms < 1e-6, "Disconnected input advances silence history");
         }
+        require(lightHostModern::meterSegments(lightHostModern::amplitudeDb(.001)) == 0, "-60 dBFS floor");
+        require(lightHostModern::meterSegments(lightHostModern::amplitudeDb(1)) == 28, "0 dBFS ceiling");
+        require(std::abs(lightHostModern::amplitudeDb(2)-6.020599913)<1e-6, "Overload dB was clamped");
+        require(!std::isfinite(lightHostModern::amplitudeDb(0)), "Silence is not minus infinity");
+        lightHostModern::PresentationPeak presentation;
+        presentation.process(1, 64, 48000);
+        for (int i=0;i<30;++i) presentation.process(0,64,48000);
+        require(presentation.read()==1, "Transient was lost between 20Hz UI samples");
+        for (int i=0;i<50;++i) presentation.process(0,64,48000);
+        require(presentation.read()==0, "Presentation retains a stale maximum");
         std::cout << "RMS, peak hold, per-channel clipping and 256-channel meter scenarios passed\n";
     }
     catch (std::exception const& error) { std::cerr << error.what() << '\n'; return 1; }

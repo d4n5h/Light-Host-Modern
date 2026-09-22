@@ -7,7 +7,7 @@ Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,WindowsBase
 $control=Join-Path (Split-Path -Parent $ProfileInfo) 'control.json'
 $log=Join-Path (Split-Path -Parent $ProfileInfo) 'requests.jsonl'
 rtk proxy winapp ui click NavDashboard -a $info.uiPid --json | Out-Null
-$window=(rtk proxy winapp ui list-windows -a $info.uiPid --json | ConvertFrom-Json | Where-Object { $_.title.StartsWith('Light Host Modern [Test:') } | Select-Object -First 1).hwnd
+$window=(rtk proxy winapp ui list-windows -a $info.uiPid --json | ConvertFrom-Json | Where-Object { $_.title.StartsWith('LightHostModern [Test:') } | Select-Object -First 1).hwnd
 $root=[Windows.Automation.AutomationElement]::FromHandle([IntPtr][long]$window)
 $condition=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty,'InputMeter')
 $meter=$root.FindFirst([Windows.Automation.TreeScope]::Descendants,$condition)

@@ -7,7 +7,7 @@
 static void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
 int main()
 {
-    using Measurement = lightHost::CallbackMeasurement;
+    using Measurement = lightHostModern::CallbackMeasurement;
     try
     {
         for (unsigned exponent = 0; exponent < 64; ++exponent)

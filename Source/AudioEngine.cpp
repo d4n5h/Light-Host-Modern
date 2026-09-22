@@ -7,9 +7,9 @@
 #include <cmath>
 #include <vector>
 
-void lightHostLog(const String& message);
-void setLightHostCrashContext(const String& context);
-void clearLightHostCrashContext();
+void lightHostModernLog(const String& message);
+void setLightHostModernCrashContext(const String& context);
+void clearLightHostModernCrashContext();
 
 namespace
 {
@@ -158,7 +158,7 @@ AudioEngine::AudioEngine(bool startInSafeMode, bool shouldRestoreActivePluginsOn
           [this] { markSettingsDirty(); }, [this] { loadActivePlugins(); })
 {
     deviceManager.allowed = [this](const String& backend, const String& input, const String& output) {
-        return deviceController.isAudioDeviceChoiceAllowed(backend, input, output);
+        return deviceController.isAudioDeviceCreationAllowed(backend, input, output);
     };
     addEnabledPluginFormats(formatManager);
 	std::unique_ptr<XmlElement> savedPluginList(getXmlValuePreserving("pluginList"));
@@ -170,8 +170,8 @@ AudioEngine::AudioEngine(bool startInSafeMode, bool shouldRestoreActivePluginsOn
     sessionLoadSuppressed = safeMode || !restoreActivePluginsOnStartup;
     auto* settings = getAppProperties().getUserSettings();
     setDiagnosticsEnabled(settings->getBoolValue("diagnosticsEnabled", true));
-    auto storage = std::make_shared<lightHost::DiskSessionStorage>(settings->getFile());
-    const auto recovered = lightHost::SessionStore::recover(*storage);
+    auto storage = std::make_shared<lightHostModern::DiskSessionStorage>(settings->getFile());
+    const auto recovered = lightHostModern::SessionStore::recover(*storage);
     if (recovered.document)
     {
         instances = recovered.document->instances;
@@ -188,7 +188,7 @@ AudioEngine::AudioEngine(bool startInSafeMode, bool shouldRestoreActivePluginsOn
     {
         // Copy the exact previous file before device initialization or migration
         // can alter its keys. Legacy material remains untouched after activation.
-        const auto backupError = lightHost::SessionStore::backupLegacy(*storage, sessionMigrationId);
+        const auto backupError = lightHostModern::SessionStore::backupLegacy(*storage, sessionMigrationId);
         if (backupError.isNotEmpty())
         {
             instances.writable = false;
@@ -207,8 +207,8 @@ AudioEngine::AudioEngine(bool startInSafeMode, bool shouldRestoreActivePluginsOn
             else { instances.writable = false; instances.recoveryError = "Invalid legacy session; original settings preserved"; }
         }
     }
-    sessionStore = std::make_unique<lightHost::SessionStore>(std::move(storage), recovered);
-    deviceController.start(safeMode, lightHost::RuntimeProfile::current().noAudio);
+    sessionStore = std::make_unique<lightHostModern::SessionStore>(std::move(storage), recovered);
+    deviceController.start(safeMode, lightHostModern::RuntimeProfile::current().noAudio);
     player.setProcessor(&hostProcessor);
     deviceManager.addAudioCallback(&player);
     deviceManager.addChangeListener(this);
@@ -226,7 +226,7 @@ AudioEngine::~AudioEngine()
 	stopTimer(persistenceTimerId);
 
     // State capture must precede releaseResources as well as destruction.
-    if (!flushSession()) Logger::writeToLog("Light Host Modern: final session remains pending: " + getSessionSaveStatus().error);
+    if (!flushSession()) Logger::writeToLog("LightHostModern: final session remains pending: " + getSessionSaveStatus().error);
     if (sessionStore) sessionStore->shutdown();
 	flushPendingSaves();
 
@@ -244,7 +244,7 @@ std::unique_ptr<XmlElement> AudioEngine::getXmlValuePreserving(const String& key
 	auto xml = settings->getXmlValue(key);
 	if (xml == nullptr && settings->getValue(key).isNotEmpty())
 	{
-		Logger::writeToLog("Light Host Modern: preserved invalid XML setting '" + key + "'");
+		Logger::writeToLog("LightHostModern: preserved invalid XML setting '" + key + "'");
 	}
 
 	return xml;
@@ -254,7 +254,7 @@ int AudioEngine::findKnownPluginIndexById(const String& id) const
 {
     const auto known = getKnownPluginsSorted();
     for (size_t i = 0; i < known.size(); ++i)
-        if (lightHost::knownPluginId(known[i]) == id) return static_cast<int>(i);
+        if (lightHostModern::knownPluginId(known[i]) == id) return static_cast<int>(i);
     return -1;
 }
 
@@ -593,6 +593,10 @@ void AudioEngine::addKnownPluginsToMenu(PopupMenu& menu) const
 
 void AudioEngine::loadActivePlugins()
 {
+    const auto monoKey = deviceController.monoInputsKey();
+    hostProcessor.setMonoInputs(monoKey.isNotEmpty() && getAppProperties().getUserSettings()->getBoolValue(monoKey, false));
+    const auto outputKey = deviceController.monoOutputKey();
+    hostProcessor.setMonoOutput(outputKey.isNotEmpty() && getAppProperties().getUserSettings()->getBoolValue(outputKey, false));
     if (isDiagnosticsEnabled()) ++chainReloadCount;
     auto snapshot = std::make_shared<ChainSnapshot>();
     if (auto* device = deviceManager.getCurrentAudioDevice())
@@ -606,7 +610,7 @@ void AudioEngine::loadActivePlugins()
         if (sessionLoadSuppressed) { record.loading = "suspended"; continue; }
         if (record.error.isNotEmpty() && record.loading != "missing") { record.loading = "failed"; continue; }
         const auto& description = record.description;
-        setLightHostCrashContext("Loading instance " + record.id + " " + description.name);
+        setLightHostModernCrashContext("Loading instance " + record.id + " " + description.name);
         std::shared_ptr<PluginSlot> slot;
         if (previous)
             for (const auto& candidate : previous->slots)
@@ -639,7 +643,7 @@ void AudioEngine::loadActivePlugins()
                     throw std::runtime_error("Plugin exposes no audio channels");
                 PluginDescription actual;
                 processor->fillInPluginDescription(actual);
-                lightHost::restorePluginState(record, actual, [&](const void* data, int size) { processor->setStateInformation(data, size); });
+                lightHostModern::restorePluginState(record, actual, [&](const void* data, int size) { processor->setStateInformation(data, size); });
                 slot = std::make_shared<PluginSlot>(description, std::move(processor));
                 slot->instanceId = record.id;
                 ++snapshot->rebuiltSlots;
@@ -663,7 +667,7 @@ void AudioEngine::loadActivePlugins()
         hostProcessor.publishSnapshot(std::move(snapshot));
     }
     ++chainVersion;
-    clearLightHostCrashContext();
+    clearLightHostModernCrashContext();
     markSettingsDirty();
 }
 
@@ -689,7 +693,7 @@ bool AudioEngine::addKnownPluginByIndex(int sortedIndex)
 {
     const auto known = getKnownPluginsSorted();
     if (!instances.writable || sessionLoadSuppressed || !isPositiveAndBelow(sortedIndex, static_cast<int>(known.size()))) return false;
-    auto record = lightHost::newKnownPluginInstance(*getAppProperties().getUserSettings(), known[static_cast<size_t>(sortedIndex)]);
+    auto record = lightHostModern::newKnownPluginInstance(*getAppProperties().getUserSettings(), known[static_cast<size_t>(sortedIndex)]);
     const auto id = record.id;
     instances.records.push_back(std::move(record));
     loadActivePlugins();
@@ -713,7 +717,7 @@ int AudioEngine::removeKnownPluginByIndex(int sortedIndex)
     const auto known = getKnownPluginsSorted();
     if (!isSessionWritable() || !isPositiveAndBelow(sortedIndex, static_cast<int>(known.size()))) return 0;
     const auto& description = known[static_cast<size_t>(sortedIndex)];
-    const auto identity = lightHost::knownPluginId(description);
+    const auto identity = lightHostModern::knownPluginId(description);
     const auto before = instances.records.size();
     instances.records.erase(std::remove_if(instances.records.begin(), instances.records.end(), [&](const auto& record) {
         return record.identityResolved && record.originalIdentity == identity;
@@ -829,14 +833,14 @@ void AudioEngine::savePluginStates()
         auto& record = instances.records[static_cast<size_t>(index)];
         if (!record.stateCaptureAllowed || slot->processDisabled.load()) continue;
         slot->stateDirty.store(false, std::memory_order_relaxed);
-        if (lightHost::capturePluginState(record, [&](MemoryBlock& binary) { slot->processor->getStateInformation(binary); }))
+        if (lightHostModern::capturePluginState(record, [&](MemoryBlock& binary) { slot->processor->getStateInformation(binary); }))
         {
             captured = true;
         }
         else
         {
             stateCaptureFailures.add(record.id);
-            Logger::writeToLog("Light Host Modern: state capture failed; previous state retained for " + record.id);
+            Logger::writeToLog("LightHostModern: state capture failed; previous state retained for " + record.id);
         }
     }
     stateCaptureDue = 0;
@@ -854,7 +858,7 @@ bool AudioEngine::renamePlugin(int sortedIndex, const String& name)
 {
     String normalized;
     if (!isSessionWritable() || sortedIndex < 0 || sortedIndex >= static_cast<int>(instances.records.size())
-        || !lightHost::normalizeInstanceName(name, normalized)) return false;
+        || !lightHostModern::normalizeInstanceName(name, normalized)) return false;
     auto& record = instances.records[static_cast<size_t>(sortedIndex)];
     if (normalized == record.description.name) normalized.clear();
     if (record.customName == normalized) return true;
@@ -870,9 +874,27 @@ bool AudioEngine::renameKnownPlugin(int sortedIndex, const String& name)
     if (!isPositiveAndBelow(sortedIndex, static_cast<int>(known.size()))) return false;
     const auto& plugin = known[static_cast<size_t>(sortedIndex)];
     const auto previous = getKnownPluginCustomName(plugin);
-    if (!lightHost::setKnownPluginCustomName(*getAppProperties().getUserSettings(), plugin, name)) return false;
+    if (!lightHostModern::setKnownPluginCustomName(*getAppProperties().getUserSettings(), plugin, name)) return false;
     if (previous != getKnownPluginCustomName(plugin)) { ++pluginDatabaseVersion; markSettingsDirty(); }
     return true;
+}
+
+void AudioEngine::setMonoInputs(bool value)
+{
+    const auto key = deviceController.monoInputsKey();
+    if (key.isEmpty()) return;
+    hostProcessor.setMonoInputs(value);
+    getAppProperties().getUserSettings()->setValue(key, value);
+    markSettingsDirty(); ++chainVersion;
+}
+
+void AudioEngine::setMonoOutput(bool value)
+{
+    const auto key = deviceController.monoOutputKey();
+    if (key.isEmpty()) return;
+    hostProcessor.setMonoOutput(value);
+    getAppProperties().getUserSettings()->setValue(key, value);
+    markSettingsDirty(); ++chainVersion;
 }
 
 void AudioEngine::setDiagnosticsEnabled(bool enabled)
@@ -976,8 +998,18 @@ DiagnosticsSnapshot AudioEngine::getDiagnosticsSnapshot() const
 	if (!isDiagnosticsEnabled()) return snapshot;
 	const RealtimeHostStats realtimeStats = hostProcessor.getStats();
 #if JUCE_WINDOWS
-    snapshot.hostCpuPercent = hostCpuSampler.sample(lightHost::processCpuTicks(), GetTickCount64(), lightHost::processorCount());
-    snapshot.workerCpuPercent = workerCpuSampler.sample(lightHost::workerCpuTicks.load(), GetTickCount64(), lightHost::processorCount());
+    const auto now = GetTickCount64();
+    if (now <= lightHostModern::diagnosticsVisibleUntil.load() && now - lastMemorySample >= 1000)
+    { cachedMemory = lightHostModern::processMemory(); lastMemorySample = now; }
+    const auto memory = now <= lightHostModern::diagnosticsVisibleUntil.load() ? cachedMemory : lightHostModern::ProcessMemory{};
+    if (memory.resident) snapshot.hostResidentMiB = *memory.resident / 1048576.0;
+    if (memory.committed) snapshot.hostCommittedMiB = *memory.committed / 1048576.0;
+    if (lightHostModern::workerMemoryUnavailable.load() == 0) {
+        snapshot.workerResidentMiB = lightHostModern::workerResidentBytes.load() / 1048576.0;
+        snapshot.workerCommittedMiB = lightHostModern::workerCommittedBytes.load() / 1048576.0;
+    }
+    snapshot.hostCpuPercent = hostCpuSampler.sample(lightHostModern::processCpuTicks(), GetTickCount64(), lightHostModern::processorCount());
+    snapshot.workerCpuPercent = workerCpuSampler.sample(lightHostModern::workerCpuTicks.load(), GetTickCount64(), lightHostModern::processorCount());
 #endif
 	snapshot.activePlugins = static_cast<int>(instances.records.size());
 	snapshot.loadedPlugins = realtimeStats.loadedSlots;
@@ -1003,7 +1035,7 @@ DiagnosticsSnapshot AudioEngine::getDiagnosticsSnapshot() const
 
 bool AudioEngine::configureCallbackMeasurement(unsigned warmupSeconds, unsigned durationSeconds)
 {
-    if (!isDiagnosticsEnabled() || !lightHost::RuntimeProfile::current().test || deviceManager.getCurrentAudioDevice()) return false;
+    if (!isDiagnosticsEnabled() || !lightHostModern::RuntimeProfile::current().test || deviceManager.getCurrentAudioDevice()) return false;
     try
     {
         player.callbackMeasurement().configure(static_cast<uint64>(Time::getHighResolutionTicksPerSecond()), warmupSeconds, durationSeconds);
@@ -1087,7 +1119,7 @@ void AudioEngine::recordProcessFailures()
 			continue;
 
 		const String errorMessage = "Plugin threw while processing audio";
-		Logger::writeToLog("Light Host Modern: failed plugin disabled in audio chain '" + slot->description.name + "': " + errorMessage);
+		Logger::writeToLog("LightHostModern: failed plugin disabled in audio chain '" + slot->description.name + "': " + errorMessage);
 		const auto index = instances.indexOf(slot->instanceId);
         if (index >= 0)
         {
@@ -1104,7 +1136,7 @@ void AudioEngine::recordProcessFailures()
 void AudioEngine::logDiagnosticsSnapshot()
 {
 	const DiagnosticsSnapshot snapshot = getDiagnosticsSnapshot();
-	Logger::writeToLog("Light Host Modern diagnostics: backend=" + snapshot.backend
+	Logger::writeToLog("LightHostModern diagnostics: backend=" + snapshot.backend
 		+ ", device=" + snapshot.deviceName
 		+ ", cpu=" + String(snapshot.cpuUsagePercent, 2) + "%"
 		+ ", xruns=" + String(snapshot.xRunCount)

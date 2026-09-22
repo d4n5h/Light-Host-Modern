@@ -1,5 +1,5 @@
 param([Parameter(Mandatory)][string] $PackageDirectory,
-      [string] $ExpectedVersion = '1.3.1')
+      [string] $ExpectedVersion = '1.4.0')
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $root = [IO.Path]::GetFullPath($PackageDirectory)
@@ -11,8 +11,8 @@ function Scenario([string] $Name, [scriptblock] $Work) {
     try { & $Work; $results.Add([ordered]@{ name = $Name; status = 'passed' }) }
     catch { $results.Add([ordered]@{ name = $Name; status = 'failed'; error = $_.Exception.Message }) }
 }
-Scenario 'Both local artifacts match their published size and SHA-256 metadata' {
-    Assert ($metadata.formatVersion -eq 1 -and $metadata.artifacts.Count -eq 2) 'Invalid artifact metadata'
+Scenario 'All three local artifacts match their published size and SHA-256 metadata' {
+    Assert ($metadata.formatVersion -eq 1 -and $metadata.artifacts.Count -eq 3) 'Invalid artifact metadata'
     foreach ($artifact in $metadata.artifacts) {
         $file = Get-Item -LiteralPath (Join-Path $root $artifact.name)
         Assert ($file.Length -eq $artifact.size -and $artifact.digest -eq ('sha256:' + (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant())) 'Artifact size or digest mismatch'
@@ -24,14 +24,19 @@ Scenario 'Portable payload includes host, WinUI, scanner and helper without test
     $zip = [IO.Compression.ZipFile]::OpenRead((Join-Path $root 'LightHostModern-Portable.zip'))
     try {
         $names = @($zip.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
-        foreach ($name in 'Light Host Modern.exe', 'LightHostScanner.exe', 'LightHostUpdateHelper.exe', 'WinUI/x64/Release/LightHost.WinUI/LightHostWinUI.exe', 'release-info.json', 'LICENSE') {
+        foreach ($name in 'LightHostModern.exe', 'LightHostModernScanner.exe', 'LightHostModernUpdateHelper.exe', 'WinUI/x64/Release/LightHostModern.WinUI/LightHostModernWinUI.exe', 'release-info.json', 'LICENSE') {
             Assert ($names -contains $name) "Missing payload: $name"
         }
-        Assert (@($names | Where-Object { $_ -match '(?i)Dragonfly|LightHost[^/]*Tests|(^|/)(Tests|fixtures|test-profiles|obj|AppX)/|\.(vst3|clap)$' }).Count -eq 0) 'Test material or duplicate output in portable payload'
+        Assert (@($names | Where-Object { $_ -match '(?i)Dragonfly|LightHostModern[^/]*Tests|(^|/)(Tests|fixtures|test-profiles|obj|AppX)/|\.(vst3|clap)$' }).Count -eq 0) 'Test material or duplicate output in portable payload'
         $manifest = $zip.Entries | Where-Object { $_.FullName -eq 'release-info.json' }
         $reader = [IO.StreamReader]::new($manifest.Open())
         try { $release = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
-        Assert ($release.version -eq $ExpectedVersion -and $release.platform -eq 'x64' -and $release.entryPoint -eq 'Light Host Modern.exe') 'Unexpected portable manifest'
+        Assert ($release.version -eq $ExpectedVersion -and $release.platform -eq 'x64' -and $release.entryPoint -eq 'LightHostModern.exe') 'Unexpected portable manifest'
+        $inventory = $zip.Entries | Where-Object { $_.FullName -eq 'legacy-payload-files.json' }
+        Assert ($null -ne $inventory) 'Legacy migration inventory is missing'
+        $reader = [IO.StreamReader]::new($inventory.Open())
+        try { $legacyFiles = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+        Assert ($legacyFiles -contains 'Uninstall-LightHostModern.ps1') 'Legacy installer-owned uninstaller would be left behind'
     } finally { $zip.Dispose() }
 }
 Scenario 'MSI preserves machine scope, upgrade identity, shortcuts and legacy migration' {
@@ -47,8 +52,10 @@ Scenario 'MSI preserves machine scope, upgrade identity, shortcuts and legacy mi
     $features = @(Rows 'SELECT `Feature` FROM `Feature`')
     Assert ($features -contains 'StartMenuShortcutFeature' -and $features -contains 'DesktopShortcutFeature') 'Shortcut features changed'
     $components = @(Rows 'SELECT `Component` FROM `Component`')
-    Assert ($components -contains 'LegacyInstallCleanupComponent') 'Legacy migration component missing'
+    Assert ($components -notcontains 'LegacyInstallCleanupComponent') 'Unsafe recursive legacy cleanup remains'
+    Assert ((Get-FileHash -LiteralPath (Join-Path $root "LightHostModern-$ExpectedVersion-Setup.msi")).Hash -eq (Get-FileHash -LiteralPath (Join-Path $root 'LightHostModern-Setup.msi')).Hash) 'Installer alias differs from versioned artifact'
     $actions = @(Rows 'SELECT `Action` FROM `CustomAction`')
+    Assert ($actions -contains 'MigrateLegacyPayload') 'Verified post-commit legacy migration is missing'
     Assert ($actions -contains 'SetARPINSTALLLOCATION') 'MSI installation location is not recorded'
     $summary = $database.SummaryInformation(0)
     Assert ($summary.Property(7).StartsWith('x64;')) 'MSI architecture mismatch'

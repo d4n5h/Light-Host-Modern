@@ -4,7 +4,7 @@
 #include <deque>
 #include <functional>
 
-namespace lightHost::ipc
+namespace lightHostModern::ipc
 {
 // Accessed only by the serialized controller. Every entry is an owned immutable
 // JSON value; callers only receive newly constructed manifests/pages.

@@ -6,18 +6,18 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$propsPath = Join-Path $repoRoot 'WinUI\LightHost.Output.props'
+$propsPath = Join-Path $repoRoot 'WinUI\LightHostModern.Output.props'
 [xml] $props = Get-Content -LiteralPath $propsPath -Raw
 $relative = [string] $props.Project.PropertyGroup.OutDir
 $source = [IO.Path]::GetFullPath($relative.Replace('$(MSBuildThisFileDirectory)', (Join-Path $repoRoot 'WinUI\')).Replace('$(Platform)', $Platform).Replace('$(Configuration)', $Configuration))
 if ($Mode -eq 'Resolve') { return $source }
 
 function Get-SourceFingerprint {
-    $project = Join-Path $repoRoot 'WinUI\LightHost.WinUI'
+    $project = Join-Path $repoRoot 'WinUI\LightHostModern.WinUI'
     $files = @(Get-ChildItem -LiteralPath $project -File | Where-Object { $_.Extension -in '.h', '.cpp', '.idl', '.xaml', '.vcxproj', '.config', '.manifest', '.appxmanifest', '.rc' })
     foreach ($child in 'Locales', 'Assets') { $files += Get-ChildItem -LiteralPath (Join-Path $project $child) -File -Recurse }
     $files += Get-Item -LiteralPath $propsPath
-    $files += Get-Item -LiteralPath (Join-Path $repoRoot 'WinUI\LightHost.WinUI.sln')
+    $files += Get-Item -LiteralPath (Join-Path $repoRoot 'WinUI\LightHostModern.WinUI.sln')
     $files += Get-ChildItem -LiteralPath (Join-Path $repoRoot 'Source') -File -Filter '*.h'
     $lines = foreach ($file in ($files | Sort-Object FullName -Unique)) {
         $file.FullName.Substring($repoRoot.Length).Replace('\', '/') + ':' + (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
@@ -35,7 +35,7 @@ function Assert-WorkspacePath([string] $Path) {
     }
     return $resolved
 }
-$exe = Join-Path $source 'LightHostWinUI.exe'
+$exe = Join-Path $source 'LightHostModernWinUI.exe'
 $stampPath = Join-Path $source 'lighthost-build.json'
 if (!(Test-Path -LiteralPath $exe)) { throw "Canonical WinUI executable was not found: $exe" }
 $fingerprint = Get-SourceFingerprint
@@ -57,4 +57,4 @@ foreach ($item in Get-ChildItem -LiteralPath $source) {
     if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Reparse point in WinUI output: $($item.FullName)" }
     Copy-Item -LiteralPath $item.FullName -Destination $target -Recurse -Force
 }
-if ((Get-FileHash -LiteralPath (Join-Path $target 'LightHostWinUI.exe') -Algorithm SHA256).Hash -ne $stamp.exeHash) { throw 'Staged WinUI executable hash changed.' }
+if ((Get-FileHash -LiteralPath (Join-Path $target 'LightHostModernWinUI.exe') -Algorithm SHA256).Hash -ne $stamp.exeHash) { throw 'Staged WinUI executable hash changed.' }

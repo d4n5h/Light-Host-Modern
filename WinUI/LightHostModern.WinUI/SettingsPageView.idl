@@ -1,0 +1,8 @@
+namespace LightHostModernWinUI
+{
+    [default_interface]
+    runtimeclass SettingsPageView : Microsoft.UI.Xaml.Controls.UserControl
+    {
+        SettingsPageView();
+    }
+}

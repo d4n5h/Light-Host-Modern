@@ -21,6 +21,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--snapshot', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--modernization', action='store_true')
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -32,7 +33,7 @@ def main():
     key = 14695981039346656037
     for char in identity:
         key = ((key ^ ord(char)) * 1099511628211) & ((1 << 64) - 1)
-    pipe = '\\\\.\\pipe\\LightHost-profile-' + str(key)
+    pipe = '\\\\.\\pipe\\LightHostModern-profile-' + str(key)
     (profile / 'ui-settings.ini').write_text(
         '[Appearance]\nThemeMode=Dark\nLayoutMode=Compact\nBackdropMode=1\n'
         '[Localization]\nLanguage=en-us\n', encoding='utf-16')
@@ -44,6 +45,26 @@ def main():
         plugin.setdefault('originalName', plugin['name'])
         plugin.setdefault('customName', '')
     state['appConfig']['closeBehavior'] = 'tray'
+    if args.modernization:
+        state['monoInputs'] = False
+        state['monoOutput'] = False
+        state['audioConfig'].update(backendNames=['Windows Audio'], currentBackendIndex=0,
+            inputDeviceNames=['Fixture input'], outputDeviceNames=['Fixture output'],
+            currentInputDeviceIndex=0, currentOutputDeviceIndex=0,
+            inputChannelNames=['Input 1', 'Input 2', 'Input 3', 'Input 4'],
+            outputChannelNames=['Output 1', 'Output 2'], activeInputChannels=[True]*4,
+            activeOutputChannels=[True]*2, currentInputChannels=4, currentOutputChannels=2,
+            maxInputChannels=4, maxOutputChannels=2, sampleRates=[48000], bufferSizes=[256])
+        state['audioSelection'] = dict(generation='1', processingAvailable=True, suspended=False,
+            driverAvailable=True, recoveryState='active', preferenceKey='fixture-pair', mainOutputPairActive=True,
+            configured=dict(backend='Windows Audio', input='Fixture input', output='Fixture output',
+                inputMask='1111', outputMask='11', defaultInputChannels=False, defaultOutputChannels=False, sampleRate=48000, bufferSize=256))
+        state['audioSelection']['editable'] = copy.deepcopy(state['audioSelection']['configured'])
+        state['audioSelection']['effective'] = copy.deepcopy(state['audioSelection']['configured'])
+        state['diagnostics'].update(backend='Windows Audio', deviceName='Fixture output',
+            inputChannels=4, outputChannels=2, sampleRate=48000, bufferSize=256,
+            recoveryState='active', hostCpuPercent=0, workerCpuPercent=0,
+            hostResidentMiB=0, workerResidentMiB=0, hostCommittedMiB=0, workerCommittedMiB=0)
     original_chain = copy.deepcopy(state['activePlugins'])
     sequence = 1
     lock = threading.RLock()
@@ -61,6 +82,19 @@ def main():
         except (OSError, ValueError):
             pass
         if control != previous_control:
+            if args.modernization and control.get('channelCounts') != previous_control.get('channelCounts'):
+                counts = control.get('channelCounts', [4, 2])
+                for direction, count in zip(('input', 'output'), counts):
+                    state['audioConfig'][direction+'ChannelNames'] = ['' if i % 3 == 0 else 'Repeated name' for i in range(count)]
+                    state['audioConfig']['active'+direction.title()+'Channels'] = [True]*count
+                    state['audioConfig']['current'+direction.title()+'Channels'] = count
+                    state['audioConfig']['max'+direction.title()+'Channels'] = count
+                    for field in ('configured', 'editable', 'effective'):
+                        state['audioSelection'][field][direction+'Mask'] = '1'*count or '0'
+                state['audioSelection']['mainOutputPairActive'] = counts[1] >= 2
+                state['audioSelection']['generation'] = str(int(state['audioSelection']['generation']) + 1)
+                state['audioConfigVersion'] += 1
+                state['chainVersion'] += 1
             if control.get('emptyChain') != previous_control.get('emptyChain'):
                 state['activePlugins'] = [] if control.get('emptyChain') else copy.deepcopy(original_chain)
                 state['chainVersion'] += 1
@@ -96,6 +130,8 @@ def main():
             time.sleep(0.4)
         if command == 'telemetry':
             time.sleep(previous_control.get('telemetryDelayMs', 0) / 1000)
+        if command in ('set-mono-inputs', 'set-mono-output'):
+            time.sleep(previous_control.get('monoDelayMs', 0) / 1000)
         with lock:
             snap = snapshot()
             base = dict(version=4, id=request['id'], hostSession=state['hostSession'], status='ok')
@@ -167,6 +203,23 @@ def main():
                             identity='fixture-original-identity', verifiedMetadata='verified', declaredMetadata='unavailable', buses=[])
             if command in ('set-global-mute', 'set-global-bypass'):
                 state['globalMuted' if command.endswith('mute') else 'globalBypassed'] = bool(arguments[0])
+            elif command in ('set-mono-inputs', 'set-mono-output'):
+                if arguments[0]['expectedGeneration'] != state['audioSelection']['generation']:
+                    return dict(base, status='error', error={'code': 'stale_configuration'})
+                state['monoInputs' if command == 'set-mono-inputs' else 'monoOutput'] = bool(arguments[0]['enabled'])
+            elif command == 'select-audio-device' and args.modernization:
+                selection = arguments[0]
+                if selection['expectedGeneration'] != state['audioSelection']['generation']:
+                    return dict(base, status='error', error={'code': 'stale_configuration'})
+                for direction in ('input', 'output'):
+                    count = len(state['audioConfig'][direction+'ChannelNames'])
+                    mask = int(selection[direction+'Mask'], 2)
+                    state['audioConfig']['active'+direction.title()+'Channels'] = [bool(mask & (1 << index)) for index in range(count)]
+                for key in ('configured', 'editable', 'effective'):
+                    state['audioSelection'][key] = {k:v for k,v in selection.items() if k != 'expectedGeneration'}
+                state['audioSelection']['generation'] = str(int(state['audioSelection']['generation']) + 1)
+                state['audioSelection']['mainOutputPairActive'] = all(state['audioConfig']['activeOutputChannels'][:2])
+                state['audioConfigVersion'] += 1
             elif command == 'set-diagnostics-enabled':
                 state['diagnosticsEnabled'] = bool(arguments[0])
             elif command == 'add-known-plugin':
@@ -230,6 +283,9 @@ def main():
                     with (output / 'requests.jsonl').open('a', encoding='utf-8') as log:
                         log.write(json.dumps(dict(time=time.time(), **request)) + '\n')
                 response = handle(request)
+                if args.modernization and request['command'] in ('set-mono-inputs', 'snapshot-manifest'):
+                    with (output / 'mono-state.jsonl').open('a', encoding='utf-8') as log:
+                        log.write(json.dumps(dict(command=request['command'], monoInputs=state['monoInputs'])) + '\n')
                 payload = json.dumps(response, ensure_ascii=False).encode('utf-8')
                 kernel.WriteFile(handle_pipe, payload, len(payload), c.byref(count), None)
                 kernel.ReadFile(handle_pipe, buffer, len(buffer), c.byref(count), None)

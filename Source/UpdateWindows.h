@@ -15,7 +15,7 @@
 #pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "msi.lib")
 
-namespace lightHost::update
+namespace lightHostModern::update
 {
 inline void windowsCheck(bool ok, const char* code)
 { if (!ok) throw Error(code, std::string(code) + ": " + std::to_string(GetLastError())); }
@@ -103,7 +103,7 @@ public:
         const std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
         const std::wstring route = std::wstring(parts.lpszUrlPath, parts.dwUrlPathLength)
             + std::wstring(parts.lpszExtraInfo ? parts.lpszExtraInfo : L"", parts.dwExtraInfoLength);
-        session.value = WinHttpOpen(L"LightHostModern/1.3.1", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, nullptr, nullptr, 0);
+        session.value = WinHttpOpen(L"LightHostModern/1.4.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, nullptr, nullptr, 0);
         windowsCheck(session.value != nullptr, "network_failed");
         windowsCheck(WinHttpSetTimeouts(session.value, 5000, 5000, 5000, 5000), "network_failed");
         connection.value = WinHttpConnect(session.value, host.c_str(), parts.nPort, 0);

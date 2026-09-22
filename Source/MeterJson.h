@@ -2,7 +2,7 @@
 #include "AudioMeters.h"
 #include <juce_core/juce_core.h>
 
-namespace lightHost
+namespace lightHostModern
 {
 inline juce::var measurementJson(const AudioMeasurement& measurement)
 {

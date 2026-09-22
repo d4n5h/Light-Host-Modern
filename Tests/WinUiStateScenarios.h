@@ -4,7 +4,7 @@
 
 static void runStateScenarios()
 {
-    using namespace lightHost::ipc;
+    using namespace lightHostModern::ipc;
     struct Peer
     {
         int count = 100, manifests = 0, pages = 0;
@@ -65,7 +65,7 @@ static void runStateScenarios()
             return winrt::to_string(result.Stringify());
         }
     } peer;
-    auto connection = std::make_shared<lightHost::ui::HostConnection>();
+    auto connection = std::make_shared<lightHostModern::ui::HostConnection>();
     auto transport = [&](const std::wstring&, const std::string& request, DWORD) { return peer.reply(request); };
     connection->commands->transport = transport;
     connection->events->transport = transport;
@@ -102,7 +102,7 @@ static void runStateScenarios()
     connection->close();
 
     // Slow control traffic must not delay the next visible meter frame.
-    auto live = std::make_shared<lightHost::ui::HostConnection>();
+    auto live = std::make_shared<lightHostModern::ui::HostConnection>();
     live->pipeName = L"isolated";
     std::promise<void> commandEntered, releaseCommand;
     auto commandRelease = releaseCommand.get_future().share();

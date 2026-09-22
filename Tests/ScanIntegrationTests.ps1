@@ -1,4 +1,4 @@
-param([string] $HostExecutable = "$PSScriptRoot\..\out\build\windows-vs2022\LightHost_artefacts\Release\Light Host Modern.exe")
+param([string] $HostExecutable = "$PSScriptRoot\..\out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe")
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\HostProtocol.ps1"
 $repo = (Resolve-Path -LiteralPath "$PSScriptRoot\..").Path

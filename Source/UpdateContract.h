@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace lightHost::update
+namespace lightHostModern::update
 {
 enum class Distribution { installed, portable };
 inline constexpr wchar_t upgradeCode[] = L"{8F28E61C-DC90-4927-B7B4-3E74E4B5960B}";
@@ -43,6 +43,14 @@ inline std::optional<std::array<unsigned, 3>> parseVersion(std::wstring text)
 }
 inline std::wstring artifactName(Distribution value)
 { return value == Distribution::installed ? L"LightHostModern-Setup.msi" : L"LightHostModern-Portable.zip"; }
+inline std::wstring versionedArtifactName(Distribution value, std::wstring version)
+{
+    require(parseVersion(version).has_value(), "version_mismatch");
+    if (!version.empty() && (version.front() == L'v' || version.front() == L'V')) version.erase(0, 1);
+    return value == Distribution::installed ? L"LightHostModern-" + version + L"-Setup.msi" : artifactName(value);
+}
+inline bool artifactNameAllowed(Distribution value, const std::wstring& version, const std::wstring& name)
+{ return name == versionedArtifactName(value, version) || name == artifactName(value); }
 inline std::wstring normalizedDigest(std::wstring value)
 {
     if (value.rfind(L"sha256:", 0) == 0) value.erase(0, 7);
@@ -63,7 +71,7 @@ struct Artifact
     {
         require(parseVersion(version).has_value(), "version_mismatch");
         require(architecture == L"x64", "architecture_mismatch");
-        require(name == artifactName(distribution), "artifact_mismatch");
+        require(artifactNameAllowed(distribution, version, name), "artifact_mismatch");
         require(bytes > 0 && bytes <= maximumPackageBytes, "size_mismatch");
         (void) normalizedDigest(digest);
         const std::wstring base = L"https://github.com/heide-oficial/Light-Host-Modern/releases/download/";

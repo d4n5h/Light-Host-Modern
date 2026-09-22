@@ -1,7 +1,7 @@
 #include "DeviceController.h"
 #include <algorithm>
 #include <cmath>
-void lightHostLog(const String& message);
+void lightHostModernLog(const String& message);
 
 namespace
 {
@@ -180,6 +180,8 @@ namespace
 String DeviceController::apply(AudioDeviceManager& manager, const String& backend,
     const AudioDeviceManager::AudioDeviceSetup& setup)
 {
+    const ScopedValueSetter<String> openingType(openingBackend, backend),
+        openingIn(openingInput, setup.inputDeviceName), openingOut(openingOutput, setup.outputDeviceName);
     const auto applyingGeneration = generation;
     if (!isAudioDeviceChoiceAllowed(backend, setup.inputDeviceName, setup.outputDeviceName))
         return "Audio device is blocked by settings";
@@ -243,7 +245,7 @@ var DeviceController::selectionState() const
 {
     auto* result = new DynamicObject;
     result->setProperty("generation", String(generation));
-    result->setProperty("configured", lightHost::audioSelection::setupJson(configuredBackend, configuredSetup));
+    result->setProperty("configured", lightHostModern::audioSelection::setupJson(configuredBackend, configuredSetup));
     AudioDeviceManager::AudioDeviceSetup current;
     auto* device = deviceManager.getCurrentAudioDevice();
     const bool available = device && device->isOpen();
@@ -254,12 +256,16 @@ var DeviceController::selectionState() const
         current.inputChannels = device->getActiveInputChannels(); current.outputChannels = device->getActiveOutputChannels();
         current.useDefaultInputChannels = current.useDefaultOutputChannels = false;
     }
-    result->setProperty("effective", lightHost::audioSelection::setupJson(available ? device->getTypeName() : String(), current));
+    result->setProperty("effective", lightHostModern::audioSelection::setupJson(available ? device->getTypeName() : String(), current));
     const bool attempted = attemptedGeneration == generation && attemptedBackend.isNotEmpty();
-    result->setProperty("attempted", attempted ? lightHost::audioSelection::setupJson(attemptedBackend, attemptedSetup) : var());
-    result->setProperty("editable", available ? lightHost::audioSelection::setupJson(device->getTypeName(), current)
-        : lightHost::audioSelection::setupJson(attempted ? attemptedBackend : configuredBackend, attempted ? attemptedSetup : configuredSetup));
+    result->setProperty("attempted", attempted ? lightHostModern::audioSelection::setupJson(attemptedBackend, attemptedSetup) : var());
+    result->setProperty("editable", available ? lightHostModern::audioSelection::setupJson(device->getTypeName(), current)
+        : lightHostModern::audioSelection::setupJson(attempted ? attemptedBackend : configuredBackend, attempted ? attemptedSetup : configuredSetup));
     result->setProperty("driverAvailable", available); result->setProperty("error", lastAudioConfigurationError);
+    result->setProperty("processingAvailable", available && device->isPlaying());
+    result->setProperty("suspended", audioStartSuspended);
+    result->setProperty("preferenceKey", monoInputsKey());
+    result->setProperty("mainOutputPairActive", available && current.outputChannels[0] && current.outputChannels[1]);
     result->setProperty("recoveryState", audioRecoveryState); result->setProperty("attempt", failedAudioRecoveryAttempts);
     return var(result);
 }
@@ -284,7 +290,7 @@ var DeviceController::optionsForBackend(const String& backend)
         const auto suggested = [&](bool input, const Array<var>& allowed) -> String {
             const auto names = type->getDeviceNames(input);
             const auto index = type->getDefaultDeviceIndex(input);
-            const auto preferred = names[index];
+            const auto preferred = isPositiveAndBelow(index, names.size()) ? names[index] : String();
             for (const auto& name : allowed) if (name.toString() == preferred) return preferred;
             return allowed.isEmpty() ? String() : allowed.getFirst().toString();
         };
@@ -374,7 +380,20 @@ bool DeviceController::setPreferredDevice(const String& backend, const String& i
 
 void DeviceController::start(bool safeMode, bool suspended)
 {
+    if (const auto saved = preferences.getXmlValue("audioDeviceState"))
+    {
+        configuredBackend = saved->getStringAttribute("deviceType");
+        configuredSetup.inputDeviceName = saved->getStringAttribute("audioInputDeviceName", saved->getStringAttribute("audioDeviceName"));
+        configuredSetup.outputDeviceName = saved->getStringAttribute("audioOutputDeviceName", saved->getStringAttribute("audioDeviceName"));
+        configuredSetup.sampleRate = saved->getDoubleAttribute("audioDeviceRate");
+        configuredSetup.bufferSize = saved->getIntAttribute("audioDeviceBufferSize");
+        configuredSetup.inputChannels.parseString(saved->getStringAttribute("audioDeviceInChans"), 2);
+        configuredSetup.outputChannels.parseString(saved->getStringAttribute("audioDeviceOutChans"), 2);
+        configuredSetup.useDefaultInputChannels = !saved->hasAttribute("audioDeviceInChans");
+        configuredSetup.useDefaultOutputChannels = !saved->hasAttribute("audioDeviceOutChans");
+    }
     audioStartSuspended = suspended || preferences.getBoolValue("audioSelectionSuspended", false);
+    if (safeMode) audioStartSuspended = true;
     if (audioStartSuspended) { audioRecoveryState = "suspended"; return; }
     const auto config = getAudioRecoveryConfiguration();
     const auto mode = normaliseAudioPersistenceMode(config.mode);
@@ -386,9 +405,12 @@ void DeviceController::start(bool safeMode, bool suspended)
     }
     else if (safeMode || mode == "disabled")
     {
-        auto saved = safeMode ? nullptr : preferences.getXmlValue("audioDeviceState");
-        lastAudioConfigurationError = initialise(deviceManager, saved.get(), true);
-        if (lastAudioConfigurationError.isNotEmpty()) audioRecoveryState = "failed";
+        if (configuredBackend.isEmpty()) { audioRecoveryState = "unconfigured"; applicationsSuspended = true; }
+        else
+        {
+            lastAudioConfigurationError = apply(deviceManager, configuredBackend, configuredSetup);
+            if (lastAudioConfigurationError.isNotEmpty()) { audioRecoveryState = "failed"; deviceManager.closeAudioDevice(); }
+        }
     }
     else
     {
@@ -515,26 +537,12 @@ void DeviceController::devicesChanged()
     ++audioConfigVersion;
 }
 
-String DeviceController::initialise(AudioDeviceManager& deviceManager, const XmlElement* savedAudioState, bool allowDefaultFallback)
+String DeviceController::initialise(AudioDeviceManager& deviceManager, const XmlElement* savedAudioState, bool)
 {
-	String audioError = deviceManager.initialise(256, 256, savedAudioState, allowDefaultFallback);
-	if (audioError.isNotEmpty())
-	{
-		Logger::writeToLog("Light Host Modern: audio device initialisation failed: " + audioError);
-		if (allowDefaultFallback)
-		{
-			audioError = deviceManager.initialiseWithDefaultDevices(256, 256);
-			if (audioError.isNotEmpty())
-				Logger::writeToLog("Light Host Modern: default audio device initialisation failed: " + audioError);
-		}
-		else
-		{
-			Logger::writeToLog("Light Host Modern: default audio fallback is disabled while device persistence is active");
-			deviceManager.closeAudioDevice();
-		}
-	}
-
-	return audioError;
+    if (!savedAudioState) return "No audio device was selected";
+    const auto error = deviceManager.initialise(256, 256, savedAudioState, false);
+    if (error.isNotEmpty()) deviceManager.closeAudioDevice();
+    return error;
 }
 
 void DeviceController::recoverIfNeeded(AudioDeviceManager& deviceManager,
@@ -560,20 +568,21 @@ void DeviceController::recoverIfNeeded(AudioDeviceManager& deviceManager,
 		return;
 
 	failedAudioRecoveryAttempts++;
-	recoveryState = "fallback";
+	recoveryState = "retrying";
 	recoveryMessage = "Audio device stopped; restarting the last audio device.";
-	Logger::writeToLog("Light Host Modern: audio device is not running; attempting restart");
-	deviceManager.restartLastAudioDevice();
+	Logger::writeToLog("LightHostModern: audio device is not running; attempting restart");
+    const auto error = configuredBackend.isEmpty() ? String("No audio device was selected")
+        : apply(deviceManager, configuredBackend, configuredSetup);
 	if (recoveringGeneration != generation) { deviceManager.closeAudioDevice(); return; }
 
 	if (deviceManager.getCurrentAudioDevice() == nullptr
 		|| !deviceManager.getCurrentAudioDevice()->isOpen()
 		|| !deviceManager.getCurrentAudioDevice()->isPlaying())
 	{
-		Logger::writeToLog("Light Host Modern: audio device restart failed; falling back to default devices");
-		recoveryMessage = "Audio device restart failed; falling back to default devices.";
-		deviceManager.initialiseWithDefaultDevices(256, 256);
-		if (recoveringGeneration != generation) deviceManager.closeAudioDevice();
+        deviceManager.closeAudioDevice();
+        recoveryState = "failed";
+        recoveryMessage = "The selected audio device is unavailable. Audio processing has stopped.";
+        lastAudioConfigurationError = error;
 	}
 }
 
@@ -856,6 +865,31 @@ bool DeviceController::isAudioDeviceChoiceAllowed(const String& backendName,
 		&& !isAudioDeviceBlocked(backendName, "output", outputDeviceName);
 }
 
+bool DeviceController::isAudioDeviceCreationAllowed(const String& backend, const String& input, const String& output) const
+{
+    const auto& targetBackend = openingBackend.isNotEmpty() ? openingBackend : configuredBackend;
+    const auto& targetInput = openingBackend.isNotEmpty() ? openingInput : configuredSetup.inputDeviceName;
+    const auto& targetOutput = openingBackend.isNotEmpty() ? openingOutput : configuredSetup.outputDeviceName;
+    return backend == targetBackend && input == targetInput && output == targetOutput
+        && isAudioDeviceChoiceAllowed(backend, input, output);
+}
+
+String DeviceController::monoInputsKey() const
+{
+    if (configuredBackend.isEmpty()) return {};
+    // Length-delimited, reversible identity; device names may contain separators.
+    String identity;
+    for (const auto& part : { configuredBackend, configuredSetup.inputDeviceName, configuredSetup.outputDeviceName })
+        identity += String(part.length()) + ":" + part;
+    return "monoInputsV1_" + Base64::toBase64(identity);
+}
+
+String DeviceController::monoOutputKey() const
+{
+    const auto inputKey = monoInputsKey();
+    return inputKey.isEmpty() ? String() : "monoOutputV1_" + inputKey.substring(13);
+}
+
 bool DeviceController::currentAudioDeviceMatchesPreferred(AudioRecoveryConfiguration const& recoveryConfig) const
 {
 	const String mode = normaliseAudioPersistenceMode(recoveryConfig.mode);
@@ -916,7 +950,7 @@ void DeviceController::closeCurrentAudioDeviceIfBlocked(const String& context)
 		+ quotedTarget(backendName, setup.inputDeviceName, setup.outputDeviceName);
 	audioRecoveryState = "failed";
 	audioRecoveryMessage = lastAudioConfigurationError;
-	lightHostLog("AudioEngine closed blocked audio device during " + context + ": " + lastAudioConfigurationError);
+	lightHostModernLog("AudioEngine closed blocked audio device during " + context + ": " + lastAudioConfigurationError);
 	deviceManager.closeAudioDevice();
 	audioConfigVersion++;
 }
@@ -968,7 +1002,7 @@ void DeviceController::rememberManualSelectedAudioDevice()
 	settings->setValue("audioPersistenceCustomInputDevice", setup.inputDeviceName);
 	settings->setValue("audioPersistenceCustomOutputDevice", setup.outputDeviceName);
 	markSettingsDirty();
-	lightHostLog("AudioEngine manual audio selection updated custom persistence target='"
+	lightHostModernLog("AudioEngine manual audio selection updated custom persistence target='"
 		+ quotedTarget(backend, setup.inputDeviceName, setup.outputDeviceName) + "'");
 }
 
@@ -1014,11 +1048,11 @@ bool DeviceController::applyPreferredAudioDevice(AudioRecoveryConfiguration cons
 			+ quotedTarget(targetBackend, targetInput, targetOutput);
 		audioRecoveryState = "failed";
 		audioRecoveryMessage = lastAudioConfigurationError;
-		lightHostLog("AudioEngine audio persistence failed: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine audio persistence failed: " + lastAudioConfigurationError);
 		return false;
 	}
 
-	lightHostLog(String("AudioEngine audio persistence retry ")
+	lightHostModernLog(String("AudioEngine audio persistence retry ")
 		+ (manualRetry ? "manual" : "automatic")
 		+ " target='" + quotedTarget(targetBackend, targetInput, targetOutput) + "'");
 
@@ -1037,7 +1071,7 @@ bool DeviceController::applyPreferredAudioDevice(AudioRecoveryConfiguration cons
 	{
 		lastAudioConfigurationError = "Preferred audio backend is unavailable: " + targetBackend;
 		audioRecoveryMessage = lastAudioConfigurationError;
-		lightHostLog("AudioEngine audio persistence failed: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine audio persistence failed: " + lastAudioConfigurationError);
 		return false;
 	}
 
@@ -1050,7 +1084,7 @@ bool DeviceController::applyPreferredAudioDevice(AudioRecoveryConfiguration cons
 	{
 		lastAudioConfigurationError = "Preferred input device is unavailable: " + targetInput;
 		audioRecoveryMessage = lastAudioConfigurationError;
-		lightHostLog("AudioEngine audio persistence failed: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine audio persistence failed: " + lastAudioConfigurationError);
 		return false;
 	}
 
@@ -1058,7 +1092,7 @@ bool DeviceController::applyPreferredAudioDevice(AudioRecoveryConfiguration cons
 	{
 		lastAudioConfigurationError = "Preferred output device is unavailable: " + targetOutput;
 		audioRecoveryMessage = lastAudioConfigurationError;
-		lightHostLog("AudioEngine audio persistence failed: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine audio persistence failed: " + lastAudioConfigurationError);
 		return false;
 	}
 
@@ -1101,7 +1135,7 @@ bool DeviceController::applyPreferredAudioDevice(AudioRecoveryConfiguration cons
 					: (selectedDeviceMismatch ? "selected ASIO device did not match requested device"
 						: (selectedSetupMismatch ? "selected input/output device did not match requested device" : "device did not open"))));
 		audioRecoveryMessage = lastAudioConfigurationError;
-		lightHostLog("AudioEngine audio persistence failed: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine audio persistence failed: " + lastAudioConfigurationError);
 		return false;
 	}
 
@@ -1121,13 +1155,13 @@ bool DeviceController::setAudioBackendByIndex(int backendIndex)
 	invalidateConfiguration();
 	auto& deviceTypes = deviceManager.getAvailableDeviceTypes();
 	lastAudioConfigurationError.clear();
-	lightHostLog("AudioEngine setAudioBackendByIndex requested index=" + String(backendIndex)
+	lightHostModernLog("AudioEngine setAudioBackendByIndex requested index=" + String(backendIndex)
 		+ " availableTypes=" + String(deviceTypes.size()));
 
 	if (backendIndex < 0)
 	{
 		lastAudioConfigurationError = "Invalid audio backend index: " + String(backendIndex);
-		lightHostLog("AudioEngine setAudioBackendByIndex failed: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine setAudioBackendByIndex failed: " + lastAudioConfigurationError);
 		return false;
 	}
 
@@ -1140,12 +1174,12 @@ bool DeviceController::setAudioBackendByIndex(int backendIndex)
 
 		if (isAudioBackendBlocked(type->getTypeName()))
 		{
-			lightHostLog("AudioEngine backend candidate blocked type='" + type->getTypeName() + "'");
+			lightHostModernLog("AudioEngine backend candidate blocked type='" + type->getTypeName() + "'");
 			continue;
 		}
 
 		++visibleBackendIndex;
-		lightHostLog("AudioEngine backend candidate visibleIndex=" + String(visibleBackendIndex)
+		lightHostModernLog("AudioEngine backend candidate visibleIndex=" + String(visibleBackendIndex)
 			+ " type='" + type->getTypeName() + "'");
 		if (visibleBackendIndex == backendIndex)
 		{
@@ -1157,19 +1191,19 @@ bool DeviceController::setAudioBackendByIndex(int backendIndex)
 	if (selectedType == nullptr)
 	{
 		lastAudioConfigurationError = "Audio backend index was not found: " + String(backendIndex);
-		lightHostLog("AudioEngine setAudioBackendByIndex failed: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine setAudioBackendByIndex failed: " + lastAudioConfigurationError);
 		return false;
 	}
 
 	const String typeName = selectedType->getTypeName();
 	if (auto* currentDevice = deviceManager.getCurrentAudioDevice())
 	{
-		lightHostLog("AudioEngine current audio backend='" + currentDevice->getTypeName()
+		lightHostModernLog("AudioEngine current audio backend='" + currentDevice->getTypeName()
 			+ "' device='" + currentDevice->getName()
 			+ "' open=" + String(currentDevice->isOpen() ? "true" : "false"));
 		if (currentDevice->getTypeName() == typeName)
 		{
-			lightHostLog("AudioEngine setAudioBackendByIndex no-op; already using backend '" + typeName + "'");
+			lightHostModernLog("AudioEngine setAudioBackendByIndex no-op; already using backend '" + typeName + "'");
 			rememberManualSelectedAudioDevice();
 			return true;
 		}
@@ -1181,17 +1215,17 @@ bool DeviceController::setAudioBackendByIndex(int backendIndex)
 	if (auto* currentDevice = deviceManager.getCurrentAudioDevice())
 		previousTypeName = currentDevice->getTypeName();
 
-	lightHostLog("AudioEngine scanning requested backend '" + typeName + "'");
+	lightHostModernLog("AudioEngine scanning requested backend '" + typeName + "'");
 	selectedType->scanForDevices();
 	auto* currentType = selectedType;
 	const auto inputDevices = currentType->getDeviceNames(true);
 	const auto outputDevices = currentType->getDeviceNames(false);
-	lightHostLog("AudioEngine backend '" + typeName + "' device scan: inputs="
+	lightHostModernLog("AudioEngine backend '" + typeName + "' device scan: inputs="
 		+ String(inputDevices.size()) + " outputs=" + String(outputDevices.size()));
 	for (int i = 0; i < inputDevices.size(); ++i)
-		lightHostLog("AudioEngine backend '" + typeName + "' input[" + String(i) + "]='" + inputDevices[i] + "'");
+		lightHostModernLog("AudioEngine backend '" + typeName + "' input[" + String(i) + "]='" + inputDevices[i] + "'");
 	for (int i = 0; i < outputDevices.size(); ++i)
-		lightHostLog("AudioEngine backend '" + typeName + "' output[" + String(i) + "]='" + outputDevices[i] + "'");
+		lightHostModernLog("AudioEngine backend '" + typeName + "' output[" + String(i) + "]='" + outputDevices[i] + "'");
 
 	struct DeviceCandidate
 	{
@@ -1221,7 +1255,7 @@ bool DeviceController::setAudioBackendByIndex(int backendIndex)
 	if (candidates.empty())
 	{
 		lastAudioConfigurationError = "No allowed devices are available for audio backend '" + typeName + "'.";
-		lightHostLog("AudioEngine setAudioBackendByIndex failed: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine setAudioBackendByIndex failed: " + lastAudioConfigurationError);
 		if (previousTypeName.isNotEmpty() && isAudioDeviceChoiceAllowed(previousTypeName, previousSetup.inputDeviceName, previousSetup.outputDeviceName))
 			apply(deviceManager, previousTypeName, previousSetup);
 		return false;
@@ -1242,7 +1276,7 @@ bool DeviceController::setAudioBackendByIndex(int backendIndex)
 		setup.bufferSize = 0;
 		applySavedAudioChannelState(setup, typeName, setup.inputDeviceName, setup.outputDeviceName);
 
-		lightHostLog("AudioEngine setAudioDeviceSetup attempt=" + String(attempt + 1)
+		lightHostModernLog("AudioEngine setAudioDeviceSetup attempt=" + String(attempt + 1)
 			+ "/" + String((int) candidates.size())
 			+ " backend='" + typeName
 			+ "' input='" + setup.inputDeviceName
@@ -1252,14 +1286,14 @@ bool DeviceController::setAudioBackendByIndex(int backendIndex)
 		const String error = apply(deviceManager, typeName, setup);
     if (error == "Audio configuration was superseded") return false;
 		AudioIODevice* selectedDevice = deviceManager.getCurrentAudioDevice();
-		lightHostLog("AudioEngine setAudioDeviceSetup attempt=" + String(attempt + 1)
+		lightHostModernLog("AudioEngine setAudioDeviceSetup attempt=" + String(attempt + 1)
 			+ " returned backend='" + typeName
 			+ "' error='" + error
 			+ "' selectedDevice=" + String(selectedDevice != nullptr ? "yes" : "no"));
 
 		if (selectedDevice != nullptr)
 		{
-			lightHostLog("AudioEngine selected device type='" + selectedDevice->getTypeName()
+			lightHostModernLog("AudioEngine selected device type='" + selectedDevice->getTypeName()
 				+ "' name='" + selectedDevice->getName()
 				+ "' open=" + String(selectedDevice->isOpen() ? "true" : "false")
 				+ " sampleRate=" + String(selectedDevice->getCurrentSampleRate(), 0)
@@ -1281,7 +1315,7 @@ bool DeviceController::setAudioBackendByIndex(int backendIndex)
 			audioRecoveryState = "running";
 			audioRecoveryMessage.clear();
 			audioConfigVersion++;
-			lightHostLog("AudioEngine setAudioBackendByIndex succeeded backend='" + typeName
+			lightHostModernLog("AudioEngine setAudioBackendByIndex succeeded backend='" + typeName
 				+ "' input='" + setup.inputDeviceName
 				+ "' output='" + setup.outputDeviceName + "'");
 			loadActivePlugins();
@@ -1295,17 +1329,17 @@ bool DeviceController::setAudioBackendByIndex(int backendIndex)
 
 	lastAudioConfigurationError = "Failed to open audio backend '" + typeName + "': "
 		+ attemptErrors.joinIntoString("; ");
-	Logger::writeToLog("Light Host Modern: " + lastAudioConfigurationError);
-	lightHostLog("AudioEngine setAudioBackendByIndex failed: " + lastAudioConfigurationError);
+	Logger::writeToLog("LightHostModern: " + lastAudioConfigurationError);
+	lightHostModernLog("AudioEngine setAudioBackendByIndex failed: " + lastAudioConfigurationError);
 	if (previousTypeName.isNotEmpty() && isAudioDeviceChoiceAllowed(previousTypeName, previousSetup.inputDeviceName, previousSetup.outputDeviceName))
 	{
-		lightHostLog("AudioEngine restoring previous audio backend '" + previousTypeName + "'");
+		lightHostModernLog("AudioEngine restoring previous audio backend '" + previousTypeName + "'");
 		apply(deviceManager, previousTypeName, previousSetup);
 	}
 
 	if (auto* restoredDevice = deviceManager.getCurrentAudioDevice())
 	{
-		lightHostLog("AudioEngine restored device type='" + restoredDevice->getTypeName()
+		lightHostModernLog("AudioEngine restored device type='" + restoredDevice->getTypeName()
 			+ "' name='" + restoredDevice->getName()
 			+ "' open=" + String(restoredDevice->isOpen() ? "true" : "false"));
 	}
@@ -1318,24 +1352,24 @@ bool DeviceController::setAudioInputDeviceByIndex(int deviceIndex)
 	ScopedValueSetter<bool> manualAudioSelectionScope(manualAudioSelectionInProgress, true);
 	invalidateConfiguration();
 	lastAudioConfigurationError.clear();
-	lightHostLog("AudioEngine setAudioInputDeviceByIndex requested index=" + String(deviceIndex));
+	lightHostModernLog("AudioEngine setAudioInputDeviceByIndex requested index=" + String(deviceIndex));
 
 	auto* currentType = deviceManager.getCurrentDeviceTypeObject();
 	if (currentType == nullptr)
 	{
 		lastAudioConfigurationError = "No current audio backend is selected while setting input device";
-		lightHostLog("AudioEngine setAudioInputDeviceByIndex failed: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine setAudioInputDeviceByIndex failed: " + lastAudioConfigurationError);
 		return false;
 	}
 
-	lightHostLog("AudioEngine setAudioInputDeviceByIndex backend='" + currentType->getTypeName() + "'");
+	lightHostModernLog("AudioEngine setAudioInputDeviceByIndex backend='" + currentType->getTypeName() + "'");
 
 	currentType->scanForDevices();
 	const auto devices = currentType->getDeviceNames(true);
-	lightHostLog("AudioEngine input device scan backend='" + currentType->getTypeName()
+	lightHostModernLog("AudioEngine input device scan backend='" + currentType->getTypeName()
 		+ "' count=" + String(devices.size()));
 	for (int i = 0; i < devices.size(); ++i)
-		lightHostLog("AudioEngine input candidate[" + String(i) + "]='" + devices[i] + "'");
+		lightHostModernLog("AudioEngine input candidate[" + String(i) + "]='" + devices[i] + "'");
 
 	const bool isAsioBackend = currentType->getTypeName().equalsIgnoreCase("ASIO");
 	StringArray allowedDevices;
@@ -1350,7 +1384,7 @@ bool DeviceController::setAudioInputDeviceByIndex(int deviceIndex)
 		lastAudioConfigurationError = "Invalid input device index " + String(deviceIndex)
 			+ " for backend '" + currentType->getTypeName()
 			+ "' with " + String(allowedDevices.size()) + " allowed devices";
-		lightHostLog("AudioEngine setAudioInputDeviceByIndex failed: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine setAudioInputDeviceByIndex failed: " + lastAudioConfigurationError);
 		return false;
 	}
 
@@ -1358,7 +1392,7 @@ bool DeviceController::setAudioInputDeviceByIndex(int deviceIndex)
 	deviceManager.getAudioDeviceSetup(setup);
 	const auto previousSetup = setup;
 	const String requestedInputDevice = allowedDevices[deviceIndex];
-	lightHostLog("AudioEngine current setup before input change backend='" + currentType->getTypeName()
+	lightHostModernLog("AudioEngine current setup before input change backend='" + currentType->getTypeName()
 		+ "' input='" + setup.inputDeviceName
 		+ "' output='" + setup.outputDeviceName
 		+ "' sampleRate=" + String(setup.sampleRate, 0)
@@ -1368,14 +1402,14 @@ bool DeviceController::setAudioInputDeviceByIndex(int deviceIndex)
 		&& setup.inputDeviceName == requestedInputDevice
 		&& setup.outputDeviceName == requestedInputDevice)
 	{
-		lightHostLog("AudioEngine setAudioInputDeviceByIndex no-op; already using ASIO device='" + requestedInputDevice + "'");
+		lightHostModernLog("AudioEngine setAudioInputDeviceByIndex no-op; already using ASIO device='" + requestedInputDevice + "'");
 		rememberManualSelectedAudioDevice();
 		return true;
 	}
 
 	if (!isAsioBackend && setup.inputDeviceName == requestedInputDevice)
 	{
-		lightHostLog("AudioEngine setAudioInputDeviceByIndex no-op; already using input='" + setup.inputDeviceName + "'");
+		lightHostModernLog("AudioEngine setAudioInputDeviceByIndex no-op; already using input='" + setup.inputDeviceName + "'");
 		rememberManualSelectedAudioDevice();
 		return true;
 	}
@@ -1385,7 +1419,7 @@ bool DeviceController::setAudioInputDeviceByIndex(int deviceIndex)
 	                                isAsioBackend ? requestedInputDevice : setup.outputDeviceName))
 	{
 		lastAudioConfigurationError = "Input device is blocked by settings: " + requestedInputDevice;
-		lightHostLog("AudioEngine setAudioInputDeviceByIndex failed: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine setAudioInputDeviceByIndex failed: " + lastAudioConfigurationError);
 		return false;
 	}
 
@@ -1393,22 +1427,22 @@ bool DeviceController::setAudioInputDeviceByIndex(int deviceIndex)
 	if (isAsioBackend)
 	{
 		setup.outputDeviceName = requestedInputDevice;
-		lightHostLog("AudioEngine setAudioInputDeviceByIndex ASIO mode; input and output will use the same device");
+		lightHostModernLog("AudioEngine setAudioInputDeviceByIndex ASIO mode; input and output will use the same device");
 	}
 	applySavedAudioChannelState(setup, currentType->getTypeName(), setup.inputDeviceName, setup.outputDeviceName);
 
-	lightHostLog("AudioEngine setAudioInputDeviceByIndex applying input='" + setup.inputDeviceName
+	lightHostModernLog("AudioEngine setAudioInputDeviceByIndex applying input='" + setup.inputDeviceName
 		+ "' output='" + setup.outputDeviceName + "'");
 
 	const String error = apply(deviceManager, deviceManager.getCurrentAudioDeviceType(), setup);
     if (error == "Audio configuration was superseded") return false;
 	AudioIODevice* selectedDevice = deviceManager.getCurrentAudioDevice();
-	lightHostLog("AudioEngine setAudioInputDeviceByIndex setAudioDeviceSetup returned error='" + error
+	lightHostModernLog("AudioEngine setAudioInputDeviceByIndex setAudioDeviceSetup returned error='" + error
 		+ "' selectedDevice=" + String(selectedDevice != nullptr ? "yes" : "no"));
 
 	if (selectedDevice != nullptr)
 	{
-		lightHostLog("AudioEngine device after input change type='" + selectedDevice->getTypeName()
+		lightHostModernLog("AudioEngine device after input change type='" + selectedDevice->getTypeName()
 			+ "' name='" + selectedDevice->getName()
 			+ "' open=" + String(selectedDevice->isOpen() ? "true" : "false")
 			+ " sampleRate=" + String(selectedDevice->getCurrentSampleRate(), 0)
@@ -1425,7 +1459,7 @@ bool DeviceController::setAudioInputDeviceByIndex(int deviceIndex)
 
 	if (selectedDeviceMismatch)
 	{
-		lightHostLog("AudioEngine setAudioInputDeviceByIndex ASIO selected device mismatch requested='"
+		lightHostModernLog("AudioEngine setAudioInputDeviceByIndex ASIO selected device mismatch requested='"
 			+ requestedInputDevice + "' actual='" + selectedDevice->getName() + "'");
 	}
 
@@ -1434,10 +1468,10 @@ bool DeviceController::setAudioInputDeviceByIndex(int deviceIndex)
 		lastAudioConfigurationError = "Failed to set input device '" + setup.inputDeviceName
 			+ "' on backend '" + currentType->getTypeName() + "': "
 			+ (error.isNotEmpty() ? error : (selectedDeviceMismatch ? "selected ASIO device did not match requested device" : "device did not open"));
-		Logger::writeToLog("Light Host Modern: " + lastAudioConfigurationError);
-		lightHostLog("AudioEngine setAudioInputDeviceByIndex failed: " + lastAudioConfigurationError);
+		Logger::writeToLog("LightHostModern: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine setAudioInputDeviceByIndex failed: " + lastAudioConfigurationError);
 		const String restoreError = apply(deviceManager, deviceManager.getCurrentAudioDeviceType(), previousSetup);
-		lightHostLog("AudioEngine setAudioInputDeviceByIndex restored previous setup input='"
+		lightHostModernLog("AudioEngine setAudioInputDeviceByIndex restored previous setup input='"
 			+ previousSetup.inputDeviceName + "' output='" + previousSetup.outputDeviceName
 			+ "' restoreError='" + restoreError + "'");
 		return false;
@@ -1458,24 +1492,24 @@ bool DeviceController::setAudioOutputDeviceByIndex(int deviceIndex)
 	ScopedValueSetter<bool> manualAudioSelectionScope(manualAudioSelectionInProgress, true);
 	invalidateConfiguration();
 	lastAudioConfigurationError.clear();
-	lightHostLog("AudioEngine setAudioOutputDeviceByIndex requested index=" + String(deviceIndex));
+	lightHostModernLog("AudioEngine setAudioOutputDeviceByIndex requested index=" + String(deviceIndex));
 
 	auto* currentType = deviceManager.getCurrentDeviceTypeObject();
 	if (currentType == nullptr)
 	{
 		lastAudioConfigurationError = "No current audio backend is selected while setting output device";
-		lightHostLog("AudioEngine setAudioOutputDeviceByIndex failed: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine setAudioOutputDeviceByIndex failed: " + lastAudioConfigurationError);
 		return false;
 	}
 
-	lightHostLog("AudioEngine setAudioOutputDeviceByIndex backend='" + currentType->getTypeName() + "'");
+	lightHostModernLog("AudioEngine setAudioOutputDeviceByIndex backend='" + currentType->getTypeName() + "'");
 
 	currentType->scanForDevices();
 	const auto devices = currentType->getDeviceNames(false);
-	lightHostLog("AudioEngine output device scan backend='" + currentType->getTypeName()
+	lightHostModernLog("AudioEngine output device scan backend='" + currentType->getTypeName()
 		+ "' count=" + String(devices.size()));
 	for (int i = 0; i < devices.size(); ++i)
-		lightHostLog("AudioEngine output candidate[" + String(i) + "]='" + devices[i] + "'");
+		lightHostModernLog("AudioEngine output candidate[" + String(i) + "]='" + devices[i] + "'");
 
 	const bool isAsioBackend = currentType->getTypeName().equalsIgnoreCase("ASIO");
 	StringArray allowedDevices;
@@ -1490,7 +1524,7 @@ bool DeviceController::setAudioOutputDeviceByIndex(int deviceIndex)
 		lastAudioConfigurationError = "Invalid output device index " + String(deviceIndex)
 			+ " for backend '" + currentType->getTypeName()
 			+ "' with " + String(allowedDevices.size()) + " allowed devices";
-		lightHostLog("AudioEngine setAudioOutputDeviceByIndex failed: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine setAudioOutputDeviceByIndex failed: " + lastAudioConfigurationError);
 		return false;
 	}
 
@@ -1498,7 +1532,7 @@ bool DeviceController::setAudioOutputDeviceByIndex(int deviceIndex)
 	deviceManager.getAudioDeviceSetup(setup);
 	const auto previousSetup = setup;
 	const String requestedOutputDevice = allowedDevices[deviceIndex];
-	lightHostLog("AudioEngine current setup before output change backend='" + currentType->getTypeName()
+	lightHostModernLog("AudioEngine current setup before output change backend='" + currentType->getTypeName()
 		+ "' input='" + setup.inputDeviceName
 		+ "' output='" + setup.outputDeviceName
 		+ "' sampleRate=" + String(setup.sampleRate, 0)
@@ -1508,14 +1542,14 @@ bool DeviceController::setAudioOutputDeviceByIndex(int deviceIndex)
 		&& setup.inputDeviceName == requestedOutputDevice
 		&& setup.outputDeviceName == requestedOutputDevice)
 	{
-		lightHostLog("AudioEngine setAudioOutputDeviceByIndex no-op; already using ASIO device='" + requestedOutputDevice + "'");
+		lightHostModernLog("AudioEngine setAudioOutputDeviceByIndex no-op; already using ASIO device='" + requestedOutputDevice + "'");
 		rememberManualSelectedAudioDevice();
 		return true;
 	}
 
 	if (!isAsioBackend && setup.outputDeviceName == requestedOutputDevice)
 	{
-		lightHostLog("AudioEngine setAudioOutputDeviceByIndex no-op; already using output='" + setup.outputDeviceName + "'");
+		lightHostModernLog("AudioEngine setAudioOutputDeviceByIndex no-op; already using output='" + setup.outputDeviceName + "'");
 		rememberManualSelectedAudioDevice();
 		return true;
 	}
@@ -1525,7 +1559,7 @@ bool DeviceController::setAudioOutputDeviceByIndex(int deviceIndex)
 	                                requestedOutputDevice))
 	{
 		lastAudioConfigurationError = "Output device is blocked by settings: " + requestedOutputDevice;
-		lightHostLog("AudioEngine setAudioOutputDeviceByIndex failed: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine setAudioOutputDeviceByIndex failed: " + lastAudioConfigurationError);
 		return false;
 	}
 
@@ -1533,22 +1567,22 @@ bool DeviceController::setAudioOutputDeviceByIndex(int deviceIndex)
 	if (isAsioBackend)
 	{
 		setup.inputDeviceName = requestedOutputDevice;
-		lightHostLog("AudioEngine setAudioOutputDeviceByIndex ASIO mode; input and output will use the same device");
+		lightHostModernLog("AudioEngine setAudioOutputDeviceByIndex ASIO mode; input and output will use the same device");
 	}
 	applySavedAudioChannelState(setup, currentType->getTypeName(), setup.inputDeviceName, setup.outputDeviceName);
 
-	lightHostLog("AudioEngine setAudioOutputDeviceByIndex applying input='" + setup.inputDeviceName
+	lightHostModernLog("AudioEngine setAudioOutputDeviceByIndex applying input='" + setup.inputDeviceName
 		+ "' output='" + setup.outputDeviceName + "'");
 
 	const String error = apply(deviceManager, deviceManager.getCurrentAudioDeviceType(), setup);
     if (error == "Audio configuration was superseded") return false;
 	AudioIODevice* selectedDevice = deviceManager.getCurrentAudioDevice();
-	lightHostLog("AudioEngine setAudioOutputDeviceByIndex setAudioDeviceSetup returned error='" + error
+	lightHostModernLog("AudioEngine setAudioOutputDeviceByIndex setAudioDeviceSetup returned error='" + error
 		+ "' selectedDevice=" + String(selectedDevice != nullptr ? "yes" : "no"));
 
 	if (selectedDevice != nullptr)
 	{
-		lightHostLog("AudioEngine device after output change type='" + selectedDevice->getTypeName()
+		lightHostModernLog("AudioEngine device after output change type='" + selectedDevice->getTypeName()
 			+ "' name='" + selectedDevice->getName()
 			+ "' open=" + String(selectedDevice->isOpen() ? "true" : "false")
 			+ " sampleRate=" + String(selectedDevice->getCurrentSampleRate(), 0)
@@ -1565,7 +1599,7 @@ bool DeviceController::setAudioOutputDeviceByIndex(int deviceIndex)
 
 	if (selectedDeviceMismatch)
 	{
-		lightHostLog("AudioEngine setAudioOutputDeviceByIndex ASIO selected device mismatch requested='"
+		lightHostModernLog("AudioEngine setAudioOutputDeviceByIndex ASIO selected device mismatch requested='"
 			+ requestedOutputDevice + "' actual='" + selectedDevice->getName() + "'");
 	}
 
@@ -1574,10 +1608,10 @@ bool DeviceController::setAudioOutputDeviceByIndex(int deviceIndex)
 		lastAudioConfigurationError = "Failed to set output device '" + setup.outputDeviceName
 			+ "' on backend '" + currentType->getTypeName() + "': "
 			+ (error.isNotEmpty() ? error : (selectedDeviceMismatch ? "selected ASIO device did not match requested device" : "device did not open"));
-		Logger::writeToLog("Light Host Modern: " + lastAudioConfigurationError);
-		lightHostLog("AudioEngine setAudioOutputDeviceByIndex failed: " + lastAudioConfigurationError);
+		Logger::writeToLog("LightHostModern: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine setAudioOutputDeviceByIndex failed: " + lastAudioConfigurationError);
 		const String restoreError = apply(deviceManager, deviceManager.getCurrentAudioDeviceType(), previousSetup);
-		lightHostLog("AudioEngine setAudioOutputDeviceByIndex restored previous setup input='"
+		lightHostModernLog("AudioEngine setAudioOutputDeviceByIndex restored previous setup input='"
 			+ previousSetup.inputDeviceName + "' output='" + previousSetup.outputDeviceName
 			+ "' restoreError='" + restoreError + "'");
 		return false;
@@ -1952,15 +1986,15 @@ bool DeviceController::setAudioSampleRate(double sampleRate)
 		else
 			lastAudioConfigurationError += ": driver kept " + String(actualRate) + " Hz";
 
-		Logger::writeToLog("Light Host Modern: " + lastAudioConfigurationError);
-		lightHostLog("AudioEngine setAudioSampleRate failed: " + lastAudioConfigurationError);
+		Logger::writeToLog("LightHostModern: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine setAudioSampleRate failed: " + lastAudioConfigurationError);
 		const String restoreError = apply(deviceManager, deviceManager.getCurrentAudioDeviceType(), previousSetup);
 		if (restoreError.isNotEmpty())
-			lightHostLog("AudioEngine setAudioSampleRate restore failed: " + restoreError);
+			lightHostModernLog("AudioEngine setAudioSampleRate restore failed: " + restoreError);
 		return false;
 	}
 
-	lightHostLog("AudioEngine setAudioSampleRate succeeded requested=" + String(requestedRate)
+	lightHostModernLog("AudioEngine setAudioSampleRate succeeded requested=" + String(requestedRate)
 		+ " actual=" + String(actualRate));
 	saveAudioDeviceState();
 	rememberLastSelectedAudioDevice();
@@ -2016,15 +2050,15 @@ bool DeviceController::setAudioBufferSize(int bufferSize)
 		else
 			lastAudioConfigurationError += ": driver kept " + String(actualBufferSize) + " samples";
 
-		Logger::writeToLog("Light Host Modern: " + lastAudioConfigurationError);
-		lightHostLog("AudioEngine setAudioBufferSize failed: " + lastAudioConfigurationError);
+		Logger::writeToLog("LightHostModern: " + lastAudioConfigurationError);
+		lightHostModernLog("AudioEngine setAudioBufferSize failed: " + lastAudioConfigurationError);
 		const String restoreError = apply(deviceManager, deviceManager.getCurrentAudioDeviceType(), previousSetup);
 		if (restoreError.isNotEmpty())
-			lightHostLog("AudioEngine setAudioBufferSize restore failed: " + restoreError);
+			lightHostModernLog("AudioEngine setAudioBufferSize restore failed: " + restoreError);
 		return false;
 	}
 
-	lightHostLog("AudioEngine setAudioBufferSize succeeded requested=" + String(bufferSize)
+	lightHostModernLog("AudioEngine setAudioBufferSize succeeded requested=" + String(bufferSize)
 		+ " actual=" + String(actualBufferSize));
 	saveAudioDeviceState();
 	rememberLastSelectedAudioDevice();
@@ -2057,7 +2091,7 @@ bool DeviceController::setAudioInputChannelEnabled(int channelIndex, bool enable
     if (error == "Audio configuration was superseded") return false;
 	if (error.isNotEmpty())
 	{
-		Logger::writeToLog("Light Host Modern: failed to set input channel: " + error);
+		Logger::writeToLog("LightHostModern: failed to set input channel: " + error);
 		return false;
 	}
 
@@ -2088,7 +2122,7 @@ bool DeviceController::setAudioOutputChannelEnabled(int channelIndex, bool enabl
     if (error == "Audio configuration was superseded") return false;
 	if (error.isNotEmpty())
 	{
-		Logger::writeToLog("Light Host Modern: failed to set output channel: " + error);
+		Logger::writeToLog("LightHostModern: failed to set output channel: " + error);
 		return false;
 	}
 
@@ -2116,7 +2150,7 @@ bool DeviceController::setAllAudioInputChannelsEnabled(bool enabled)
     if (error == "Audio configuration was superseded") return false;
 	if (error.isNotEmpty())
 	{
-		Logger::writeToLog("Light Host Modern: failed to set all input channels: " + error);
+		Logger::writeToLog("LightHostModern: failed to set all input channels: " + error);
 		return false;
 	}
 
@@ -2144,7 +2178,7 @@ bool DeviceController::setAllAudioOutputChannelsEnabled(bool enabled)
     if (error == "Audio configuration was superseded") return false;
 	if (error.isNotEmpty())
 	{
-		Logger::writeToLog("Light Host Modern: failed to set all output channels: " + error);
+		Logger::writeToLog("LightHostModern: failed to set all output channels: " + error);
 		return false;
 	}
 
@@ -2173,7 +2207,7 @@ bool DeviceController::setAudioInputChannelCount(int channelCount)
     if (error == "Audio configuration was superseded") return false;
 	if (error.isNotEmpty())
 	{
-		Logger::writeToLog("Light Host Modern: failed to set input channels: " + error);
+		Logger::writeToLog("LightHostModern: failed to set input channels: " + error);
 		return false;
 	}
 
@@ -2202,7 +2236,7 @@ bool DeviceController::setAudioOutputChannelCount(int channelCount)
     if (error == "Audio configuration was superseded") return false;
 	if (error.isNotEmpty())
 	{
-		Logger::writeToLog("Light Host Modern: failed to set output channels: " + error);
+		Logger::writeToLog("LightHostModern: failed to set output channels: " + error);
 		return false;
 	}
 

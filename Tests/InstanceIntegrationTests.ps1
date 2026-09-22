@@ -1,6 +1,6 @@
 param(
-    [string] $HostExecutable = "$PSScriptRoot\..\out\build\windows-vs2022\LightHost_artefacts\Release\Light Host Modern.exe",
-    [string] $FixtureWriter = "$PSScriptRoot\..\out\build\windows-vs2022\Release\LightHostPluginInstanceTests.exe"
+    [string] $HostExecutable = "$PSScriptRoot\..\out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe",
+    [string] $FixtureWriter = "$PSScriptRoot\..\out\build\windows-vs2022\Release\LightHostModernPluginInstanceTests.exe"
 )
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\HostProtocol.ps1"
@@ -9,7 +9,7 @@ $root = Join-Path $repo 'out\test-profiles'
 $name = 'instances-' + [guid]::NewGuid().ToString('N')
 $directory = Join-Path $root $name
 New-Item -ItemType Directory -Path $directory -Force | Out-Null
-$settings = Join-Path $directory 'Light Host Modern.settings'
+$settings = Join-Path $directory 'LightHostModern.settings'
 & $FixtureWriter --write-legacy-fixture $settings
 if ($LASTEXITCODE -ne 0) { throw 'Could not create legacy fixture.' }
 $originalHash = (Get-FileHash -LiteralPath $settings).Hash

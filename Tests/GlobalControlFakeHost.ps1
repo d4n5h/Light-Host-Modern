@@ -1,4 +1,4 @@
-param([string]$PipeName = 'LightHost-global-ui-test')
+param([string]$PipeName = 'LightHostModern-global-ui-test')
 $ErrorActionPreference = 'Stop'
 $testRoot = Join-Path $PSScriptRoot '../out/global-ui-test'
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null

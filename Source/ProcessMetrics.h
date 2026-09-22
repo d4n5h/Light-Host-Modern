@@ -8,6 +8,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <psapi.h>
 #ifdef min
 #undef min
 #endif
@@ -16,7 +17,7 @@
 #endif
 #endif
 
-namespace lightHost
+namespace lightHostModern
 {
 // Shared by the host controller, callback and scanner accounting. The UI owns
 // its process-local copy and never samples CPU while the host setting is off.
@@ -52,6 +53,24 @@ inline std::optional<uint64_t> processCpuTicks(HANDLE process = GetCurrentProces
     const auto ticks = [](FILETIME time) { return (static_cast<uint64_t>(time.dwHighDateTime) << 32) | time.dwLowDateTime; };
     return ticks(kernel) + ticks(user);
 }
+struct ProcessMemory { std::optional<uint64_t> resident, committed; };
+inline ProcessMemory processMemory(HANDLE process = GetCurrentProcess())
+{
+    // EX2 layout, queried dynamically so Windows 10 can report Unavailable for
+    // private resident RAM while still providing private committed memory.
+    struct Counters { PROCESS_MEMORY_COUNTERS_EX base{}; SIZE_T privateWorkingSet{}; ULONG64 sharedCommit{}; } info;
+    info.base.cb = sizeof(info);
+    if (K32GetProcessMemoryInfo(process, reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&info), sizeof(info)))
+        return {info.privateWorkingSet, info.base.PrivateUsage};
+    info.base.cb = sizeof(info.base);
+    if (K32GetProcessMemoryInfo(process, reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&info.base), sizeof(info.base)))
+        return {{}, info.base.PrivateUsage};
+    return {};
+}
+// Sum only private pages of scanner processes; shared runtime pages are excluded.
+inline std::atomic<uint64_t> workerResidentBytes{0}, workerCommittedBytes{0};
+inline std::atomic<unsigned> workerMemoryUnavailable{0};
+inline std::atomic<uint64_t> diagnosticsVisibleUntil{0};
 inline unsigned processorCount() { return GetActiveProcessorCount(ALL_PROCESSOR_GROUPS); }
 #endif
 }

@@ -9,7 +9,7 @@ struct AudioDeviceSelection
     uint64 expectedGeneration = 0;
 };
 
-namespace lightHost::audioSelection
+namespace lightHostModern::audioSelection
 {
 inline var setupJson(const String& backend, const AudioDeviceManager::AudioDeviceSetup& setup)
 {

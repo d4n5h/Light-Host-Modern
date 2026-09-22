@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="LightHostModernWinUI.PluginsPageView" xmlns:local="using:LightHostModernWinUI">
+    <UserControl.Resources>
+        <!-- The card owns its pointer surface. Keep native selection indicators,
+             focus and virtualization without painting a second, offset rectangle. -->
+        <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="Transparent" />
+        <SolidColorBrush x:Key="ListViewItemBackgroundPressed" Color="Transparent" />
+        <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="Transparent" />
+        <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="Transparent" />
+        <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="Transparent" />
+        <SolidColorBrush x:Key="ListViewItemBackgroundSelectedDisabled" Color="Transparent" />
+        <Style x:Key="PluginCardPointerOverStyle" TargetType="Border" BasedOn="{StaticResource AppCardStyle}">
+            <Setter Property="Background" Value="{ThemeResource AppControlBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource AppControlStrokeBrush}" />
+        </Style>
+        <Style x:Key="PluginCardContainerStyle" TargetType="ListViewItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
+
+        </Style>
+        <DataTemplate x:Key="PluginItemTemplate" x:DataType="local:PluginItem">
+            <Grid>
+                <Border Style="{StaticResource AppCardStyle}" Padding="16,12" MinHeight="48" Margin="0,8,0,0" Visibility="{x:Bind GroupVisibility, Mode=OneWay}" PointerEntered="PluginCard_PointerEntered" PointerExited="PluginCard_PointerExited">
+                    <TextBlock Text="{x:Bind GroupHeading, Mode=OneWay}" Foreground="{ThemeResource TextFillColorPrimaryBrush}" Style="{StaticResource BodyStrongTextBlockStyle}" AutomationProperties.HeadingLevel="Level2" />
+                </Border>
+                <Grid Visibility="{x:Bind PluginVisibility, Mode=OneWay}">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="{x:Bind BranchWidth, Mode=OneWay}" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <Grid Visibility="{x:Bind BranchVisibility, Mode=OneWay}" IsHitTestVisible="False">
+                        <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                        <Border Width="1" HorizontalAlignment="Left" Margin="16,0,0,0" Background="{ThemeResource AppTextSecondaryBrush}" />
+                        <Border Grid.Row="1" Width="1" HorizontalAlignment="Left" Margin="16,0,0,0" Background="{ThemeResource AppTextSecondaryBrush}" Visibility="{x:Bind TailVisibility, Mode=OneWay}" />
+                        <Border Grid.RowSpan="2" Height="1" VerticalAlignment="Center" Margin="16,0,0,0" Background="{ThemeResource AppTextSecondaryBrush}" />
+                    </Grid>
+            <Border Grid.Column="1" Style="{StaticResource AppCardStyle}" Margin="0,8,0,0" PointerEntered="PluginCard_PointerEntered" PointerExited="PluginCard_PointerExited">
+            <Grid MinHeight="{x:Bind RowHeight, Mode=OneWay}" ColumnSpacing="16" AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}" AllowDrop="{x:Bind CanReorder, Mode=OneWay}" DragOver="RunningPluginItem_DragOver" Drop="RunningPluginItem_Drop">
+                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <TextBlock Grid.Row="1" Text="{x:Bind Position, Mode=OneWay}" Visibility="{x:Bind PositionVisibility, Mode=OneWay}" MinWidth="24" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" Foreground="{ThemeResource AppTextSecondaryBrush}" />
+                <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+                    <TextBlock Text="{x:Bind Name, Mode=OneWay}" Foreground="{ThemeResource TextFillColorPrimaryBrush}" Style="{StaticResource BodyStrongTextBlockStyle}" TextWrapping="Wrap" />
+                    <TextBlock Text="{x:Bind Metadata, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource AppTextSecondaryBrush}" TextWrapping="Wrap" />
+
+                </StackPanel>
+                <StackPanel Grid.Row="1" Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Border Style="{x:Bind StatusBadgeStyle, Mode=OneWay}"><StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <FontIcon VerticalAlignment="Center" Glyph="{x:Bind StateGlyph, Mode=OneWay}" Style="{x:Bind StatusIconStyle, Mode=OneWay}" FontSize="12" />
+                        <TextBlock VerticalAlignment="Center" TextLineBounds="Tight" Text="{x:Bind Status, Mode=OneWay}" Foreground="{ThemeResource TextFillColorPrimaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" />
+                    </StackPanel></Border>
+                    <Button AutomationProperties.AutomationId="{x:Bind Id, Mode=OneWay}" AutomationProperties.Name="{x:Bind ActionName, Mode=OneWay}" Click="PluginActions_Click" Width="36" MinWidth="36" Height="32" Padding="0"><FontIcon Glyph="&#xE712;" FontSize="16" /></Button>
+                </StackPanel>
+            </Grid>
+            </Border>
+                </Grid>
+            </Grid>
+        </DataTemplate>
+    </UserControl.Resources>
+    <Grid>
+    <Grid x:Name="PluginsPanel" Visibility="Collapsed" RowSpacing="16">
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+        <Border x:Name="PluginSectionCard" Style="{StaticResource AppCardStyle}" Padding="4" MinHeight="0">
+        <SelectorBar x:Name="PluginSectionSelector" AutomationProperties.AutomationId="PluginSectionSelector">
+            <SelectorBarItem x:Name="RunningPluginsTabButton" AutomationProperties.AutomationId="PluginsRunningTab" Text="Running" Icon="Play" IsSelected="True" />
+            <SelectorBarItem x:Name="InstalledPluginsTabButton" AutomationProperties.AutomationId="PluginsInstalledTab" Text="Installed" Icon="Library" />
+        </SelectorBar>
+        </Border>
+        <Grid x:Name="RunningPluginsPanel" Grid.Row="1" RowSpacing="12">
+            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+            <Border x:Name="RunningToolbarCard" Style="{StaticResource AppCardStyle}" Padding="4" MinHeight="0">
+                <CommandBar x:Name="RunningToolbar" SizeChanged="Toolbar_SizeChanged" AutomationProperties.AutomationId="RunningPluginToolbar" DefaultLabelPosition="Right" Background="Transparent" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center">
+                    <CommandBar.Content>
+                        <AutoSuggestBox x:Name="RunningPluginSearchBox" AutomationProperties.AutomationId="RunningPluginSearch" AutomationProperties.Name="Search running plugins" PlaceholderText="Search running plugins" QueryIcon="Find" Width="320" MinWidth="160" Margin="4,0,12,0" VerticalAlignment="Center" />
+                    </CommandBar.Content>
+                    <AppBarToggleButton x:Name="RunningGlobalMuteButton" Label="Mute output" Icon="Mute" Tag="mute" IsEnabled="False" AutomationProperties.AutomationId="RunningGlobalMute" Click="GlobalAudioControl_Click" />
+                    <AppBarToggleButton x:Name="RunningGlobalBypassButton" Label="Bypass chain" Tag="bypass" IsEnabled="False" AutomationProperties.AutomationId="RunningGlobalBypass" Click="GlobalAudioControl_Click"><AppBarToggleButton.Icon><FontIcon Glyph="&#xE8AB;" /></AppBarToggleButton.Icon></AppBarToggleButton>
+                    <AppBarSeparator />
+                    <AppBarButton x:Name="RunningPluginSortButton" Label="Sort" Icon="Sort" AutomationProperties.AutomationId="RunningPluginSort" />
+                </CommandBar>
+            </Border>
+            <Grid x:Name="RunningPluginsListCard" Grid.Row="1">
+                <ListView x:Name="RunningPluginsListView" AutomationProperties.AutomationId="RunningPluginsList" AutomationProperties.Name="Running plugins" SelectionMode="Single" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollMode="Disabled" ItemTemplate="{StaticResource PluginItemTemplate}" ItemContainerStyle="{StaticResource PluginCardContainerStyle}" IsItemClickEnabled="False" DragItemsStarting="RunningPluginsListView_DragItemsStarting" DragItemsCompleted="RunningPluginsListView_DragItemsCompleted" />
+                <TextBlock x:Name="RunningPluginsEmptyText" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" Text="No plugins running" Visibility="Collapsed" TextWrapping="Wrap" />
+            </Grid>
+        </Grid>
+        <Grid x:Name="InstalledPluginsPanel" Visibility="Collapsed" Grid.Row="1" RowSpacing="12">
+            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+            <Border x:Name="InstalledToolbarCard" Style="{StaticResource AppCardStyle}" Padding="4" MinHeight="0">
+                <CommandBar x:Name="InstalledToolbar" SizeChanged="Toolbar_SizeChanged" AutomationProperties.AutomationId="InstalledPluginToolbar" DefaultLabelPosition="Right" Background="Transparent" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center">
+                    <CommandBar.Content>
+                        <AutoSuggestBox x:Name="InstalledPluginSearchBox" AutomationProperties.AutomationId="InstalledPluginSearch" AutomationProperties.Name="Search installed plugins" PlaceholderText="Search installed plugins" QueryIcon="Find" Width="320" MinWidth="160" Margin="4,0,12,0" VerticalAlignment="Center" />
+                    </CommandBar.Content>
+                    <AppBarButton x:Name="ScanForPluginsButton" Label="Scan for plugins" Icon="Find" AutomationProperties.AutomationId="ScanForPlugins" />
+                    <AppBarSeparator />
+                    <AppBarButton x:Name="InstalledPluginSortButton" Label="Sort" Icon="Sort" AutomationProperties.AutomationId="InstalledPluginSort" />
+                </CommandBar>
+            </Border>
+            <Grid x:Name="InstalledPluginsListCard" Grid.Row="1">
+                <ListView x:Name="InstalledPluginsListView" AutomationProperties.AutomationId="InstalledPluginsList" AutomationProperties.Name="Installed plugins" SelectionMode="Single" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollMode="Disabled" ItemTemplate="{StaticResource PluginItemTemplate}" ItemContainerStyle="{StaticResource PluginCardContainerStyle}" IsItemClickEnabled="False" />
+                <TextBlock x:Name="InstalledPluginsEmptyText" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" Text="No plugins installed" Visibility="Collapsed" TextWrapping="Wrap" />
+            </Grid>
+        </Grid>
+        <StackPanel Visibility="Collapsed"><TextBlock x:Name="RunningPluginsSummaryText" /><TextBlock x:Name="InstalledPluginsSummaryText" /></StackPanel>
+    </Grid>
+    </Grid>
+</UserControl>

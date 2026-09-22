@@ -1,4 +1,4 @@
-param([string] $HostExecutable = "$PSScriptRoot\..\out\build\windows-vs2022\LightHost_artefacts\Release\Light Host Modern.exe")
+param([string] $HostExecutable = "$PSScriptRoot\..\out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe")
 $ErrorActionPreference = 'Stop'
 $VerbosePreference = 'Continue'
 . "$PSScriptRoot\HostProtocol.ps1"
@@ -8,11 +8,11 @@ $name = 'integration-' + [guid]::NewGuid().ToString('N')
 $profileDirectory = Join-Path $root $name
 $metadata = Join-Path $profileDirectory 'profile.json'
 $process = $null
-$files = @((Join-Path $env:APPDATA 'Light Host Modern\Light Host Modern.settings'), (Join-Path $env:LOCALAPPDATA 'LightHostModern\ui-settings.ini'))
+$files = @((Join-Path $env:APPDATA 'LightHostModern\LightHostModern.settings'), (Join-Path $env:LOCALAPPDATA 'LightHostModern\ui-settings.ini'))
 $before = @{}
 foreach ($file in $files) { $before[$file] = if (Test-Path -LiteralPath $file) { (Get-FileHash -LiteralPath $file).Hash } else { '' } }
 $runKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Run')
-$startupBefore = if ($runKey) { $runKey.GetValue('Light Host Modern'); $runKey.Dispose() } else { $null }
+$startupBefore = if ($runKey) { $runKey.GetValue('LightHostModern'); $runKey.Dispose() } else { $null }
 try {
     $process = Start-Process -FilePath (Resolve-Path -LiteralPath $HostExecutable).Path -ArgumentList @("--test-profile=$name", "--profile-root=`"$root`"") -WindowStyle Hidden -PassThru
     $deadline = [DateTime]::UtcNow.AddSeconds(30)
@@ -25,6 +25,18 @@ try {
     if ($snapshot.diagnostics.sampleRate -ne $null -or $snapshot.diagnostics.recoveryState -ne 'suspended') { throw 'Test profile opened audio automatically.' }
     $session = $snapshot.hostSession
     if ([string]::IsNullOrEmpty($session)) { throw 'Missing host session.' }
+    if ($snapshot.monoOutput -ne $false) { throw 'Output mono must default to disabled.' }
+    $staleGeneration = ([uint64]$snapshot.audioSelection.generation + 1).ToString()
+    foreach ($monoCommand in 'set-mono-inputs','set-mono-output') {
+        $staleMono = Send-HostRequest $info.pipe $monoCommand @(@{ enabled=$true; expectedGeneration=$staleGeneration }) -Session $session
+        $staleResult = Wait-HostOperation $info.pipe $staleMono
+        if ($staleResult.status -ne 'error' -or $staleResult.error.code -ne 'stale_configuration') { throw ('Unexpected mono result: ' + ($staleResult | ConvertTo-Json -Depth 8 -Compress)) }
+        foreach ($enabled in 'true',$true) {
+            $invalidMono = Send-HostRequest $info.pipe $monoCommand @(@{ enabled=$enabled; expectedGeneration=$snapshot.audioSelection.generation }) -Session $session
+            $invalidResult = Wait-HostOperation $info.pipe $invalidMono
+            if ($invalidResult.error.code -ne 'invalid_arguments') { throw 'Mono accepted a non-boolean or an unconfigured device.' }
+        }
+    }
     $requestId = [guid]::NewGuid().ToString('N')
     $accepted = Send-HostRequest -PipeName $info.pipe -Command 'set-global-mute' -Arguments @($true) -Session $session -RequestId $requestId
     if ($accepted.status -ne 'operation') { throw 'Mutation did not return an operation.' }
@@ -49,7 +61,7 @@ try {
         if ($after -ne $before[$file]) { throw "Production preferences were modified: $file" }
     }
     $runKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Run')
-    $startupAfter = if ($runKey) { $runKey.GetValue('Light Host Modern'); $runKey.Dispose() } else { $null }
+    $startupAfter = if ($runKey) { $runKey.GetValue('LightHostModern'); $runKey.Dispose() } else { $null }
     if ($startupAfter -cne $startupBefore) { throw 'Production startup registry changed.' }
     @{ passed = $true; hostSession = $session; profile = $profileDirectory; realAudioOpened = $false } | ConvertTo-Json |
         Set-Content -LiteralPath (Join-Path $profileDirectory 'integration-result.json') -Encoding UTF8

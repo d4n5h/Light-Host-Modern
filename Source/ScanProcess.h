@@ -5,7 +5,7 @@
 #include <functional>
 #include <string>
 
-namespace lightHost::scan
+namespace lightHostModern::scan
 {
 inline std::wstring quoteArgument(const std::wstring& value)
 {
@@ -29,7 +29,7 @@ inline Result run(const std::wstring& executable, const std::wstring& arguments,
                   const std::function<bool()>& cancelled, DWORD timeoutMs = 60000,
                   const std::function<void()>& poll = {}, const std::function<uint64_t()>& progress = {})
 {
-    using lightHost::ipc::Handle;
+    using lightHostModern::ipc::Handle;
     if (cancelled()) return { Exit::cancelled, ERROR_CANCELLED };
     Handle job(CreateJobObjectW(nullptr, nullptr));
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits {};
@@ -47,14 +47,29 @@ inline Result run(const std::wstring& executable, const std::wstring& arguments,
     {
         HANDLE process;
         std::optional<uint64_t> previous{0};
+        uint64_t lastMemoryTick = 0, resident = 0, committed = 0;
+        bool unavailable = false;
+        void memory()
+        {
+            const auto now = GetTickCount64();
+            if (now - lastMemoryTick < 1000 || now > diagnosticsVisibleUntil.load()) return;
+            lastMemoryTick = now;
+            const auto value = processMemory(process);
+            const bool missing = !value.resident || !value.committed;
+            if (missing != unavailable) { if (missing) ++workerMemoryUnavailable; else --workerMemoryUnavailable; unavailable = missing; }
+            workerResidentBytes.fetch_sub(resident); workerCommittedBytes.fetch_sub(committed);
+            resident = value.resident.value_or(0); committed = value.committed.value_or(0);
+            workerResidentBytes.fetch_add(resident); workerCommittedBytes.fetch_add(committed);
+        }
         void update()
         {
-            if (!lightHost::diagnosticsCollectionEnabled.load(std::memory_order_relaxed))
+            if (!lightHostModern::diagnosticsCollectionEnabled.load(std::memory_order_relaxed))
             { previous.reset(); return; }
-            if (const auto ticks = lightHost::processCpuTicks(process))
-            { if (previous && *ticks >= *previous) lightHost::workerCpuTicks.fetch_add(*ticks - *previous); previous = *ticks; }
+            memory();
+            if (const auto ticks = lightHostModern::processCpuTicks(process))
+            { if (previous && *ticks >= *previous) lightHostModern::workerCpuTicks.fetch_add(*ticks - *previous); previous = *ticks; }
         }
-        ~WorkerAccounting() { update(); }
+        ~WorkerAccounting() { update(); workerResidentBytes.fetch_sub(resident); workerCommittedBytes.fetch_sub(committed); if (unavailable) --workerMemoryUnavailable; }
     } accounting{child.get()};
     if (!AssignProcessToJobObject(job.get(), child.get()))
     {

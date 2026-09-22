@@ -2,7 +2,7 @@
 #include <future>
 #include <iostream>
 
-using namespace lightHost::ipc;
+using namespace lightHostModern::ipc;
 static void require(bool condition, const char* message)
 {
     if (!condition) throw std::runtime_error(message);
@@ -22,7 +22,7 @@ int main()
         auto ids = extractArray(encodeRequest("swap-plugin-with:first:second", L"test"), "args");
         require(ids.GetStringAt(0) == L"first" && ids.GetStringAt(1) == L"second", "reordering encodes string IDs");
 
-        const auto name = L"\\\\.\\pipe\\LightHost-ui-test-" + std::to_wstring(GetCurrentProcessId());
+        const auto name = L"\\\\.\\pipe\\LightHostModern-ui-test-" + std::to_wstring(GetCurrentProcessId());
         Handle server(CreateNamedPipeW(name.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
             PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT, 1, 4096, 4096, 1000, nullptr));
         require(static_cast<bool>(server), "create fake host");
