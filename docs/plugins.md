@@ -1,5 +1,7 @@
 # Plugins
 
+Scanner root traversal follows directory links with canonical deduplication and cycle/depth limits. Linked subdirectories **inside a plugin bundle** are reported as `module_link_unsupported`: the scanner does not silently omit their contents from module verification. Regular bundles and linked scan roots remain supported.
+
 The Plugins page separates the active processing chain from the installed plugin database.
 
 ## Running
@@ -46,7 +48,21 @@ Default Windows locations include common system and per-user VST3 folders and co
 
 **Start scan** opens a small progress dialog with cancellation. Completion shows results and offers **Retry failed files**, **View failures**, and **Close**. Failure cards separate the path, readable error, format, and attempt count; selected entries can be retried without pagination buttons.
 
-Scanning uses a separate `LightHostModernScanner.exe` worker for each module, with a timeout and cleanup when cancelled or when its owner exits. Unchanged plugin descriptions are cached, and interrupted scans preserve completed results. This isolation applies to discovery; active effects still run inside the audio host. VST2 scanning occurs only when support was compiled into the host and **Enable VST2 plugins** is enabled.
+Scanning uses `LightHostModernScanner.exe` for directory enumeration, module catalogs and individual class validation. A class crash or timeout does not discard other verified classes in its module. Partial cache checkpoints let retries reuse successful classes. The worker job also terminates descendants on cancellation or owner exit. Active effects still run inside the audio host. VST2 scanning occurs only when support was compiled into the host and **Enable VST2 plugins** is enabled.
+
+The initial inactivity timeout is 60 seconds; real filesystem/hash progress renews it. A separate 30-minute processing limit prevents unbounded enumeration; consumer backpressure is excluded. Enumeration overlaps one validator through a queue of at most 128 candidates. Fingerprints are computed at discovery and after validation; warm scans avoid plugin instantiation. Worker protocol/cache version 3 invalidates older metadata caches without deleting the installed database or saved sessions.
+
+VST3 validation compares the module and class, including the complete CID when available. Bundle and corresponding inner-binary paths are equivalent, while persisted IDs/aliases remain stable. The isolated catalog checks the real factory instead of trusting stale manifest data; channel/bus data comes from the instantiated effect. JUCE adaptations are limited to the build-owned dependency copy.
+
+The manifest-only pass never falls through to a second factory enumeration when metadata is missing or invalid. A single-class VST3 is instantiated, checked and fingerprinted in its existing isolated catalog worker; multi-class modules retain separate validation workers per class. Hash input is buffered in 256 KiB blocks while retaining the same full-content SHA-256 fingerprint. Known-class/ID lookups use indexes rather than rescanning the full installed list for each result.
+
+Partial scans append checksummed class records to a bounded cache journal. The complete XML catalog is written at the start/end boundaries rather than after every class. Recovery keeps complete preceding records when a trailing record is interrupted, and checkpoint IDs prevent replaying a journal from another snapshot. This additive cache-v3 format does not change plugin/session identities.
+
+Verbose captures include `scan.timing` events for module/catalog/instantiation, fingerprint reads and hashing, cache operations, and child-process launch/CPU/I/O/peak working set. Use `python Utilities/summarize-scan-timings.py <capture-folder-or-export.txt> --output report.json`. Nested stage durations and overlapping workers are not additive, and process I/O counters are not physical-disk transfer measurements.
+
+Default missing folders are skipped. User-added unavailable paths remain actionable failures; default VST2-only folders are not traversed with VST2 disabled. Directory links are deduplicated canonically, cycles are reported as skipped, and traversal depth is limited to 64. Incompatible PE architectures are identified before instantiation. Load failures can include a Windows error code, such as 126 for an unavailable module/dependency; retry alone does not repair a plugin installation.
+
+Progress distinguishes examined modules, cached modules, recognized classes, skipped items and current failures. Enumeration is indeterminate; incomplete roots cannot report complete success. A successful root retry resolves its old enumeration failure. Failure details include the technical reason and stage, with selectable text.
 
 Plugins that fail to load can be quarantined so one broken binary does not repeatedly crash startup or chain restoration. Use `--clear-failed-plugins` to clear that quarantine, or `--safe-mode` to start without restoring the saved chain.
 

@@ -1,4 +1,4 @@
-param([string]$ProfileInfo = 'out/ui-current-profile.json', [string]$OutputDirectory = 'out/ui-session')
+﻿param([string]$ProfileInfo = 'out/ui-current-profile.json', [string]$OutputDirectory = 'out/ui-session')
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\..\Tests\HostProtocol.ps1"
 $info = Get-Content -LiteralPath $ProfileInfo -Raw | ConvertFrom-Json
@@ -13,7 +13,7 @@ $id = $snapshot.activePlugins[0].instanceId
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $results = [Collections.Generic.List[object]]::new()
 function UI([string[]]$Arguments) {
-    $output = rtk proxy winapp ui @Arguments -a $script:AppPid --json
+    $output = & winapp ui @Arguments -a $script:AppPid --json
     if ($LASTEXITCODE -ne 0) { throw "$output" }
     $output | ConvertFrom-Json
 }
@@ -30,7 +30,7 @@ function Scenario([string]$Name, [scriptblock]$Action) {
 function Await-Value([string]$Selector, [string]$Value) {
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     do {
-        try { UI @('wait-for', $Selector, '--value', $Value, '-t', '2000') | Out-Null; return }
+        try { UI @('wait-for', $Selector, '-p', 'ToggleState', '--value', $Value, '-t', '2000') | Out-Null; return }
         catch {
             if (!(Get-Process -Id $script:AppPid -ErrorAction SilentlyContinue)) { throw 'Reopened UI exited unexpectedly.' }
             Start-Sleep -Milliseconds 200
@@ -65,13 +65,16 @@ Scenario 'Closing and reopening UI preserves live global controls and session' {
     if (!$previousUi.WaitForExit(10000)) { throw 'UI process remained alive after closing.' }
     $live = Send-HostRequest $info.pipe 'snapshot'
     if ($live.hostSession -ne $session -or !$live.globalMuted -or !$live.globalBypassed) { throw 'Closing UI changed the live host.' }
-    $launch = rtk proxy winapp run WinUI/x64/Release/LightHostModern.WinUI --manifest WinUI/LightHostModern.WinUI/Package.appxmanifest --exe LightHostModernWinUI.exe --detach --json -- "--test-profile=$($info.name)" "--profile-root=$($info.root)" "--host-pipe=$($info.pipe)" | ConvertFrom-Json
+    $launch = Start-TestUi -Directory "WinUI/x64/Release/LightHostModern.WinUI" -Arguments @("--test-profile=$($info.name)", "--profile-root=$($info.root)", "--host-pipe=$($info.pipe)")
     if ($LASTEXITCODE -ne 0) { throw 'Could not reopen UI.' }
     $script:AppPid = $launch.ProcessId
     $info.uiPid = $script:AppPid
     $info | ConvertTo-Json | Set-Content -LiteralPath $ProfileInfo -Encoding UTF8
-    Await-Value 'DashboardGlobalMute' 'On'
-    Await-Value 'DashboardGlobalBypass' 'On'
+    UI @('wait-for','NavPlugins','-t','10000') | Out-Null
+    UI @('invoke','NavPlugins') | Out-Null
+    UI @('invoke','PluginsRunningTab') | Out-Null
+    Await-Value 'RunningGlobalMute' 'On'
+    Await-Value 'RunningGlobalBypass' 'On'
     Mutate 'set-global-mute' @($false)
     Mutate 'set-global-bypass' @($false)
     UI @('screenshot', '-o', "$OutputDirectory/reopened.png") | Out-Null

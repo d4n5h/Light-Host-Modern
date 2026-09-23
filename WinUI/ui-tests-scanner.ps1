@@ -1,4 +1,4 @@
-# Actual scanner, IPC/events and UI; each run owns a fresh no-audio profile.
+﻿# Actual scanner, IPC/events and UI; each run owns a fresh no-audio profile.
 param([string]$OutputDirectory='out/ui-scanner', [switch]$KeepOpen)
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot\..\Tests\HostProtocol.ps1"
@@ -10,7 +10,7 @@ New-Item -ItemType Directory -Force -Path $profileDirectory,$OutputDirectory | O
 $results=[Collections.Generic.List[object]]::new()
 $hostProcess=$null; $script:appPid=0; $script:pipe=''
 function UI([string[]]$Arguments) {
-    $output=rtk proxy winapp ui @Arguments -a $script:appPid --json
+    $output=& winapp ui @Arguments -a $script:appPid --json
     if ($LASTEXITCODE -ne 0) { throw "UI command $($Arguments -join ' ') failed: $output" }
     $output | ConvertFrom-Json
 }
@@ -41,19 +41,19 @@ function Failures($Status) {
 function Select-Failure($Failure) {
     $match=(UI @('search',$Failure.path)).matches | Where-Object { $_.type -eq 'ListItem' -and !$_.isOffscreen } | Select-Object -First 1
     if (!$match) { throw "Visible failure row was not found: $($Failure.path)" }
-    UI @('invoke',$match.selector) | Out-Null
-    $details=UI @('get-value','ScanFailureDetails')
-    $text=$details | ConvertTo-Json -Depth 5
-    if (!$text.Contains($Failure.path.Replace('\','\\')) -or !$text.Contains('Attempt 1')) { throw "Full failure details were missing: $text" }
+    # UIA Select replaces the entire multi-selection; a user click toggles this row.
+    UI @('click',$match.selector) | Out-Null
+    $text=(UI @('get-property',$match.selector,'-p','Name')).properties.Name
+    if (!$text.Contains($Failure.path) -or !$text.Contains('Attempt 1')) { throw "Full failure details were missing: $text" }
 }
 function Scenario([string]$Name,[scriptblock]$Action) {
     try { & $Action; $results.Add([pscustomobject]@{name=$Name;status='passed'}) }
     catch { $results.Add([pscustomobject]@{name=$Name;status='failed';error="$($_.Exception.Message)"}); throw }
 }
 try {
-    rtk proxy "$repo\out\build\windows-vs2022\Release\LightHostModernPluginInstanceTests.exe" --write-ui-fixture (Join-Path $profileDirectory 'LightHostModern.settings') 3
+    & "$(Get-TestBuildDirectory)\Release\LightHostModernPluginInstanceTests.exe" --write-ui-fixture (Join-Path $profileDirectory 'LightHostModern.settings') 3
     if ($LASTEXITCODE -ne 0) { throw 'Fixture generation failed.' }
-    $hostProcess=Start-Process -FilePath "$repo\out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe" -ArgumentList @("--test-profile=$name",('--profile-root="'+$profileRoot+'"')) -WindowStyle Hidden -PassThru
+    $hostProcess=Start-Process -FilePath "$(Get-TestBuildDirectory)\LightHostModern_artefacts\Release\LightHostModern.exe" -ArgumentList @("--test-profile=$name",('--profile-root="'+$profileRoot+'"')) -WindowStyle Hidden -PassThru
     $metadata=Join-Path $profileDirectory 'profile.json'
     $deadline=[DateTime]::UtcNow.AddSeconds(30)
     while (!(Test-Path -LiteralPath $metadata)) {
@@ -68,35 +68,39 @@ try {
     Mutate 'scan-plugin-path' @($paths)
     $script:status=Wait-ScanIdle
     $script:failures=Failures $script:status
-    $launch=rtk proxy winapp run "$repo\WinUI\x64\Release\LightHostModern.WinUI" --manifest "$repo\WinUI\LightHostModern.WinUI\Package.appxmanifest" --exe LightHostModernWinUI.exe --detach --json -- "--test-profile=$name" "--profile-root=$profileRoot" "--host-pipe=$script:pipe" | ConvertFrom-Json
+    $launch=Start-TestUi -Directory "$repo\WinUI\x64\Release\LightHostModern.WinUI" -Arguments @("--test-profile=$name", "--profile-root=$profileRoot", "--host-pipe=$script:pipe")
     if ($LASTEXITCODE -ne 0) { throw 'UI did not launch.' }
     $script:appPid=$launch.ProcessId
     @{hostPid=$hostProcess.Id;uiPid=$appPid;name=$name;root=$profileRoot;profile=$profileDirectory;pipe=$script:pipe} | ConvertTo-Json | Set-Content "$OutputDirectory/profile.json" -Encoding UTF8
     UI @('wait-for','NavPlugins','-t','10000') | Out-Null
     UI @('invoke','NavPlugins') | Out-Null
     UI @('invoke','PluginsInstalledTab') | Out-Null
-    Scenario 'Complete failure pages expose full details and retain selection' {
+    Scenario 'Incremental failure rows expose full details and retain selection' {
         if ($script:failures.Count -lt 151) { throw 'Failures were truncated.' }
-        UI @('wait-for','ViewScanFailures','--property','IsEnabled','--value','True','-t','8000') | Out-Null
-        UI @('invoke','ViewScanFailures') | Out-Null
+        UI @('invoke','ScanForPlugins') | Out-Null
+        UI @('invoke','View scan results') | Out-Null
+        UI @('wait-for','ScanProgressDialog','-t','5000') | Out-Null
+        UI @('wait-for','View failures','-t','5000') | Out-Null
+        UI @('invoke','View failures') | Out-Null
         UI @('wait-for','ScanFailureList','-t','5000') | Out-Null
         Select-Failure $script:failures[0]
         UI @('screenshot','-o',"$OutputDirectory/page-1.png") | Out-Null
-        UI @('invoke','NextFailurePage') | Out-Null
-        Select-Failure $script:failures[100]
+        for ($i=0;$i -lt 4;$i++) { UI @('scroll','ScanFailureList','--to','bottom') | Out-Null; Start-Sleep -Milliseconds 250 }
+        UI @('wait-for','ScanFailurePath150','-p','IsOffscreen','--value','False','-t','5000') | Out-Null
+        Select-Failure $script:failures[150]
         UI @('screenshot','-o',"$OutputDirectory/page-2.png") | Out-Null
-        UI @('invoke','PreviousFailurePage') | Out-Null
+        UI @('scroll','ScanFailureList','--to','top') | Out-Null
         $row=(UI @('search',$script:failures[0].path)).matches | Where-Object { $_.type -eq 'ListItem' -and !$_.isOffscreen } | Select-Object -First 1
         $properties=UI @('get-property',$row.selector)
         if ($properties.properties.IsSelected -ne 'True') { throw ('Selection was lost when returning to page 1: '+($properties|ConvertTo-Json -Depth 6)) }
     }
     Scenario 'Selected retry updates only the IDs selected across both pages' {
         $previousRevision=$script:status.revision
-        UI @('invoke','Retry selected') | Out-Null
+        UI @('invoke','PrimaryButton') | Out-Null
         UI @('wait-for','ScanFailureList','--gone','-t','5000') | Out-Null
         $script:status=Wait-ScanIdle $previousRevision
         $updated=Failures $script:status
-        $selected=@($script:failures[0].id,$script:failures[100].id)
+        $selected=@($script:failures[0].id,$script:failures[150].id)
         if ($updated.Count -ne $script:failures.Count) { throw 'Retry lost prior failures.' }
         foreach ($failure in $updated) {
             $expected=if ($selected -contains $failure.id) { 2 } else { 1 }
@@ -106,7 +110,8 @@ try {
     }
     Scenario 'Retry all preserves the known bank, chain and previous failure IDs' {
         $previousRevision=$script:status.revision
-        UI @('invoke','RetryPluginScan') | Out-Null
+        UI @('wait-for','ScanProgressDialog','-t','5000') | Out-Null
+        UI @('invoke','Retry failures') | Out-Null
         $script:status=Wait-ScanIdle $previousRevision
         $updated=Failures $script:status
         foreach ($failure in $updated) {
@@ -122,10 +127,7 @@ try {
     $results | Format-Table name,status,error -AutoSize
     if (!$KeepOpen) {
         if ($script:appPid -and (Get-Process -Id $script:appPid -ErrorAction SilentlyContinue)) {
-            $dialog=UI @('search','ScanFailureList')
-            if ($dialog.matches.Count) { UI @('invoke','Close') | Out-Null }
-            UI @('invoke','Close') | Out-Null
-            Get-Process -Id $script:appPid -ErrorAction SilentlyContinue | Wait-Process -Timeout 15
+            Stop-Process -Id $script:appPid -ErrorAction SilentlyContinue
         }
         if ($hostProcess -and !$hostProcess.HasExited) {
             Send-HostRequest $script:pipe 'quit-host' -Session $script:hostSession | Out-Null

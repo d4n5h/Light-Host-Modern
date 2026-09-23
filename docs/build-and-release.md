@@ -4,7 +4,7 @@
 
 After building WinUI Release, run `Tests/GlobalControlFakeHost.ps1` in a separate hidden PowerShell process and launch the UI with `winapp run WinUI/x64/Release/LightHostModern.WinUI --manifest WinUI/LightHostModern.WinUI/Package.appxmanifest --exe LightHostModernWinUI.exe --detach --json -- --host-pipe=\\.\pipe\LightHostModern-global-ui-test`. Pass the returned process ID to `WinUI/ui-tests-global-controls.ps1 -AppPid <id>` from the repository root. Use only that simulated connection for this script, never a live audio session. It checks both pages, keyboard activation, close/reopen synchronization, and closes the test UI. Write the fixture-owned file `out/global-ui-test/stop` to stop the helper. Logs and the Dashboard screenshot stay under `out/global-ui-test`.
 
-LightHostModern has two native build systems: CMake builds the JUCE host, while MSBuild builds and packages the C++/WinRT WinUI shell. The release script combines both outputs. Version 1.4.0 uses the same version in CMake, the WinUI manifests, About, the updater, and the MSI/portable metadata.
+LightHostModern has two native build systems: CMake builds the JUCE host, while MSBuild builds and packages the C++/WinRT WinUI shell. The release script combines both outputs. Version 1.4.1 uses the same version in CMake, the WinUI manifests, About, the updater, and the MSI/portable metadata.
 
 ## Requirements
 
@@ -52,7 +52,7 @@ The tests use temporary local pipes, Windows JSON, and simulated device types. T
 
 Build `WinUI\LightHostModern.WinUI\LightHostModern.WinUI.vcxproj` for x64 Debug or Release with MSBuild or Visual Studio. The release workflow copies the self-contained WinUI payload beside the JUCE host.
 
-The WinUI shell is a packaged desktop app. During development, launch it with its package registration or `winapp run`; do not treat the packaged executable as a standalone unpackaged app.
+The release WinUI payload is self-contained and is launched directly by the host. Isolated UI tests use the same executable through `Start-TestUi` in `Tests/HostProtocol.ps1`; `winapp ui` provides automation without registering a development package. Set `LIGHTHOST_TEST_BUILD_DIR` when testing a native build outside the default `out/build/windows-vs2022` directory.
 
 ## VST2 configuration
 
@@ -85,7 +85,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ".\Utilities\Build Release.p
 Outputs:
 
 ```text
-out\release\LightHostModern-1.4.0-Setup.msi
+out\release\LightHostModern-1.4.1-Setup.msi
 out\release\LightHostModern-Setup.msi  # identical compatibility alias
 out\release\LightHostModern-Portable.zip
 ```

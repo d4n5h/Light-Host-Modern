@@ -18,6 +18,8 @@ Running order, instance IDs, custom instance names, bypass state, and processor 
 
 The WinUI shell stores interface-only options in `%LOCALAPPDATA%\LightHostModern\ui-settings.ini`, including language, layout, material, support visibility, and custom scan paths.
 
+**Settings > Appearance > Sidebar on open** stores `Appearance/SidebarOnOpen` as `Collapsed` (default, also used for invalid values) or `Expanded`. It applies when constructing a new window, including reopening from the tray. Toggling the sidebar manually changes only the current window; changing the preference affects subsequent openings. Focusing an already open window does not reset its sidebar.
+
 Settings writes are debounced during interactive operations and flushed explicitly during shutdown.
 
 ## Preferred-device recovery
@@ -61,9 +63,13 @@ Failed plugins can be marked with `plugin-failed-*` settings. This prevents repe
 
 ## Debug logs
 
+Scanner cache v3 can pair its module XML with a `.journal` file during partial validation. The XML snapshot is published atomically with a fresh checkpoint ID before new checksummed class records are appended and flushed. Recovery accepts complete records with that ID; an incomplete/corrupt tail cannot discard earlier records. Final compaction publishes the consolidated XML before deleting the journal. If writing fails, scanning can continue in memory and reports the cache failure in verbose logs; available older checkpoints remain reusable. Journals are limited to 16 MiB and reconstructed entries retain the 4 MiB response limit.
+
 With `--debug`, the host writes timestamped files under `%APPDATA%\LightHostModern\Logs`. Logs include startup, IPC, device selection, plugin loading, chain rebuilds, and fatal crash context when available. Debug logging is disabled during ordinary launches.
 
 ## Product name migration
+
+Diagnostics capture is separate from legacy `--debug`. Its durable state (`off`, `armed`, `collecting`, `stopped`) and process segments are under `%LOCALAPPDATA%/LightHostModern/Logs/Captures`. A named event stops existing writers without stopping the app. A shared counter enforces the capture budget. Export writes a temporary destination, replaces the final file only after a successful flush, and records a receipt before the host disables and cleans the capture. Cancelled/failed export keeps the stopped capture intact. See [Diagnostics](diagnostics.md).
 
 On the first normal start, the host copies the complete `Light Host Modern.settings` family into the canonical `LightHostModern.settings` location before opening preferences. Session primary, backup, pending candidates, damaged archives and plugin quarantine are copied byte-for-byte. Staged files and a durable manifest allow interrupted publication to resume. Originals are retained. Existing canonical recovery candidates take precedence even when invalid, so migration cannot hide damaged newer data with an older session. Conflicting pending migrations stop startup and preserve both versions.
 

@@ -12,7 +12,7 @@ foreach ($role in @('ui','host')) {
     if (!$process) { continue }
     if (!$process.ExecutablePath.StartsWith($repo+'\',[StringComparison]::OrdinalIgnoreCase) -or !$process.CommandLine.Contains('--test-profile='+$info.name)) { throw "PID $id no longer belongs to this test profile." }
     if ($role -eq 'ui') {
-        rtk proxy winapp ui invoke Close -a $id --json
+        & winapp ui invoke Close -a $id --json
         if ($LASTEXITCODE -ne 0) { throw 'The test UI did not accept Close.' }
     } else {
         $hello=Send-HostRequest $info.pipe 'hello'

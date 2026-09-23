@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.4.1](https://github.com/heide-oficial/Light-Host-Modern/releases/tag/v1.4.1) — 2026-09-23
+
+### Added
+
+- Detailed troubleshooting logs in Diagnostics. Enable capture, restart when ready, reproduce the problem, then stop and save a TXT file through the Windows save dialog. Logs stay on the computer and are never sent automatically.
+- A Sidebar on open preference under Settings > Appearance, applied both at startup and when reopening the interface from the tray.
+
+### Removed
+
+- None.
+
+### Improved
+
+- Faster plugin scanning through buffered file hashing, fewer repeated VST3 factory scans, combined discovery and validation for single-class VST3 modules, and smaller incremental cache writes.
+- More reliable scan progress and time limits, with successful results retained for cancellation, retries and interrupted scans.
+- Clearer scan failure details, including missing paths, incompatible architecture, class identity and loading failures.
+- Localized troubleshooting controls with restart confirmation, cancelled-export recovery, capture size limits and masking of personal-folder paths in logs.
+
+### Fixed
+
+- VST3 bundle and binary paths being treated as different modules, and incomplete class-ID comparisons rejecting valid scan results.
+- Productive scanner workers timing out despite making progress, and retries retaining outdated root failures or repeating completed work unnecessarily.
+- Ending the interface through Windows End task leaving the audio host running. Normal close-to-tray behavior is preserved.
+
+[Full comparison with v1.4.0](https://github.com/heide-oficial/Light-Host-Modern/compare/v1.4.0...v1.4.1).
+
 ## [1.4.0](https://github.com/heide-oficial/Light-Host-Modern/releases/tag/v1.4.0) — 2026-09-21
 
 ### Added

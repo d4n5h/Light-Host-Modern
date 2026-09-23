@@ -222,6 +222,8 @@ def main():
                 state['audioConfigVersion'] += 1
             elif command == 'set-diagnostics-enabled':
                 state['diagnosticsEnabled'] = bool(arguments[0])
+            elif command == 'set-audio-persistence-mode':
+                state['appConfig']['audioPersistenceMode'] = arguments[0]
             elif command == 'add-known-plugin':
                 plugin = next(p for p in state['knownPluginList'] if p['knownId'] == arguments[0])
                 state['activePlugins'].append(dict(plugin, instanceId=uuid.uuid4().hex,
@@ -236,7 +238,7 @@ def main():
                 plugin['name'] = plugin['customName'] or plugin['originalName']
                 if not running:
                     state['pluginDbVersion'] += 1
-            elif command == 'scan-plugin-path':
+            elif command in ('scan-plugin-path', 'scan-plugin-roots'):
                 scan_active = True
                 scan_cancelled = False
             elif command == 'cancel-plugin-scan':

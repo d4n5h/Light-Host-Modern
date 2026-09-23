@@ -11,7 +11,7 @@ $directory = Join-Path $root $name
 New-Item -ItemType Directory -Path $directory -Force | Out-Null
 $settings = Join-Path $directory 'LightHostModern.settings'
 $sessionFile = $settings + '.session.json'
-rtk proxy $FixtureWriter --write-legacy-fixture $settings
+& $FixtureWriter --write-legacy-fixture $settings
 if ($LASTEXITCODE -ne 0) { throw 'Could not write legacy fixture.' }
 $originalHash = (Get-FileHash -LiteralPath $settings).Hash
 $script:hostProcess = $null
@@ -81,7 +81,7 @@ try {
     $evidence.Add('Safe mode preserves ordered records and file bytes')
 
     $sessionUtility=Join-Path (Split-Path $FixtureWriter -Parent) 'LightHostModernSessionTests.exe'
-    rtk proxy $sessionUtility --mark-session-failed $settings
+    & $sessionUtility --mark-session-failed $settings
     if ($LASTEXITCODE -ne 0) { throw 'Could not prepare a valid failed-load marker.' }
     $marked=Get-Content -LiteralPath $sessionFile -Raw -Encoding UTF8 | ConvertFrom-Json
     [xml]$markedXml=$marked.sessionXml

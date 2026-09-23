@@ -1,3 +1,20 @@
+# Optional override ensures integration suites exercise the selected build.
+function Get-TestBuildDirectory {
+    if ($env:LIGHTHOST_TEST_BUILD_DIR) { return [IO.Path]::GetFullPath($env:LIGHTHOST_TEST_BUILD_DIR) }
+    return [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\out\build\windows-vs2022'))
+}
+
+function Start-TestUi {
+    param([Parameter(Mandatory)][string]$Directory, [Parameter(Mandatory)][string[]]$Arguments)
+    if (!@($Arguments | Where-Object { $_.StartsWith('--test-profile=') }).Count) { throw 'UI tests require an isolated profile.' }
+    # Exercise the same self-contained executable as the portable/host launcher.
+    # Do not register a development MSIX or depend on winapp run deployment.
+    $quoted = @($Arguments | ForEach-Object { '"' + $_.Replace('"','\"') + '"' })
+    $process = Start-Process -FilePath (Join-Path $Directory 'LightHostModernWinUI.exe') -ArgumentList $quoted -WindowStyle Hidden -PassThru
+    $global:LASTEXITCODE = 0
+    return [pscustomobject]@{ ProcessId=$process.Id }
+}
+
 function Send-HostRequest {
     param([string] $PipeName, [string] $Command, [array] $Arguments = @(),
           [string] $Session = '', [string] $RequestId = [guid]::NewGuid().ToString('N'), [int] $TimeoutMs = 5000,

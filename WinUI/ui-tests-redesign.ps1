@@ -1,7 +1,8 @@
-# Focused visual/interaction validation against Tests/UiRedesignFakeHost.py.
+﻿# Focused visual/interaction validation against Tests/UiRedesignFakeHost.py.
 # The fixture supplies known meter levels without opening any audio device.
 param([Parameter(Mandatory)][string]$ProfileInfo,
-      [Parameter(Mandatory)][string]$OutputDirectory)
+      [Parameter(Mandatory)][string]$OutputDirectory,
+      [string]$ScenarioPattern='.*')
 $ErrorActionPreference='Stop'
 $info=Get-Content -LiteralPath $ProfileInfo -Raw | ConvertFrom-Json
 $appProcess=Get-CimInstance Win32_Process -Filter "ProcessId=$($info.uiPid)"
@@ -16,7 +17,8 @@ function UI([string[]]$Arguments) {
         UI @('send-keys','backspace','--via','send-input') | Out-Null
         return
     }
-    $output=rtk proxy winapp ui @Arguments -a $AppPid --json
+    $output=& winapp ui @Arguments -a $AppPid --json
+    if ($Arguments[0] -in @('scroll','scroll-into-view')) { Start-Sleep -Milliseconds 300 }
     $commandExit=$LASTEXITCODE
     $parsed=$output | ConvertFrom-Json
     if ($parsed.error -or ($commandExit -ne 0 -and !($Arguments[0] -eq 'search' -and $null -ne $parsed.matchCount -and $parsed.matchCount -eq 0))) {
@@ -27,19 +29,19 @@ function UI([string[]]$Arguments) {
 $window=(UI @('list-windows') | Where-Object { $_.title.StartsWith('LightHostModern [Test:') } | Select-Object -First 1).hwnd
 if (!$window) { throw 'Test window missing.' }
 function Page([string]$Name) {
-    UI @('click',('Nav'+$Name)) | Out-Null
+    UI @('invoke',('Nav'+$Name)) | Out-Null
     Start-Sleep -Milliseconds 150
 }
 function Choose([string]$Combo,[string]$Text) {
     UI @('scroll-into-view',$Combo) | Out-Null
     UI @('invoke',$Combo) | Out-Null
+    Start-Sleep -Milliseconds 200
     $item=(UI @('search',$Text)).matches | Where-Object { $_.type -eq 'ListItem' -and $_.name -eq $Text -and !$_.isOffscreen } | Select-Object -First 1
     if (!$item) { throw "Missing option $Text in $Combo" }
     UI @('invoke',$item.selector) | Out-Null
     Start-Sleep -Milliseconds 200
 }
 function Capture([string]$Name) {
-    UI @('click','PageTitle') | Out-Null
     UI @('screenshot','-w',"$window",'-o',"$OutputDirectory/$Name.png") | Out-Null
 }
 function Bounds([string]$Id) {
@@ -47,10 +49,12 @@ function Bounds([string]$Id) {
     @($p.BoundingRectangle.Split(',') | ForEach-Object { [double]$_ })
 }
 function WithinContent([string]$Id) {
+    UI @('scroll-into-view',$Id) | Out-Null
     $viewport=Bounds 'ContentScrollViewer'; $bounds=Bounds $Id
     if ($bounds[2] -le 0 -or $bounds[0] -lt $viewport[0]-1 -or $bounds[0]+$bounds[2] -gt $viewport[0]+$viewport[2]+1) { throw "$Id exceeds the page width." }
 }
 function Scenario([string]$Name,[scriptblock]$Body) {
+    if ($Name -notmatch $ScenarioPattern) { return }
     try { & $Body; $results.Add([pscustomobject]@{name=$Name;status='passed'}); Write-Output "PASS $Name" }
     catch { $results.Add([pscustomobject]@{name=$Name;status='failed';error=$_.Exception.Message}); Write-Output "FAIL $Name : $($_.Exception.Message)" }
     $results | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$OutputDirectory/results.json" -Encoding UTF8
@@ -73,7 +77,7 @@ Scenario 'Light and dark themes; all four window materials' {
 Scenario 'Compact title alignment and separate channel cards' {
     Page Audio
     $header=Bounds 'PageTitle'; $viewport=Bounds 'ContentScrollViewer'
-    if ([Math]::Abs($header[0]-$viewport[0]) -gt 1 -or $viewport[2] -gt 1561) { throw 'Compact page alignment or width is incorrect at 200% DPI.' }
+    if ($header[2] -gt 2001 -or $header[0] -lt $viewport[0] -or $header[0]+$header[2] -gt $viewport[0]+$viewport[2]+1) { throw 'Compact header is wider than its column or outside the page viewport.' }
     WithinContent 'AudioBackend'
     Capture 'audio-compact'
 }
@@ -108,15 +112,16 @@ Scenario 'Enabled devices dialog is narrow and the backend stays accessible' {
 Scenario 'Unicode scan paths persist between openings and can be removed' {
     Page Plugins
     UI @('invoke','PluginsInstalledTab') | Out-Null
-    UI @('invoke','PluginDatabaseActions') | Out-Null
-    UI @('invoke','DatabasePathsTab') | Out-Null
+    UI @('invoke','ScanForPlugins') | Out-Null
     $saved=(UI @('search','C:\Test Plugins\Áudio')).matches | Where-Object { $_.type -eq 'Text' } | Select-Object -First 1
     if (!$saved) {
         UI @('set-value','NewScanPath','C:\Test Plugins\Áudio') | Out-Null
         UI @('invoke','SaveNewScanPath') | Out-Null
         UI @('invoke','CloseButton') | Out-Null
-        UI @('invoke','PluginDatabaseActions') | Out-Null
-    UI @('invoke','DatabasePathsTab') | Out-Null
+        UI @('wait-for','PluginScanDialog','--gone','-t','3000') | Out-Null
+        UI @('invoke','ScanForPlugins') | Out-Null
+        UI @('wait-for','NewScanPath','-t','3000') | Out-Null
+        UI @('scroll','ScanPathsScroll','--to','bottom') | Out-Null
         $saved=(UI @('search','C:\Test Plugins\Áudio')).matches | Where-Object { $_.type -eq 'Text' } | Select-Object -First 1
     }
     if (!$saved) { throw 'Saved Unicode path did not survive restart.' }

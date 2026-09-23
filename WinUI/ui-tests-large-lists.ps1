@@ -1,4 +1,4 @@
-param([int[]]$Counts = @(100,500,1000), [string]$OutputDirectory = 'out/ui-large-lists', [string]$ProcessorCache='')
+﻿param([int[]]$Counts = @(100,500,1000), [string]$OutputDirectory = 'out/ui-large-lists', [string]$ProcessorCache='')
 $ErrorActionPreference='Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 . "$repo\Tests\HostProtocol.ps1"
@@ -6,7 +6,7 @@ $root = Join-Path $repo 'out\test-profiles'
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $results = [Collections.Generic.List[object]]::new()
 function UI([string[]]$Arguments) {
-    $output = rtk proxy winapp ui @Arguments -a $script:appPid --json
+    $output = & winapp ui @Arguments -a $script:appPid --json
     if ($LASTEXITCODE -ne 0) { throw "UI command $($Arguments -join ' ') failed: $output" }
     return $output | ConvertFrom-Json
 }
@@ -18,10 +18,10 @@ foreach ($count in $Counts) {
     try {
         $fixtureArguments=@('--write-ui-fixture',(Join-Path $profile 'LightHostModern.settings'),$count)
         if ($ProcessorCache) { $fixtureArguments=@('--write-loaded-ui-fixture',(Join-Path $profile 'LightHostModern.settings'),$count,$ProcessorCache) }
-        rtk proxy "$repo\out\build\windows-vs2022\Release\LightHostModernPluginInstanceTests.exe" @fixtureArguments
+        & "$(Get-TestBuildDirectory)\Release\LightHostModernPluginInstanceTests.exe" @fixtureArguments
         if ($LASTEXITCODE -ne 0) { throw 'Fixture generation failed.' }
         $clock = [Diagnostics.Stopwatch]::StartNew()
-        $hostProcess = Start-Process -FilePath "$repo\out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe" -ArgumentList @("--test-profile=$name", ('--profile-root="'+$root+'"')) -PassThru -WindowStyle Hidden
+        $hostProcess = Start-Process -FilePath "$(Get-TestBuildDirectory)\LightHostModern_artefacts\Release\LightHostModern.exe" -ArgumentList @("--test-profile=$name", ('--profile-root="'+$root+'"')) -PassThru -WindowStyle Hidden
         $metadata = Join-Path $profile 'profile.json'
         $deadline = [DateTime]::UtcNow.AddSeconds($(if ($ProcessorCache) { 180 } else { 30 }))
         while (!(Test-Path -LiteralPath $metadata)) {
@@ -34,7 +34,7 @@ foreach ($count in $Counts) {
         if ($snapshot.activePlugins.Count -ne $count -or $snapshot.knownPluginList.Count -ne $count) { throw 'Host fixture count mismatch.' }
         if ($ProcessorCache -and $snapshot.diagnostics.loadedPlugins -ne $count) { throw 'The host did not load every simulated processor.' }
         if ($snapshot.diagnostics.deviceName -notin @('none','None','')) { throw 'Fixture unexpectedly opened an audio device.' }
-        $launch = rtk proxy winapp run "$repo\WinUI\x64\Release\LightHostModern.WinUI" --manifest "$repo\WinUI\LightHostModern.WinUI\Package.appxmanifest" --exe LightHostModernWinUI.exe --detach --json -- "--test-profile=$name" "--profile-root=$root" "--host-pipe=$pipe" | ConvertFrom-Json
+        $launch = Start-TestUi -Directory "$repo\WinUI\x64\Release\LightHostModern.WinUI" -Arguments @("--test-profile=$name", "--profile-root=$root", "--host-pipe=$pipe")
         if ($LASTEXITCODE -ne 0) { throw 'UI failed to launch.' }
         $script:appPid=$launch.ProcessId
         @{hostPid=$hostProcess.Id;uiPid=$script:appPid;name=$name;root=$root;profile=$profile;pipe=$pipe} | ConvertTo-Json |
@@ -56,6 +56,7 @@ foreach ($count in $Counts) {
         UI @('wait-for',('running-'+$last.instanceId),'-p','IsOffscreen','--value','False','-t','5000') | Out-Null
         UI @('wait-for',('running-'+$last.instanceId),'-p','IsSelected','--value','True','-t','5000') | Out-Null
         UI @('wait-for',('running-'+$last.instanceId),'-p','HasKeyboardFocus','--value','True','-t','5000') | Out-Null
+        UI @('send-keys','escape','--via','send-input') | Out-Null
         UI @('invoke','NavDashboard') | Out-Null
         UI @('invoke','NavPlugins') | Out-Null
         UI @('wait-for',('running-'+$last.instanceId),'-p','IsOffscreen','--value','False','-t','5000') | Out-Null
@@ -78,6 +79,8 @@ foreach ($count in $Counts) {
         if ((@((Send-HostRequest $pipe 'snapshot').activePlugins.instanceId) -join ',') -ne $originalOrder) { throw 'Visual sorting or drag in a sorted view changed the processing order.' }
         UI @('invoke','RunningPluginSort') | Out-Null
         UI @('invoke','Chain order') | Out-Null
+        # Let the virtualized list finish applying the new view before dragging.
+        Start-Sleep -Milliseconds 500
         UI @('scroll','RunningPluginsList','--to','top') | Out-Null
         $first=$snapshot.activePlugins[0]; $second=$snapshot.activePlugins[1]
         UI @('wait-for',('running-'+$first.instanceId),'-p','IsOffscreen','--value','False','-t','5000') | Out-Null
@@ -100,12 +103,17 @@ foreach ($count in $Counts) {
         if (!$known) { throw 'The final sorted Installed fixture is missing.' }
         UI @('wait-for',('installed-'+$known.knownId),'-t','5000') | Out-Null
         UI @('screenshot','-o',"$OutputDirectory/installed-$count.png") | Out-Null
+        UI @('invoke','InstalledPluginSort') | Out-Null
         UI @('invoke','InstalledGroupByManufacturer') | Out-Null
-        UI @('wait-for','InstalledGroupByManufacturer','--value','On','-t','5000') | Out-Null
+        UI @('invoke','InstalledPluginSort') | Out-Null
+        UI @('wait-for','InstalledGroupByManufacturer','-p','ToggleState','--value','On','-t','5000') | Out-Null
+        UI @('send-keys','escape','--via','send-input') | Out-Null
         UI @('invoke','NavDashboard') | Out-Null
         UI @('invoke','NavPlugins') | Out-Null
         UI @('invoke','PluginsInstalledTab') | Out-Null
-        UI @('wait-for','InstalledGroupByManufacturer','--value','On','-t','5000') | Out-Null
+        UI @('invoke','InstalledPluginSort') | Out-Null
+        UI @('wait-for','InstalledGroupByManufacturer','-p','ToggleState','--value','On','-t','5000') | Out-Null
+        UI @('send-keys','escape','--via','send-input') | Out-Null
         UI @('set-value','InstalledPluginSearchInput',$known.name) | Out-Null
         UI @('wait-for',('installed-'+$known.knownId),'-p','IsOffscreen','--value','False','-t','5000') | Out-Null
         UI @('screenshot','-o',"$OutputDirectory/grouped-search-$count.png") | Out-Null

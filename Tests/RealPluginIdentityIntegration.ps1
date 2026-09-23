@@ -4,7 +4,7 @@ $ErrorActionPreference='Stop'
 . "$PSScriptRoot\HostProtocol.ps1"
 $repo=(Resolve-Path -LiteralPath "$PSScriptRoot\..").Path
 $root=Join-Path $repo 'out\test-profiles'
-$hostExe=Join-Path $repo 'out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe'
+$hostExe=Join-Path (Get-TestBuildDirectory) 'LightHostModern_artefacts\Release\LightHostModern.exe'
 [xml]$cache=Get-Content -LiteralPath $MetadataCache -Raw -Encoding UTF8
 $entry=$cache.SelectSingleNode('/SCAN/ENTRY')
 $plugin=$entry.SelectSingleNode('PLUGIN')

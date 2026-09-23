@@ -42,6 +42,8 @@ The main modules are:
 
 If the shell window already exists, the host restores and focuses it rather than opening a duplicate UI.
 
+The host retains the launched shell's process handle and watches for its exit outside the audio and message threads. A unique `--ui-close-event` per launch acknowledges completion of a normal window close. Closing to the tray leaves audio running; an unacknowledged exit (including Windows taskbar **End task** or a shell crash) instead requests host shutdown. A separate ten-second deadline terminates the host if plugin code blocks orderly shutdown. This fallback has the same unsaved-state limitations as forced termination. No process-name searches or exit-code guesses are used, and a shell still starting or closing cannot be launched twice. Packaged activation is monitored using the returned process ID.
+
 ## Named-pipe protocol
 
 The transport is a local Windows message-mode named pipe. Requests and responses are UTF-8 JSON, limited to 4 MiB per message. Both ends use cancellable overlapped I/O and assemble partial reads. The shell queues requests in FIFO order outside the UI thread; the server dispatches commands serially on the JUCE message thread. Queued callbacks own their completion state and cannot access a destroyed server.
@@ -99,6 +101,10 @@ The host exposes separate version counters for:
 The shell polls lightweight telemetry and requests the larger state snapshot only after a counter changes. This reduces serialization and UI work while preserving live meters and status.
 
 ## Failure boundaries
+
+Detailed captures use additive IPC commands: `verbose-log-status` (read-only), `set-verbose-logs` (boolean), `stop-verbose-logs`, `complete-verbose-logs` (capture ID), and `restart-host` (`uiPid`, `uiCreated`). Existing IPC v4 request IDs/operation reconciliation apply. The host owns state transitions; the UI exports a stopped capture asynchronously and then confirms completion. Restart helper mode validates process IDs/creation times and relaunches the same executable/profile only after both processes exit.
+
+`scan-plugin-roots` accepts `{ roots: [{path, optional, format}] }`, with `format` equal to `all`, `VST` or `VST3`. It consolidates roots by enabled format/origin before enumeration. Scan status adds `recognized`, `ignored`, `enumerating`, and `incomplete`. Scanner/cache protocol v3 separates catalog, class and fingerprint verification, correlating one-shot responses by request ID, module path, format and fingerprint.
 
 An empty response indicates that the pipe closed or the host stopped responding during an operation. Plugin-load commands return explicit error JSON when the host can reject a plugin safely. The shell displays the failure without pretending the plugin was added.
 

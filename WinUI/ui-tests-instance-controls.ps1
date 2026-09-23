@@ -1,11 +1,11 @@
-param([Parameter(Mandatory)][int]$AppPid, [Parameter(Mandatory)][string]$PipeName,
+﻿param([Parameter(Mandatory)][int]$AppPid, [Parameter(Mandatory)][string]$PipeName,
       [string]$OutputDirectory = 'out/ui-instance-controls')
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\..\Tests\HostProtocol.ps1"
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $results = [Collections.Generic.List[object]]::new()
 function UI([string[]]$Arguments) {
-    $output = rtk proxy winapp ui @Arguments -a $AppPid --json
+    $output = & winapp ui @Arguments -a $AppPid --json
     if ($LASTEXITCODE -ne 0) { throw "$output" }
     return $output | ConvertFrom-Json
 }
@@ -55,27 +55,33 @@ Test-Scenario 'Details preserve original identity and are selectable' {
 }
 Test-Scenario 'Restore original name and return focus' {
     Open-Action 'restore'
-    UI @('wait-for',('running-'+$script:instanceId),'--value','2 Effect, Error','-t','4000') | Out-Null
+    UI @('wait-for',('running-'+$script:instanceId),'--value',('2 '+$initial.activePlugins[0].originalName+', Error'),'-t','4000') | Out-Null
     if (@((Snapshot).activePlugins | Where-Object instanceId -eq $script:instanceId)[0].customName -ne '') { throw 'Custom name was not reset.' }
     $focus = UI @('get-focused')
     if (($focus | ConvertTo-Json -Depth 6) -notmatch $script:instanceId) { throw 'Focus did not return to the row action.' }
 }
 Test-Scenario 'Installed grouping remains selected across navigation' {
     UI @('invoke','PluginsInstalledTab') | Out-Null
-    UI @('invoke','InstalledGroupByManufacturer') | Out-Null
-    UI @('wait-for','InstalledGroupByManufacturer','--value','On','-t','2000') | Out-Null
+    UI @('invoke','InstalledPluginSort') | Out-Null
+        UI @('invoke','InstalledGroupByManufacturer') | Out-Null
+    UI @('invoke','InstalledPluginSort') | Out-Null
+        UI @('wait-for','InstalledGroupByManufacturer','-p','ToggleState','--value','On','-t','2000') | Out-Null
+    UI @('send-keys','escape','--via','send-input') | Out-Null
     UI @('invoke','NavDashboard') | Out-Null
     UI @('invoke','NavPlugins') | Out-Null
     UI @('invoke','PluginsInstalledTab') | Out-Null
-    UI @('wait-for','InstalledGroupByManufacturer','--value','On','-t','2000') | Out-Null
+    UI @('invoke','InstalledPluginSort') | Out-Null
+        UI @('wait-for','InstalledGroupByManufacturer','-p','ToggleState','--value','On','-t','2000') | Out-Null
+    UI @('send-keys','escape','--via','send-input') | Out-Null
     UI @('screenshot','-o',"$OutputDirectory/grouping.png") | Out-Null
-    UI @('invoke','InstalledGroupByManufacturer') | Out-Null
+    UI @('invoke','InstalledPluginSort') | Out-Null
+        UI @('invoke','InstalledGroupByManufacturer') | Out-Null
 }
 Test-Scenario 'Dashboard exposes the two live level bars' {
     UI @('invoke','NavDashboard') | Out-Null
     foreach ($id in @('InputMeter','OutputMeter')) {
         $properties=(UI @('get-property',$id)).properties
-        if ($properties.ControlType -ne 'ProgressBar' -or $properties.IsOffscreen -ne 'False') { throw "The level bar is not visible: $id" }
+        if ($properties.IsOffscreen -ne 'False' -or !$properties.HelpText) { throw "The level bar or its accessible reading is missing: $id" }
     }
     UI @('screenshot','-o',"$OutputDirectory/meters.png") | Out-Null
 }

@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$ProfileInfo,[Parameter(Mandatory)][string]$OutputDirectory,[string]$TestPattern='.*')
+﻿param([Parameter(Mandatory)][string]$ProfileInfo,[Parameter(Mandatory)][string]$OutputDirectory,[string]$TestPattern='.*')
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot/ui-tests-plugin-workspace.ps1" -ProfileInfo $ProfileInfo -OutputDirectory $OutputDirectory -ScenarioPattern '^$' | Out-Null
 $ScenarioPattern=$TestPattern
@@ -10,6 +10,7 @@ function Command([string]$Name,[array]$Arguments) {
 }
 Scenario 'Compact page keeps the scrollbar at the window edge and bounds the preferred picker' {
     Page Settings; Choose LayoutMode Compact
+    Choose AudioPersistenceMode 'Custom device'
     UI @('scroll-into-view','PreferredDevicePicker') | Out-Null
     $picker=Bounds PreferredDevicePicker; $title=Bounds PageTitle; $scroll=Bounds ContentScrollViewer
     Require ($picker[2] -lt $title[2]*0.55) 'Compact picker is stretched across the card.'
@@ -55,6 +56,7 @@ Scenario 'Installed aliases restore independently and seed new Running instances
     Invoke PluginAction-rename
     UI @('wait-for','InstanceName','-t','3000') | Out-Null
     UI @('set-value','InstanceName','Studio Reverb') | Out-Null; Invoke PrimaryButton
+    Start-Sleep -Milliseconds 500
     UI @('wait-for',('installed-'+$id),'-t','2000') | Out-Null
     $renamed=(Snapshot).knownPluginList | Where-Object knownId -eq $id
     Require ($renamed.name -eq 'Studio Reverb' -and $renamed.originalName -eq $known.originalName) 'Installed alias altered the original metadata.'
@@ -91,7 +93,7 @@ Scenario 'Installed and Running search widths match and list scrollbar stays out
     Require ($list[0]+$list[2] -gt $sort[0]+$sort[2]+40) 'Plugin scrollbar is inside compact toolbar width.'
     $first=(Snapshot).knownPluginList[0].knownId
     $card=Bounds ('installed-'+$first); $title=Bounds PageTitle
-    Require ([Math]::Abs($card[0]-$title[0]) -le 3 -and [Math]::Abs($card[2]-$title[2]) -le 3) 'Plugin cards do not align with the compact header.'
+    Require ([Math]::Abs($card[0]-$title[0]) -le 3 -and [Math]::Abs($card[2]-$title[2]) -le 3) "Plugin cards do not align with the compact header: card=$card title=$title."
     UI @('hover','PageTitle','--dwell-time','100') | Out-Null
     Capture 'installed-toolbar-scrollbar'
 }
@@ -117,7 +119,7 @@ Scenario 'Failure checkboxes retain contrast when selected' {
     Require ((Properties PrimaryButton).IsEnabled -eq 'True') 'Checkbox selection no longer enables retry.'
     UI @('hover','ScanFailureSummary','--dwell-time','100') | Out-Null
     Capture 'failure-checkbox-selected-dark'
-    Invoke CloseButton; Invoke CloseButton
+    Invoke CloseButton; UI @('wait-for','ScanProgressDialog','-t','4000') | Out-Null; Invoke CloseButton
 }
 $results | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$OutputDirectory/results.json" -Encoding UTF8
 if (@($results | Where-Object status -eq failed).Count) { exit 1 }

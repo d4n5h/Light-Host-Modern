@@ -1,5 +1,5 @@
 param(
-    [string] $PayloadDirectory = "$PSScriptRoot\..\out\release\1.4.0-local\LightHostModern-Portable",
+    [string] $PayloadDirectory = "$PSScriptRoot\..\out\release\1.4.1-local\LightHostModern-Portable",
     [switch] $SimulatedAudio,
     [switch] $MeasureResources,
     [string[]] $Languages = @('en-us', 'pt-br'),

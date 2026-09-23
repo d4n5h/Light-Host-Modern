@@ -8,7 +8,7 @@ $profileDirectory = Join-Path $profileRoot $testProfileName
 $metadata = Join-Path $profileDirectory 'profile.json'
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 if (!$ExistingProfile) {
-$hostProcess = Start-Process -FilePath "$repo\out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe" -ArgumentList @("--test-profile=$testProfileName", ('--profile-root="'+$profileRoot+'"')) -WindowStyle Hidden -PassThru
+$hostProcess = Start-Process -FilePath "$(Get-TestBuildDirectory)\LightHostModern_artefacts\Release\LightHostModern.exe" -ArgumentList @("--test-profile=$testProfileName", ('--profile-root="'+$profileRoot+'"')) -WindowStyle Hidden -PassThru
 $deadline = [DateTime]::UtcNow.AddSeconds(30)
 while (!(Test-Path -LiteralPath $metadata)) {
     if ($hostProcess.HasExited -or [DateTime]::UtcNow -ge $deadline) { throw 'Test profile failed to start.' }
@@ -16,7 +16,7 @@ while (!(Test-Path -LiteralPath $metadata)) {
 }
 $profile = Get-Content -LiteralPath $metadata -Raw | ConvertFrom-Json
 $script:pipe = $profile.pipe
-$launch = rtk proxy winapp run WinUI/x64/Release/LightHostModern.WinUI --manifest WinUI/LightHostModern.WinUI/Package.appxmanifest --exe LightHostModernWinUI.exe --detach --json -- "--test-profile=$testProfileName" "--profile-root=$profileRoot" "--host-pipe=$($profile.pipe)" | ConvertFrom-Json
+$launch = Start-TestUi -Directory "WinUI/x64/Release/LightHostModern.WinUI" -Arguments @("--test-profile=$testProfileName", "--profile-root=$profileRoot", "--host-pipe=$($profile.pipe)")
 if ($LASTEXITCODE -ne 0) { throw 'Test UI failed to start.' }
 $script:AppPid = $launch.ProcessId
 @{hostPid=$hostProcess.Id; uiPid=$AppPid; name=$testProfileName; root=$profileRoot; profile=$profileDirectory; pipe=$profile.pipe} | ConvertTo-Json | Set-Content "$OutputDirectory/profile.json" -Encoding UTF8
@@ -27,7 +27,7 @@ $script:AppPid = $launch.ProcessId
 }
 $results = [Collections.Generic.List[object]]::new()
 function UI([string[]]$Arguments) {
-    $output = rtk proxy winapp ui @Arguments -a $script:AppPid --json
+    $output = & winapp ui @Arguments -a $script:AppPid --json
     if ($LASTEXITCODE -ne 0) { throw "$output" }
     $output | ConvertFrom-Json
 }

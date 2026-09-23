@@ -1,4 +1,4 @@
-# Focused UI regression. Requires the isolated Tests/UiRedesignFakeHost.py profile.
+﻿# Focused UI regression. Requires the isolated Tests/UiRedesignFakeHost.py profile.
 param([Parameter(Mandatory)][string]$ProfileInfo,
       [Parameter(Mandatory)][string]$OutputDirectory,
       [string]$ScenarioPattern='.*')
@@ -7,6 +7,15 @@ $info=Get-Content -LiteralPath $ProfileInfo -Raw | ConvertFrom-Json
 $appProcess=Get-CimInstance Win32_Process -Filter "ProcessId=$($info.uiPid)"
 if (!$appProcess -or !$appProcess.CommandLine.Contains('--test-profile='+$info.name)) { throw 'An isolated test UI is required.' }
 $AppPid=[int]$info.uiPid
+if (-not ('LightHostTestForeground' -as [type])) {
+    Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class LightHostTestForeground {
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+}
+'@
+}
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $results=[Collections.Generic.List[object]]::new()
 $fixtureDirectory=Split-Path -Parent $ProfileInfo
@@ -17,7 +26,12 @@ function UI([string[]]$Arguments) {
         UI @('send-keys','backspace','--via','send-input') | Out-Null
         return
     }
-    $output=rtk proxy winapp ui @Arguments -a $AppPid --json
+    if ($window -and $Arguments[0] -in @('click','hover','send-keys','drag')) {
+        [LightHostTestForeground]::SetForegroundWindow([IntPtr][long]$window) | Out-Null
+        Start-Sleep -Milliseconds 100
+    }
+    $output=& winapp ui @Arguments -a $AppPid --json
+    if ($Arguments[0] -in @('scroll','scroll-into-view')) { Start-Sleep -Milliseconds 300 }
     $commandExit=$LASTEXITCODE
     $parsed=$output | ConvertFrom-Json
     if (@($parsed | Where-Object { $_.error }).Count -gt 0 -or ($commandExit -ne 0 -and !($Arguments[0] -eq 'search' -and $null -ne $parsed.matchCount -and $parsed.matchCount -eq 0))) {
@@ -28,12 +42,18 @@ function UI([string[]]$Arguments) {
 $window=(UI @('list-windows') | Where-Object { $_.title.StartsWith('LightHostModern [Test:') } | Select-Object -First 1).hwnd
 if (!$window) { throw 'Test window missing.' }
 function Page([string]$Name) {
+    UI @('focus',('Nav'+$Name)) | Out-Null
     UI @('send-keys','escape','--via','send-input') | Out-Null
-    UI @('click',('Nav'+$Name)) | Out-Null
     Start-Sleep -Milliseconds 200
-    if ((Properties ('Nav'+$Name)).IsSelected -ne 'True') { UI @('click',('Nav'+$Name)) | Out-Null }
+    UI @('invoke',('Nav'+$Name)) | Out-Null
+    Start-Sleep -Milliseconds 200
+    if ((Properties ('Nav'+$Name)).IsSelected -ne 'True') { UI @('invoke',('Nav'+$Name)) | Out-Null }
 }
-function Invoke([string]$Id) { UI @('invoke',$Id) | Out-Null }
+function Invoke([string]$Id) {
+    UI @('invoke',$Id) | Out-Null
+    # Wait for flyout/dialog close animations before the next simulated action.
+    Start-Sleep -Milliseconds 200
+}
 function Capture([string]$Name) { UI @('screenshot','-w',"$window",'-o',"$OutputDirectory/$Name.png") | Out-Null }
 function Properties([string]$Id) { (UI @('get-property',$Id)).properties }
 function Bounds([string]$Id) { @((Properties $Id).BoundingRectangle.Split(',') | ForEach-Object { [double]$_ }) }
@@ -73,19 +93,20 @@ Scenario 'Support tab can be hidden before its lazy page is created' {
     Require ($settings -match 'HideSupportTab=1') 'The hidden preference was not saved.'
     Capture 'support-hidden'
 }
-Scenario 'Settings maintenance works before Plugins loads and Support follows Settings' {
+Scenario 'Settings maintenance works before Plugins loads and Settings follows Support' {
     Page Settings
     Require (!(Visible NavDatabase)) 'Database should no longer be a sidebar page.'
     UI @('scroll-into-view','HideSupportTab') | Out-Null
     if ((Properties HideSupportTab).ToggleState -eq 'On') { Invoke HideSupportTab }
     Require (Visible NavSupport) 'Support navigation is missing.'
-    Require ((Bounds NavSupport)[1] -gt (Bounds NavSettings)[1]) 'Support is not below Settings.'
+    Require ((Bounds NavSettings)[1] -gt (Bounds NavSupport)[1]) 'Settings is not below Support.'
     UI @('scroll','ContentScrollViewer','--to','top') | Out-Null
     UI @('hover','PageTitle','--dwell-time','150') | Out-Null
     Capture 'settings-plugin-database'
     Require ((Properties RemoveMissingPlugins).IsEnabled -eq 'True') 'Maintenance depends on opening Plugins first.'
     Require ((Properties ClearPluginDatabase).IsEnabled -eq 'True') 'Clear database is unavailable in Settings.'
     Invoke RemoveMissingPlugins
+    UI @('scroll-into-view','ClearPluginDatabase') | Out-Null
     Invoke ClearPluginDatabase
     Require (@((UI @('search','Clear plugin database?')).matches).Count -gt 0) 'Clear confirmation did not open.'
     Capture 'settings-clear-confirmation'
@@ -170,16 +191,17 @@ Scenario 'Failure list loads remaining rows during scrolling and retries stable 
     Require ($pages -contains 100 -and $pages -contains 200) 'Remaining failure pages were not requested.'
     Fixture @{}
 }
-Scenario 'Dashboard has the original linear meters and no global controls' {
+Scenario 'Dashboard has the logarithmic dBFS meters and no global controls' {
     Page Dashboard; Fixture @{}
     Require (!(Visible 'DashboardGlobalMute') -and !(Visible 'DashboardGlobalBypass')) 'Dashboard still has global controls.'
-    Require ((Properties InputMeter).HelpText -eq '25%' -and (Properties OutputMeter).HelpText -eq '50%') 'Fixture peaks did not reach the meters.'
+    Require ((Properties InputMeter).HelpText -eq '-12.0 dBFS' -and (Properties OutputMeter).HelpText -eq '-6.0 dBFS') 'Fixture peaks did not reach the meters.'
     Capture 'dashboard-original-meters'
     Fixture @{inputPeak=0;outputPeak=0.8}
-    Require ((Properties InputMeter).HelpText -eq '0%' -and (Properties OutputMeter).HelpText -eq '80%') 'Meter linear scale is incorrect.'
+    Start-Sleep -Milliseconds 2000
+    Require ((Properties InputMeter).HelpText -eq ([string][char]0x2212+[char]0x221e+' dBFS') -and (Properties OutputMeter).HelpText -eq '-1.9 dBFS') 'Meter dBFS scale is incorrect.'
     Capture 'meters-silence-warning'
     Fixture @{inputPeak=0.9;outputPeak=1.1}
-    Require ((Properties OutputMeter).HelpText -eq '100%') 'Meter did not saturate at full scale.'
+    Require ((Properties OutputMeter).HelpText -eq '0.8 dBFS') 'Numeric meter should expose clipping above full scale.'
     Capture 'meters-peak'
     Fixture @{}
 }
@@ -195,8 +217,8 @@ Scenario 'Running toolbar owns mute, bypass and sorting' {
     }
     Require ((Bounds RunningPluginSearchInput)[2] -ge 0.36*$toolbar[2]) 'Running search did not grow with the toolbar.'
     Invoke RunningGlobalMute; Start-Sleep -Milliseconds 300
-    Page Dashboard; Start-Sleep -Milliseconds 400
-    Require ((Properties OutputMeter).HelpText -eq '0%') 'Toolbar mute did not silence the output meter.'
+    Page Dashboard; Start-Sleep -Milliseconds 2500
+    Require ((Properties OutputMeter).HelpText -eq ([string][char]0x2212+[char]0x221e+' dBFS')) 'Toolbar mute did not silence the output meter.'
     Page Plugins; Invoke RunningGlobalMute; Invoke RunningGlobalBypass
     Start-Sleep -Milliseconds 250
     Capture 'running-toolbar-bypass'
@@ -239,11 +261,16 @@ Scenario 'Installed toolbar and distinct manufacturer cards preserve search' {
     $header=Bounds 'manufacturer-cockos'
     $items=(UI @('search','installed-')).matches | Where-Object { $_.automationId -and $_.automationId.StartsWith('installed-') -and !$_.isOffscreen }
     Require ($items.Count -gt 0) 'Grouped plugin cards are missing.'
-    UI @('hover','manufacturer-cockos','--dwell-time','150') | Out-Null
+    $manufacturerTitle=(UI @('search','Cockos')).matches | Where-Object { $_.type -eq 'Text' -and $_.name -eq 'Cockos' -and !$_.isOffscreen } | Select-Object -First 1
+    Require ($null -ne $manufacturerTitle) 'Visible manufacturer heading is missing.'
+    UI @('focus','InstalledPluginSort') | Out-Null
+    UI @('hover',$manufacturerTitle.selector,'--dwell-time','150') | Out-Null
     Capture 'installed-manufacturer-hover'
+    UI @('focus','InstalledPluginSort') | Out-Null
     UI @('hover',$items[0].automationId,'--dwell-time','150') | Out-Null
     Capture 'installed-plugin-hover'
     UI @('set-value','InstalledPluginSearchInput','OldSkool') | Out-Null
+    Start-Sleep -Milliseconds 400
     Require (Visible 'manufacturer-voxengo') 'Search did not retain the matching manufacturer header.'
     Capture 'installed-grouped-filtered'
     $actions=(UI @('search','Actions for')).matches | Where-Object { $_.type -eq 'Button' -and !$_.isOffscreen } | Select-Object -First 1
@@ -256,9 +283,16 @@ Scenario 'Installed toolbar and distinct manufacturer cards preserve search' {
 Scenario 'Diagnostics readings are below each card heading' {
     Page Diagnostics; Start-Sleep -Milliseconds 1100
     foreach ($pair in @(@('performance','dspLoadPercent'),@('reliability','xRunCount'),@('format','sampleRate'),@('latency','chainLatencySamples'))) {
-        UI @('scroll-into-view',('Diagnostic-'+$pair[1])) | Out-Null
+        UI @('scroll-into-view',('DiagnosticsTitle-'+$pair[0])) | Out-Null
+        # Bringing the heading into view can place it at the bottom edge.
+        # Scroll until its first reading is also inside the viewport.
+        for($attempt=0;$attempt -lt 8;$attempt++) {
+            $value=Bounds ('Diagnostic-'+$pair[1])
+            if($value[2] -gt 0 -and $value[3] -gt 0){break}
+            UI @('scroll','ContentScrollViewer','--direction','down') | Out-Null
+        }
         $title=Bounds ('DiagnosticsTitle-'+$pair[0]); $value=Bounds ('Diagnostic-'+$pair[1])
-        Require ($value[1] -gt $title[1]+$title[3]) ($pair[0]+' readings are beside the title.')
+        Require ($value[1] -gt $title[1]+$title[3]) ($pair[0]+" readings are beside the title: title=$title value=$value.")
     }
     UI @('scroll','ContentScrollViewer','--to','top') | Out-Null
     Capture 'diagnostics-stacked'
@@ -295,7 +329,8 @@ Scenario 'Portuguese and light theme keep Settings and scan modal accessible' {
     Page Plugins; Capture 'final-plugins'
 }
 Scenario 'Preferred device stays bounded with long driver names in Compact and Expanded' {
-    Page Settings; Choose LayoutMode Compact
+    Page Settings; Choose AppLanguage 'English (United States)'; Choose LayoutMode Compact
+    Choose AudioPersistenceMode 'Custom device'
     UI @('scroll-into-view','PreferredDevicePicker') | Out-Null
     $heading=(UI @('search','Preferred device')).matches | Where-Object { $_.type -eq 'Text' -and $_.name -eq 'Preferred device' } | Select-Object -First 1
     Require ($null -ne $heading) 'Preferred device heading is missing.'

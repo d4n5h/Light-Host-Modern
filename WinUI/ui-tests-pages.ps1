@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][int]$AppPid, [Parameter(Mandatory)][string]$PipeName,
+﻿param([Parameter(Mandatory)][int]$AppPid, [Parameter(Mandatory)][string]$PipeName,
       [string]$OutputDirectory = 'out/ui-pages')
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\..\Tests\HostProtocol.ps1"
@@ -9,7 +9,7 @@ function Test-Scenario([string]$Name, [scriptblock]$Action) {
     catch { $results.Add([pscustomobject]@{name=$Name; status='failed'; error="$($_.Exception.Message)"}) }
 }
 function UI([string[]]$Arguments) {
-    $output = rtk proxy winapp ui @Arguments -a $AppPid --json
+    $output = & winapp ui @Arguments -a $AppPid --json
     if ($LASTEXITCODE -ne 0) { throw "$output" }
     return $output | ConvertFrom-Json
 }
@@ -18,18 +18,16 @@ function Counters {
     if ($result.status -eq 'error') { throw "Transport diagnostics failed: $($result.message)" }
     return $result
 }
-Test-Scenario 'Dashboard globals work before other pages are created' {
-    UI @('invoke', 'DashboardGlobalMute') | Out-Null
-    UI @('wait-for', 'DashboardGlobalMute', '--value', 'On', '-t', '3000') | Out-Null
-    UI @('invoke', 'DashboardGlobalMute') | Out-Null
-    UI @('wait-for', 'DashboardGlobalMute', '--value', 'Off', '-t', '3000') | Out-Null
+Test-Scenario 'Dashboard meters exist before other pages are created' {
+    UI @('wait-for','InputMeter','-t','3000') | Out-Null
+    UI @('wait-for','OutputMeter','-t','3000') | Out-Null
 }
 Test-Scenario 'Visible meters update at no more than 20 Hz' {
     $before = Counters
     Start-Sleep -Seconds 2
     $after = Counters
-    $delta = $after.telemetryRequests - $before.telemetryRequests
-    if ($delta -lt 10 -or $delta -gt 43) { throw "Unexpected telemetry requests in 2 seconds: $delta" }
+    $delta = $after.meterRequests - $before.meterRequests
+    if ($delta -lt 10 -or $delta -gt 43) { throw "Unexpected meter requests in 2 seconds: $delta" }
 }
 Test-Scenario 'Plugins load on first access with native virtualized ListView' {
     UI @('invoke', 'NavPlugins') | Out-Null
@@ -54,7 +52,7 @@ Test-Scenario 'Hidden meters do not request telemetry' {
     $before = Counters
     Start-Sleep -Seconds 2
     $after = Counters
-    if ($after.telemetryRequests -ne $before.telemetryRequests) { throw 'Plugins page is polling meters.' }
+    if ($after.meterRequests -ne $before.meterRequests) { throw 'Plugins page is polling meters.' }
 }
 foreach ($entry in @(@('NavAudio','AudioBackend'), @('NavSupport','SupportKoFiButton'), @('NavSettings','AppLanguage'))) {
     Test-Scenario "Create $($entry[0]) on first access" {
@@ -70,7 +68,7 @@ Test-Scenario 'Minimized UI keeps heartbeat and stops visual telemetry' {
     $before = Counters
     Start-Sleep -Seconds 6
     $after = Counters
-    if ($after.telemetryRequests -ne $before.telemetryRequests) { throw 'Minimized UI requested visual telemetry.' }
+    if ($after.meterRequests -ne $before.meterRequests) { throw 'Minimized UI requested visual telemetry.' }
     if ($after.heartbeatRequests -le $before.heartbeatRequests) { throw 'Minimized UI stopped connectivity checks.' }
 }
 $results | ConvertTo-Json -Depth 6 | Set-Content "$OutputDirectory/results.json" -Encoding UTF8

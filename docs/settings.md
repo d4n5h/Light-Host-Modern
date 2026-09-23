@@ -18,7 +18,7 @@ Activates the VST2 format at runtime when VST2 support exists in the build. VST3
 
 ### Diagnostics
 
-Enabled by default. Shows Diagnostics below Settings in the sidebar. Disabling it asks for confirmation, hides the page, and stops collecting diagnostic measurements. Audio processing and the Dashboard peak meters continue.
+Enabled by default. Shows Diagnostics after Plugins in the sidebar. Disabling it asks for confirmation, hides the page, and stops collecting diagnostic measurements. Audio processing and the Dashboard peak meters continue.
 
 ## Plugin database
 
@@ -64,6 +64,10 @@ Selects a JSON catalogue discovered from the `Locales` directory. The visible in
 
 - **Compact** applies one consistent maximum content width across pages.
 - **Expanded** uses the available width while keeping cards and controls responsive.
+
+### Sidebar on open
+
+Select **Collapsed** or **Expanded** to choose the sidebar state each time the app window opens, including reopening from the tray. The default is Collapsed. This preference applies on the next opening; manual sidebar changes affect only the current window.
 
 ### Window material
 

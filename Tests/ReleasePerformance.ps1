@@ -18,7 +18,7 @@ $repo=(Resolve-Path -LiteralPath "$PSScriptRoot\..").Path
 $root=Join-Path $repo 'out\test-profiles'
 $protocol=if ($Variant -eq 'baseline') { 3 } else { 4 }
 $comparison=[IO.Path]::GetFullPath((Join-Path $repo $ComparisonDirectory))
-$hostExe=if ($Variant -eq 'baseline') { Join-Path $comparison 'bld\LightHostModern_artefacts\Release\LightHostModern.exe' } else { Join-Path $repo 'out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe' }
+$hostExe=if ($Variant -eq 'baseline') { Join-Path $comparison 'bld\LightHostModern_artefacts\Release\LightHostModern.exe' } else { Join-Path (Get-TestBuildDirectory) 'LightHostModern_artefacts\Release\LightHostModern.exe' }
 $uiDirectory=Join-Path $repo 'WinUI\x64\Release\LightHostModern.WinUI'
 $baselineUi=Join-Path $repo 'out\baselines\completion-20260908-release\host\WinUI\x64\Release\LightHostModern.WinUI'
 $profileFiles=@((Join-Path $env:APPDATA 'LightHostModern\LightHostModern.settings'),(Join-Path $env:LOCALAPPDATA 'LightHostModern\ui-settings.ini'))
@@ -64,7 +64,7 @@ function Mutate([string]$Command,[array]$Arguments=@()) {
     return $result
 }
 function UI([string[]]$Arguments) {
-    $result=rtk proxy winapp ui @Arguments -a $script:uiPid --json
+    $result=& winapp ui @Arguments -a $script:uiPid --json
     if ($LASTEXITCODE -ne 0) { throw "UI command failed: $result" }
     return $result|ConvertFrom-Json
 }
@@ -111,7 +111,7 @@ for ($runIndex=1;$runIndex -le $Repetitions;$runIndex++) {
             if ((Measurement).driverAvailable) { throw 'The comparison watchdog opened a default device.' }
         }
         if ($UiState -ne 'closed') {
-            $launch=rtk proxy winapp run $uiDirectory --manifest "$repo\WinUI\LightHostModern.WinUI\Package.appxmanifest" --exe LightHostModernWinUI.exe --detach --json -- "--test-profile=$name" "--profile-root=$root" "--host-pipe=$script:pipe" | ConvertFrom-Json
+            $launch=Start-TestUi -Directory $uiDirectory -Arguments @("--test-profile=$name", "--profile-root=$root", "--host-pipe=$script:pipe")
             if ($LASTEXITCODE -ne 0 -or !$launch.ProcessId) { throw 'The performance UI did not start.' }
             $script:uiPid=$launch.ProcessId; $uiProcess=Get-Process -Id $script:uiPid
             $run.uiActualPath=$uiProcess.Path

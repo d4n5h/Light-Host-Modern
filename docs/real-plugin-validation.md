@@ -1,5 +1,15 @@
 # Real plugin validation
 
+## Issue 7 manifest regression
+
+The opt-in `Tests/scanner-manifest-regression.py` copies a supplied VST3 bundle into a unique ignored `out/manifest-regression` directory. It exercises missing, valid, invalid and stale manifests, compares full class IDs against the actual factory, and requires final module-fingerprint verification. It never edits the installed/original plugin.
+
+```powershell
+python Tests/scanner-manifest-regression.py --scanner out/build/modern-validation/LightHostModern_artefacts/Release/LightHostModernScanner.exe --module out/real-plugin-test/plugins/dragonfly-reverb-3.2.10/DragonflyRoomReverb.vst3
+```
+
+Use the actual extracted bundle path if the archive layout differs. See [the issue 7 validation report](issue-7-validation.md) for current results and commercial-plugin limitations.
+
 The opt-in fixture uses [Dragonfly Reverb 3.2.10 for Windows x64](https://github.com/michaelwillis/dragonfly-reverb/releases/tag/3.2.10), a free plugin suite from its official publisher repository. It tests Early Reflections, Hall, Plate and Room in VST2 and VST3 format.
 
 Build the Release host/scanner and CTest targets, then run from the repository:

@@ -29,10 +29,11 @@ def main():
     parser.add_argument('--generic-editor', action='store_true', help='Exercise the host generic editor; does not validate the native editor')
     parser.add_argument('--vmware-no-llvmpipe', action='store_true',
                         help='Set SVGA_ALLOW_LLVMPIPE=0 only in each test child; record the override separately')
+    parser.add_argument("--build-dir", type=Path, default=REPO / "out/build/windows-vs2022")
     args = parser.parse_args()
     root = REPO / 'out/real-plugin-test'
     root.mkdir(parents=True, exist_ok=True)
-    destination = root / 'Processing áudio 日本'
+    destination = root / 'Processing Ã¡udio æ—¥æœ¬'
     destination.mkdir(exist_ok=True)
     for filename, source, digest in FIXTURES:
         archive = root / filename
@@ -61,7 +62,7 @@ def main():
     modules = [module for module in modules if args.match in module.name and module.name not in args.exclude]
     if not modules:
         raise RuntimeError('No fixture matched')
-    executable = REPO / 'out/build/windows-vs2022/Release/LightHostModernRealPluginTests.exe'
+    executable = args.build_dir.resolve() / 'Release/LightHostModernRealPluginTests.exe'
     environment = os.environ.copy()
     overrides = {}
     if args.vmware_no_llvmpipe:

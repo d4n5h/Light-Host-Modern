@@ -2,7 +2,7 @@
 # Without -Execute, this script inspects packages and writes the reviewable plan.
 param([Parameter(Mandatory)][string]$CurrentMsi,
       [string]$PreviousMsi='',
-      [string]$ExpectedVersion='1.4.0',
+      [string]$ExpectedVersion='1.4.1',
       [string]$OutputDirectory='out/msi-lifecycle',
       [switch]$Execute,
       [string]$DisposableComputerName='')
@@ -52,8 +52,9 @@ function InstalledRoot([string]$Code) {
 }
 function Verify-Payload([string]$Code,[switch]$Current) {
     $directory=InstalledRoot $Code
-    $payload=if ($Current) { @('LightHostModern.exe','WinUI\x64\Release\LightHostModern.WinUI\LightHostModernWinUI.exe') } else { @('Light Host Modern.exe','WinUI\x64\Release\LightHost.WinUI\LightHostWinUI.exe') }
-    if ($Current) { $payload+=@('LightHostModernScanner.exe','LightHostModernUpdateHelper.exe') }
+    $modernNames=[version]$installer.ProductInfo($Code,'VersionString') -ge [version]'1.4.0'
+    $payload=if ($modernNames) { @('LightHostModern.exe','WinUI\x64\Release\LightHostModern.WinUI\LightHostModernWinUI.exe') } else { @('Light Host Modern.exe','WinUI\x64\Release\LightHost.WinUI\LightHostWinUI.exe') }
+    if ($modernNames) { $payload+=@('LightHostModernScanner.exe','LightHostModernUpdateHelper.exe') }
     foreach ($relative in $payload) {
         if (!(Test-Path -LiteralPath (Join-Path $directory $relative) -PathType Leaf)) { throw "Installed payload is missing $relative" }
     }

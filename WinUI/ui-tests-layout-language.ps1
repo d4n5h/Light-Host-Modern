@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][int]$AppPid, [Parameter(Mandatory)][string]$PipeName,
+﻿param([Parameter(Mandatory)][int]$AppPid, [Parameter(Mandatory)][string]$PipeName,
       [Parameter(Mandatory)][ValidateSet(96,144,192)][int]$ExpectedDpi,
       [string]$OutputDirectory='out/ui-accessibility')
 $ErrorActionPreference='Stop'
@@ -7,7 +7,7 @@ $OutputDirectory=Join-Path $OutputDirectory "dpi-$ExpectedDpi"
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $results=[Collections.Generic.List[object]]::new()
 function UI([string[]]$Arguments) {
-    $output=rtk proxy winapp ui @Arguments -a $AppPid --json
+    $output=& winapp ui @Arguments -a $AppPid --json
     if ($LASTEXITCODE -ne 0) { throw "UI command $($Arguments -join ' ') failed: $output" }
     $output | ConvertFrom-Json
 }
@@ -38,7 +38,7 @@ $window=@($tree.windows | Where-Object { $_.title.StartsWith('LightHostModern [T
 if ($window.Count -ne 1) { throw 'Exactly one isolated application window is required.' }
 $handle=$window[0].hwnd
 $script:windowBounds=$window[0].elements[0]
-$metrics=rtk proxy python -X utf8 "$PSScriptRoot\..\Tests\InspectWindowMetrics.py" --hwnd $handle --pid $AppPid | ConvertFrom-Json
+$metrics=& python -X utf8 "$PSScriptRoot\..\Tests\InspectWindowMetrics.py" --hwnd $handle --pid $AppPid | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0 -or $metrics.dpi -ne $ExpectedDpi) { throw "Window DPI $($metrics.dpi) differs from requested $ExpectedDpi." }
 $metrics | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $OutputDirectory 'window-metrics.json') -Encoding UTF8
 if (!$metrics.withinWorkArea) { throw 'The initial application window extends outside its monitor work area.' }
@@ -50,8 +50,8 @@ foreach ($language in @('en-us','pt-br')) {
         UI @('invoke','NavSettings') | Out-Null
         Choose 'AppLanguage' $catalog.'Language.DisplayName'
         UI @('invoke','NavDashboard') | Out-Null
-        Assert-Visible 'DashboardGlobalMute' $catalog.'audio.globalMute'
-        Assert-Visible 'DashboardGlobalBypass' $catalog.'audio.globalBypass'
+        Assert-Visible 'InputMeter'
+        Assert-Visible 'OutputMeter'
     }
     foreach ($mode in @('compact','expanded')) {
         Scenario "$language $mode pages remain reachable at $ExpectedDpi DPI" {
@@ -59,12 +59,13 @@ foreach ($language in @('en-us','pt-br')) {
             Choose 'LayoutMode' $catalog.('settings.layout.'+$mode)
             foreach ($page in @('Dashboard','Audio','Plugins','Settings')) {
                 UI @('invoke',('Nav'+$page)) | Out-Null
+                Start-Sleep -Milliseconds 250
                 if ($page -ne 'Plugins') {
                     $scroll=(UI @('get-property','ContentScrollViewer')).properties
                     if ($scroll.VerticallyScrollable -notin @('0x0','False',$null)) { UI @('scroll','ContentScrollViewer','--to','top') | Out-Null }
                 }
                 switch ($page) {
-                    Dashboard { Assert-Visible 'DashboardGlobalMute'; Assert-Visible 'DashboardGlobalBypass' }
+                    Dashboard { Assert-Visible 'InputMeter'; Assert-Visible 'OutputMeter' }
                     Audio { Assert-Visible 'AudioBackend' }
                     Plugins { Assert-Visible 'PluginsRunningTab'; Assert-Visible 'PluginsInstalledTab' }
                     Settings {
@@ -83,20 +84,22 @@ foreach ($language in @('en-us','pt-br')) {
     }
     Scenario "$language keyboard traverses global controls and Space changes the host" {
         UI @('invoke','NavDashboard') | Out-Null
-        UI @('focus','DashboardGlobalMute') | Out-Null
+        UI @('invoke','NavPlugins') | Out-Null
+        UI @('invoke','PluginsRunningTab') | Out-Null
+        UI @('focus','RunningGlobalMute') | Out-Null
         UI @('send-keys','tab','--via','send-input') | Out-Null
         $focus=UI @('get-focused')
-        if (($focus | ConvertTo-Json -Depth 6) -notmatch 'DashboardGlobalBypass') { throw 'Tab did not focus the bypass control.' }
+        if (($focus | ConvertTo-Json -Depth 6) -notmatch 'RunningGlobalBypass') { throw 'Tab did not focus the bypass control.' }
         $before=Send-HostRequest $PipeName 'snapshot'
         UI @('send-keys','space','--via','send-input') | Out-Null
         $expected=if ($before.globalBypassed) { 'Off' } else { 'On' }
-        UI @('wait-for','DashboardGlobalBypass','--value',$expected,'-t','5000') | Out-Null
+        UI @('wait-for','RunningGlobalBypass','-p','ToggleState','--value',$expected,'-t','5000') | Out-Null
         $after=Send-HostRequest $PipeName 'snapshot'
         if ($after.globalBypassed -eq $before.globalBypassed) { throw 'Keyboard activation did not change the actual host.' }
         $focus=UI @('get-focused')
-        if (($focus | ConvertTo-Json -Depth 6) -notmatch 'DashboardGlobalBypass') { throw ('Completing the command lost keyboard focus: '+($focus | ConvertTo-Json -Depth 6 -Compress)) }
+        if (($focus | ConvertTo-Json -Depth 6) -notmatch 'RunningGlobalBypass') { throw ('Completing the command lost keyboard focus: '+($focus | ConvertTo-Json -Depth 6 -Compress)) }
         UI @('send-keys','space','--via','send-input') | Out-Null
-        UI @('wait-for','DashboardGlobalBypass','--value',$(if ($before.globalBypassed) { 'On' } else { 'Off' }),'-t','5000') | Out-Null
+        UI @('wait-for','RunningGlobalBypass','-p','ToggleState','--value',$(if ($before.globalBypassed) { 'On' } else { 'Off' }),'-t','5000') | Out-Null
     }
 }
 $english=Get-Content -LiteralPath "$PSScriptRoot\LightHostModern.WinUI\Locales\en-us.json" -Encoding UTF8 -Raw | ConvertFrom-Json

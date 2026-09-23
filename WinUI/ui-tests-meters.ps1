@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$ProfileInfo,
+﻿param([Parameter(Mandatory)][string]$ProfileInfo,
       [Parameter(Mandatory)][string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 $info=Get-Content -LiteralPath $ProfileInfo -Raw | ConvertFrom-Json
@@ -6,8 +6,8 @@ $process=Get-CimInstance Win32_Process -Filter "ProcessId=$($info.uiPid)"
 if (!$process -or !$process.CommandLine.Contains('--test-profile='+$info.name)) { throw 'An isolated fixture UI is required.' }
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,WindowsBase
 $AppPid=[int]$info.uiPid
-rtk proxy winapp ui click NavDashboard -a $AppPid --json | Out-Null
-$window=(rtk proxy winapp ui list-windows -a $AppPid --json | ConvertFrom-Json | Where-Object { $_.title.StartsWith('LightHostModern [Test:') } | Select-Object -First 1).hwnd
+& winapp ui invoke NavDashboard -a $AppPid --json | Out-Null
+$window=(& winapp ui list-windows -a $AppPid --json | ConvertFrom-Json | Where-Object { $_.title.StartsWith('LightHostModern [Test:') } | Select-Object -First 1).hwnd
 $root=[Windows.Automation.AutomationElement]::FromHandle([IntPtr][long]$window)
 function Element([string]$Id) {
     $condition=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty,$Id)
@@ -16,29 +16,30 @@ function Element([string]$Id) {
 function Level([string]$Id) {
     $bar=Element $Id
     if (!$bar) { throw "Missing meter $Id" }
-    [double]$bar.Current.HelpText.TrimEnd([char]37)
+    if ($bar.Current.HelpText -eq ([string][char]0x2212+[char]0x221e+' dBFS')) { return [double]::NegativeInfinity }
+    [double]::Parse($bar.Current.HelpText.Replace(' dBFS',''),[Globalization.CultureInfo]::InvariantCulture)
 }
 Start-Sleep -Milliseconds 500
 $initialInput=Level InputMeter; $initialOutput=Level OutputMeter
-if ([Math]::Abs($initialInput-25) -gt 0.1 -or [Math]::Abs($initialOutput-50) -gt 0.1) { throw 'Known fixture signals did not reach the volume bars.' }
+if ([Math]::Abs($initialInput+12.0) -gt 0.1 -or [Math]::Abs($initialOutput+6.0) -gt 0.1) { throw 'Known fixture signals did not reach the volume bars.' }
 $muted=$false
 try {
-    rtk proxy winapp ui click NavPlugins -a $AppPid --json | Out-Null
-    rtk proxy winapp ui invoke PluginsRunningTab -a $AppPid --json | Out-Null
+    & winapp ui invoke NavPlugins -a $AppPid --json | Out-Null
+    & winapp ui invoke PluginsRunningTab -a $AppPid --json | Out-Null
     Start-Sleep -Milliseconds 500
-    rtk proxy winapp ui invoke RunningGlobalMute -a $AppPid --json | Out-Null
+    & winapp ui invoke RunningGlobalMute -a $AppPid --json | Out-Null
     Start-Sleep -Milliseconds 250
-    rtk proxy winapp ui click NavDashboard -a $AppPid --json | Out-Null
+    & winapp ui invoke NavDashboard -a $AppPid --json | Out-Null
     $muted=$true
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Milliseconds 2500
     $mutedInput=Level InputMeter; $mutedOutput=Level OutputMeter
-    if ($mutedOutput -gt 0.1 -or [Math]::Abs($mutedInput-$initialInput) -gt 0.1) { throw "Mute must clear output while preserving input: input=$mutedInput output=$mutedOutput" }
+    if ($mutedOutput -ne [double]::NegativeInfinity -or [Math]::Abs($mutedInput-$initialInput) -gt 0.1) { throw "Mute must clear output while preserving input: input=$mutedInput output=$mutedOutput" }
 } finally {
     if ($muted) {
-        rtk proxy winapp ui click NavPlugins -a $AppPid --json | Out-Null
-        rtk proxy winapp ui invoke RunningGlobalMute -a $AppPid --json | Out-Null
+        & winapp ui invoke NavPlugins -a $AppPid --json | Out-Null
+        & winapp ui invoke RunningGlobalMute -a $AppPid --json | Out-Null
         Start-Sleep -Milliseconds 250
-        rtk proxy winapp ui click NavDashboard -a $AppPid --json | Out-Null
+        & winapp ui invoke NavDashboard -a $AppPid --json | Out-Null
     }
 }
 Start-Sleep -Milliseconds 500

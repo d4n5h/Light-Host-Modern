@@ -25,6 +25,8 @@ When enabled, closing the WinUI window leaves the host, audio device, plugin ins
 
 When disabled, the close flow requests host shutdown, which saves plugin state and flushes pending settings before exiting.
 
+Windows taskbar **End task** is treated as ending the whole app, regardless of Close to tray. The host detects an abrupt UI exit and shuts down; this also applies to UI crashes. If plugin code blocks cleanup, a ten-second fallback terminates the host. Normal window closing acknowledges a separate per-launch event and continues to honor Close to tray.
+
 ## Start with Windows
 
 The setting creates a current-user Windows `Run` entry named `LightHostModern`. It points to the host executable that enabled the option. Disabling the setting removes the value.
@@ -35,6 +37,8 @@ Temporary test profiles reject changes to Windows startup registration and do no
 
 ## Navigation and responsive layout
 
-The sidebar contains Dashboard, Audio, Plugins, Settings, optional Diagnostics, and optional Support me, in that order. Its collapsed state keeps the app logo and accessible navigation icons visible. The bottom control expands or collapses the pane.
+The sidebar contains Dashboard, Audio, Plugins, optional Diagnostics, optional Support me, and Settings, in that order. Its collapsed state keeps the app logo and accessible navigation icons visible. The bottom control expands or collapses the pane.
+
+**Settings > Appearance > Sidebar on open** chooses Collapsed (default) or Expanded for each new window, including reopening from the tray. Manual toggling changes only the current window. Restoring or focusing an existing window preserves its current state.
 
 Pages are created on first access and retained. Compact mode limits content width; Expanded mode uses the available space. Running and Installed each have a bounded virtualized list with its own scrolling. Search and visual sorting preserve the actual processing order; drag reordering is available only in the unfiltered chain-order view.

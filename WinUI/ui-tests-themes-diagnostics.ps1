@@ -1,11 +1,11 @@
-param([Parameter(Mandatory)][int]$AppPid, [Parameter(Mandatory)][string]$PipeName,
+﻿param([Parameter(Mandatory)][int]$AppPid, [Parameter(Mandatory)][string]$PipeName,
       [string]$OutputDirectory = 'out/ui-themes-diagnostics')
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\..\Tests\HostProtocol.ps1"
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $results = [Collections.Generic.List[object]]::new()
 function UI([string[]]$Arguments) {
-    $output = rtk proxy winapp ui @Arguments -a $AppPid --json
+    $output = & winapp ui @Arguments -a $AppPid --json
     if ($LASTEXITCODE -ne 0) { throw "$output" }
     $output | ConvertFrom-Json
 }
@@ -26,7 +26,7 @@ Scenario 'Light, dark and system themes can change with a native popup open' {
     foreach ($theme in @('Light','Dark','System','Light','Dark')) {
         Choose 'AppTheme' $theme
         UI @('invoke', 'NavDashboard') | Out-Null
-        UI @('wait-for', 'DashboardGlobalMute', '-t', '3000') | Out-Null
+        UI @('wait-for', 'InputMeter', '-t', '3000') | Out-Null
         UI @('screenshot', '-o', "$OutputDirectory/$theme.png") | Out-Null
         UI @('invoke', 'NavSettings') | Out-Null
     }

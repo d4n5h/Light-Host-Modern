@@ -23,7 +23,7 @@ if ($ExistingProfile) {
     $directory=Join-Path $testRoot $name
     New-Item -ItemType Directory -Force -Path $directory | Out-Null
     if ($PreferencesFixture) { Copy-Item -LiteralPath $PreferencesFixture -Destination (Join-Path $directory 'LightHostModern.settings') }
-    $hostProcess=Start-Process -FilePath "$repo\out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe" -ArgumentList @("--test-profile=$name", ('--profile-root="'+$testRoot+'"')) -WindowStyle Hidden -PassThru
+    $hostProcess=Start-Process -FilePath "$(Get-TestBuildDirectory)\LightHostModern_artefacts\Release\LightHostModern.exe" -ArgumentList @("--test-profile=$name", ('--profile-root="'+$testRoot+'"')) -WindowStyle Hidden -PassThru
     $startedHost=$true
     $metadata=Join-Path $directory 'profile.json'
     $deadline=[DateTime]::UtcNow.AddSeconds(30)
@@ -42,12 +42,12 @@ if ($ExistingProfile) {
         $info | ConvertTo-Json
         return
     }
-    $launch=rtk proxy winapp run "$repo\WinUI\x64\Release\LightHostModern.WinUI" --manifest "$repo\WinUI\LightHostModern.WinUI\Package.appxmanifest" --exe LightHostModernWinUI.exe --detach --json -- "--test-profile=$($info.name)" "--profile-root=$($info.root)" "--host-pipe=$($info.pipe)" | ConvertFrom-Json
+    $launch=Start-TestUi -Directory "$repo\WinUI\x64\Release\LightHostModern.WinUI" -Arguments @("--test-profile=$($info.name)", "--profile-root=$($info.root)", "--host-pipe=$($info.pipe)")
     if ($LASTEXITCODE -ne 0 -or !$launch.ProcessId) { throw 'The isolated UI did not start.' }
     $info.uiPid=$launch.ProcessId
     $uiStarted=$true
     $info | ConvertTo-Json | Set-Content (Join-Path $OutputDirectory 'profile.json') -Encoding UTF8
-    rtk proxy winapp ui wait-for NavDashboard -a $info.uiPid -t 10000 --json | Out-Null
+    & winapp ui wait-for NavDashboard -a $info.uiPid -t 10000 --json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'The isolated UI did not become ready.' }
     $info | ConvertTo-Json
 } catch {
@@ -56,7 +56,7 @@ if ($ExistingProfile) {
         try {
             $uiProcess=Get-Process -Id $info.uiPid -ErrorAction SilentlyContinue
             if ($uiProcess -and !$uiProcess.HasExited) {
-                rtk proxy winapp ui invoke Close -a $info.uiPid --json | Out-Null
+                & winapp ui invoke Close -a $info.uiPid --json | Out-Null
                 if ($LASTEXITCODE -ne 0 -or !$uiProcess.WaitForExit(15000)) { throw 'The failed test UI did not close.' }
             }
         } catch { Write-Warning "Test UI cleanup: $($_.Exception.Message)" }

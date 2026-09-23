@@ -35,3 +35,8 @@ LightHostModern processes audio only while the host process is running and a usa
 
 - [Issue 6 and PR 5 implementation](issue-6-implementation-plan.md) — approved scope and local validation status.
 - [Channel selection and main mono output](audio-channels-followup-plan.md) — approved follow-up for Individual/Pairs selection and independent output mono, with local implementation and validation status.
+- [Issue 7 scanner fixes and verbose logging](issue-7-scanner-and-verbose-logs-plan.md) — approved implementation scope for discovery, retries and diagnostic captures.
+- [Issue 7 validation](issue-7-validation.md) — local results, measurements and remaining compatibility/manual checks.
+- [UI lifetime and sidebar validation](ui-lifetime-and-sidebar-validation.md) — forced-exit, close-to-tray and sidebar preference behavior and validation.
+
+- [Version 1.4.1 validation](release-1.4.1-validation.md) — release tests, package inspection and remaining environment-dependent limits.

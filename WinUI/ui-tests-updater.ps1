@@ -13,17 +13,18 @@ $sourceZip = Join-Path $sourceDir 'LightHostModern-Portable.zip'
 Copy-Item -LiteralPath (Join-Path $PackageDirectory 'LightHostModern-Portable.zip') -Destination $sourceZip
 $sourceInfo = Get-Item -LiteralPath $sourceZip
 $sourceDigest = 'sha256:' + (Get-FileHash -LiteralPath $sourceZip -Algorithm SHA256).Hash.ToLowerInvariant()
+$packageVersion = (Get-Content -LiteralPath (Join-Path $PackageDirectory 'release-artifacts.json') -Raw | ConvertFrom-Json).artifacts[0].version
 function Write-Fixture([bool] $CorruptDigest = $false) {
     $digest = if ($CorruptDigest) { 'sha256:' + ('0' * 64) } else { $sourceDigest }
     [ordered]@{
-        tag_name = 'v1.2.2'; html_url = 'https://github.com/heide-oficial/Light-Host-Modern/releases/tag/v1.2.2'
-        reportedCurrentVersion = '1.2.1'; localPackage = $sourceZip; chunkDelayMs = 20
+        tag_name = "v$packageVersion"; html_url = "https://github.com/heide-oficial/Light-Host-Modern/releases/tag/v$packageVersion"
+        reportedCurrentVersion = '0.0.0'; localPackage = $sourceZip; chunkDelayMs = 20
         assets = @(@{ name = 'LightHostModern-Portable.zip'; size = $sourceInfo.Length; digest = $digest
-            browser_download_url = 'https://github.com/heide-oficial/Light-Host-Modern/releases/download/v1.2.2/LightHostModern-Portable.zip' })
+            browser_download_url = "https://github.com/heide-oficial/Light-Host-Modern/releases/download/v$packageVersion/LightHostModern-Portable.zip" })
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $temp 'update-fixture.json') -Encoding UTF8
 }
 Write-Fixture
-$hostExe = Join-Path $repo 'out\build\windows-vs2022\LightHostModern_artefacts\Release\LightHostModern.exe'
+$hostExe = Join-Path (Get-TestBuildDirectory) 'LightHostModern_artefacts\Release\LightHostModern.exe'
 $hostProcess = $null
 $pipe = ''
 $session = ''
@@ -39,12 +40,12 @@ function Start-Host {
 }
 $script:AppPid = 0
 function UI([string[]] $Arguments) {
-    $result = rtk proxy winapp ui @Arguments -a $script:AppPid --json
+    $result = & winapp ui @Arguments -a $script:AppPid --json
     if ($LASTEXITCODE -ne 0) { throw "$result" }
     $result | ConvertFrom-Json
 }
 function Open-UI {
-    $launch = rtk proxy winapp run WinUI/x64/Release/LightHostModern.WinUI --manifest WinUI/LightHostModern.WinUI/Package.appxmanifest --exe LightHostModernWinUI.exe --detach --json -- "--test-profile=$testProfileName" "--profile-root=$root" "--host-pipe=$pipe" | ConvertFrom-Json
+    $launch = Start-TestUi -Directory "WinUI/x64/Release/LightHostModern.WinUI" -Arguments @("--test-profile=$testProfileName", "--profile-root=$root", "--host-pipe=$pipe")
     if ($LASTEXITCODE -ne 0) { throw 'Could not open update UI.' }
     $script:AppPid = $launch.ProcessId
     @{hostPid=$hostProcess.Id; uiPid=$script:AppPid; profile=$profile; pipe=$pipe; name=$testProfileName; root=$root} | ConvertTo-Json |

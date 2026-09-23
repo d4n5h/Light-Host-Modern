@@ -6,7 +6,7 @@ $root = Join-Path $repo 'out\test-profiles'
 $name = 'state-' + [guid]::NewGuid().ToString('N')
 $directory = Join-Path $root $name
 New-Item -ItemType Directory -Path $directory -Force | Out-Null
-rtk proxy "$repo\out\build\windows-vs2022\Release\LightHostModernPluginInstanceTests.exe" --write-legacy-fixture (Join-Path $directory 'LightHostModern.settings')
+& "$(Get-TestBuildDirectory)\Release\LightHostModernPluginInstanceTests.exe" --write-legacy-fixture (Join-Path $directory 'LightHostModern.settings')
 if ($LASTEXITCODE -ne 0) { throw 'Fixture failed.' }
 $process = $null
 $eventPipe = $null
@@ -44,7 +44,14 @@ try {
     $event = [Text.Encoding]::UTF8.GetString($buffer, 0, $read.Result) | ConvertFrom-Json
     $receipt = [Text.Encoding]::UTF8.GetBytes('received'); $eventPipe.Write($receipt, 0, $receipt.Length)
     $eventPipe.Dispose(); $eventPipe = $null
-    if ($event.hostSession -ne $manifest.hostSession -or $event.sequence -le $manifest.eventSequence -or $event.changes.chain -notcontains $page.items[0].instanceId) { throw 'Chain event omitted the changed UUID.' }
+    # Session-save/startup diagnostics can legitimately publish a wildcard chain
+    # event before the bypass mutation. Consume ordered events until that exact
+    # instance delta arrives; do not mistake unrelated activity for a lost delta.
+    $eventDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    while ($event.hostSession -eq $manifest.hostSession -and $event.changes.chain -notcontains $page.items[0].instanceId -and [DateTime]::UtcNow -lt $eventDeadline) {
+        $event = Send-HostRequest -PipeName ($info.pipe + '-events') -Command 'events' -Arguments @(@{hostSession=$manifest.hostSession; afterSequence=$event.sequence; waitMs=1000})
+    }
+    if ($event.hostSession -ne $manifest.hostSession -or $event.sequence -le $manifest.eventSequence -or $event.changes.chain -notcontains $page.items[0].instanceId) { throw ('Chain event omitted the changed UUID: ' + ($event | ConvertTo-Json -Depth 10 -Compress)) }
     $oldPage = Send-HostRequest -PipeName $info.pipe -Command 'snapshot-page' -Arguments @(@{snapshotId=$manifest.snapshotId; collection='activePlugins'; offset=0; limit=100})
     if ($oldPage.items[0].bypassed) { throw 'An in-progress snapshot changed after a mutation.' }
     $latest = Send-HostRequest -PipeName $info.pipe -Command 'snapshot-manifest'
