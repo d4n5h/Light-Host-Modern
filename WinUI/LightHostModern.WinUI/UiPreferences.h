@@ -57,4 +57,9 @@ namespace lightHostModern::ui
         WritePrivateProfileStringW(section, key, value.c_str(), settingsFile.c_str());
     }
 
+    inline bool sidebarStartsCollapsed()
+    {
+        return loadUiSetting(L"Appearance", L"SidebarOnOpen", L"Collapsed") != L"Expanded";
+    }
+
 }

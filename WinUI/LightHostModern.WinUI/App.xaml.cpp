@@ -3,6 +3,7 @@
 #include "MainWindow.xaml.h"
 #include "WinUIDebug.h"
 #include "../../Source/RuntimeProfile.h"
+#include "../../Source/VerboseLog.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -12,6 +13,8 @@ namespace winrt::LightHostModernWinUI::implementation
     App::App()
     {
         lightHostModern::RuntimeProfile::current().createDirectories();
+        try {lightHostModern::verbose::logger().attach(lightHostModern::verbose::root(),"ui");}
+        catch(const std::exception& error){lightHostModern::verbose::reportFailure(lightHostModern::verbose::root(),error.what());}
         setWinUIDebugEnabled(commandLineHasFlag(L"--debug") || commandLineHasFlag(L"-debug"));
         setWinUIDebugLogPath(commandLineOptionValue(L"--debug-log"));
         initialiseWinUIDebugConsole();

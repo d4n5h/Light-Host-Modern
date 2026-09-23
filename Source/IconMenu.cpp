@@ -76,6 +76,7 @@ IconMenu::IconMenu(bool startInSafeMode, bool debugEnabled, bool restoreActivePl
 IconMenu::~IconMenu()
 {
 	stopTimer(menuTimerId);
+	uiLifetime.reset();
 	closeWinUIWindow();
 
 	if (engine != nullptr)
@@ -201,6 +202,13 @@ void IconMenu::showNativeContextMenu()
 void IconMenu::openWinUI()
 {
 	lightHostModernLog("Open New UI clicked.");
+	// Do not launch a second shell while the first is starting/closing, or
+	// replace the monitor while unexpected-exit shutdown is being dispatched.
+	if (uiLifetime && (uiLifetime->running() || uiLifetime->endedUnexpectedly()))
+	{
+		focusWinUIWindow();
+		return;
+	}
 
 	if (focusWinUIWindow())
 	{
@@ -208,7 +216,18 @@ void IconMenu::openWinUI()
 		return;
 	}
 
+	try
+	{
+		uiLifetime = std::make_unique<lightHostModern::UiProcessLifetime>(
+			L"Local\\LightHostModernUiClose-" + std::wstring(Uuid().toString().toWideCharPointer()));
+	}
+	catch (const std::exception& error)
+	{
+		lightHostModernLog("Cannot prepare UI lifetime monitor: " + String(error.what()));
+		return;
+	}
 	String parameters = "--host-pipe=\"" + ipcServer->getPipeName() + "\"";
+	parameters << " --ui-close-event=\"" << String(uiLifetime->eventName().c_str()) << "\"";
 	parameters << String(lightHostModern::RuntimeProfile::current().arguments().c_str());
 	if (debugMode)
 	{
@@ -271,17 +290,18 @@ void IconMenu::openWinUI()
 					lightHostModernLog("Found WinUI executable.");
 
 					const auto workingDirectory = candidate.getParentDirectory();
-					const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr,
-						L"open",
-						candidate.getFullPathName().toWideCharPointer(),
-						parameters.toWideCharPointer(),
-						workingDirectory.getFullPathName().toWideCharPointer(),
-						SW_SHOWNORMAL));
-
-					lightHostModernLog("ShellExecute result: " + String((int) result));
-
-					if (result <= 32)
+					const auto executablePath = candidate.getFullPathName();
+					const auto directoryPath = workingDirectory.getFullPathName();
+					SHELLEXECUTEINFOW launch { sizeof(launch) };
+					launch.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
+					launch.lpVerb = L"open";
+					launch.lpFile = executablePath.toWideCharPointer();
+					launch.lpParameters = parameters.toWideCharPointer();
+					launch.lpDirectory = directoryPath.toWideCharPointer();
+					launch.nShow = SW_SHOWNORMAL;
+					if (!ShellExecuteExW(&launch))
 					{
+						const auto result = GetLastError();
 						const auto locale = trayLocale();
 						auto message = locale["tray.uiLaunchFailed"].toString();
 						if (message.isEmpty()) message = "Could not open the application interface. Error: {code}";
@@ -289,6 +309,7 @@ void IconMenu::openWinUI()
 							"LightHostModern",
 							message.replace("{code}", String((int) result)));
 					}
+					else monitorWinUI(launch.hProcess);
 
 					return;
 				}
@@ -308,6 +329,28 @@ void IconMenu::openWinUI()
 	AlertWindow::showMessageBoxAsync(AlertWindow::WarningIcon,
 		"LightHostModern",
 		message);
+}
+
+void IconMenu::monitorWinUI(HANDLE process)
+{
+	try
+	{
+		uiLifetime->monitor(process, [] {
+			// Shutdown may encounter stalled plugin code. Bound it independently of
+			// the message/audio threads; this deadline survives IconMenu destruction.
+			std::thread([] {
+				if (WaitForSingleObject(GetCurrentProcess(), 10000) == WAIT_TIMEOUT)
+					TerminateProcess(GetCurrentProcess(), ERROR_PROCESS_ABORTED);
+			}).detach();
+			lightHostModernLog("UI ended without a normal close; shutting down the host.");
+			MessageManager::callAsync([] { JUCEApplication::getInstance()->quit(); });
+		});
+	}
+	catch (const std::exception& error)
+	{
+		lightHostModernLog("Cannot monitor UI lifetime: " + String(error.what()));
+		JUCEApplication::getInstance()->quit();
+	}
 }
 
 bool IconMenu::openPackagedWinUI(const String& parameters)
@@ -365,6 +408,7 @@ bool IconMenu::openPackagedWinUI(const String& parameters)
 	}
 
 	lightHostModernLog("Packaged WinUI activated. pid=" + String(static_cast<int>(processId)));
+	monitorWinUI(OpenProcess(SYNCHRONIZE, FALSE, processId));
 	return true;
 }
 

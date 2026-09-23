@@ -1,6 +1,7 @@
 #include "UpdatePackage.h"
 #include "UpdateApply.h"
 #include "LegacyInstallMigration.h"
+#include "HostRestart.h"
 #include <shellapi.h>
 
 using namespace lightHostModern::update;
@@ -62,6 +63,10 @@ int main(int argc, char** argv)
     std::map<std::wstring, std::wstring> options;
     for (int index = 1; command && index + 1 < count; index += 2) options.emplace(command[index], command[index + 1]);
     if (command) LocalFree(command);
+    if(options[L"--mode"]==L"restart") {
+        try{return lightHostModern::restart::run(options);}
+        catch(const std::exception& error){OutputDebugStringA(error.what());return 1;}
+    }
     const auto operation = std::filesystem::path(options[L"--operation"]);
     try
     {

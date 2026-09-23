@@ -15,6 +15,8 @@ inline Arguments argumentsFor(std::string_view command)
         {"snapshot", A::none}, {"state-snapshot", A::none}, {"telemetry", A::none}, {"meter-levels", A::none},
         {"snapshot-manifest", A::none}, {"snapshot-page", A::object}, {"events", A::object},
         {"transport-diagnostics", A::none},
+        {"verbose-log-status", A::none}, {"set-verbose-logs", A::boolean},
+        {"stop-verbose-logs", A::none}, {"complete-verbose-logs", A::text}, {"restart-host", A::object},
         {"measure-callbacks", A::twoIntegers}, {"callback-measurement", A::none},
         {"select-audio-device", A::object}, {"audio-device-options", A::text}, {"set-preferred-audio-device", A::object},
         {"enabled-audio-choices", A::none}, {"remove-missing-known-plugins", A::none},
@@ -47,6 +49,7 @@ inline Arguments argumentsFor(std::string_view command)
         {"set-audio-persistence-mode", A::text}, {"block-audio-backend", A::text},
         {"block-audio-input", A::text}, {"block-audio-output", A::text},
         {"scan-default-plugins", A::text}, {"scan-plugin-path", A::text},
+        {"scan-plugin-roots", A::object},
         {"set-close-behavior", A::text}, {"set-tray-icon-mode", A::text},
         {"move-plugin-to", A::twoTexts}, {"swap-plugin-with", A::twoTexts},
         {"set-input-channel", A::integerBoolean}, {"set-output-channel", A::integerBoolean},
@@ -63,6 +66,7 @@ inline bool isReadOnly(std::string_view command)
         || command == "state-snapshot" || command == "telemetry" || command == "meter-levels"
         || command == "snapshot-manifest" || command == "snapshot-page" || command == "events"
         || command == "transport-diagnostics"
+        || command == "verbose-log-status"
         || command == "callback-measurement"
         || command == "audio-device-options"
         || command == "enabled-audio-choices" || command == "plugin-scan-status"

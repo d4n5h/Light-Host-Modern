@@ -10,6 +10,7 @@
 #include "AudioPageController.h"
 #include "MeterPresenter.h"
 #include "DiagnosticsPresenter.h"
+#include "VerboseLogsPresenter.h"
 #include "WindowMaterial.h"
 #include <winrt/Windows.UI.ViewManagement.h>
 #include "AudioPageView.xaml.h"
@@ -150,6 +151,8 @@ namespace winrt::LightHostModernWinUI::implementation
         Microsoft::UI::Xaml::Controls::ComboBox themeModeBox{ nullptr };
         Microsoft::UI::Xaml::Controls::ComboBox backdropModeBox{ nullptr };
         Microsoft::UI::Xaml::Controls::ComboBox layoutModeBox{ nullptr };
+        Microsoft::UI::Xaml::Controls::ComboBox sidebarOnOpenBox{ nullptr };
+        bool syncingSidebarPreference = false;
         Microsoft::UI::Xaml::Controls::ComboBox iconModeBox{ nullptr };
         Microsoft::UI::Xaml::Controls::ComboBox audioPersistenceModeBox{ nullptr };
         Microsoft::UI::Xaml::Controls::ComboBox customRecoveryBackendBox{ nullptr };
@@ -253,6 +256,7 @@ namespace winrt::LightHostModernWinUI::implementation
         std::vector<std::string> allAudioDeviceChoices;
         std::vector<bool> allAudioDeviceChoiceEnabled;
         std::vector<std::string> pluginScanPaths;
+        std::set<std::string> optionalPluginScanPaths;
         std::vector<Microsoft::UI::Xaml::Controls::Border> runningPluginItemBorders;
         std::vector<Microsoft::UI::Xaml::Controls::Border> installedPluginItemBorders;
 
@@ -291,6 +295,7 @@ namespace winrt::LightHostModernWinUI::implementation
         void openFluentDropdown(FluentDropdown& dropdown);
         lightHostModern::ui::MeterPresenter inputMeter, outputMeter;
         lightHostModern::ui::DiagnosticsPresenter diagnosticsPresenter;
+        std::shared_ptr<lightHostModern::ui::VerboseLogsPresenter> verboseLogsPresenter;
         lightHostModern::ui::SessionStatusPresenter sessionStatusPresenter;
         winrt::LightHostModernWinUI::DiagnosticsPageView diagnosticsPageView{nullptr};
         winrt::LightHostModernWinUI::DatabasePageView databasePageView{nullptr};

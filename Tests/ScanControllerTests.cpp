@@ -2,6 +2,8 @@
 #include "ScanProcess.h"
 #include "ScannerProtocol.h"
 #include "PluginInstances.h"
+#include "PluginIdentity.h"
+#include "ScanArchitecture.h"
 #include <shellapi.h>
 #include <iostream>
 #include <set>
@@ -110,6 +112,19 @@ int main()
             return root.contains("denied-fixture") ? String("access_denied") : String();
         });
         const auto path = request->getStringAttribute("path");
+        const auto mode=request->getStringAttribute("mode");
+        if(mode=="verify")return 0;
+        int onlyClass=-1;
+        if(path.contains("isolated")&&mode=="class") {
+            const auto* plugin=request->getChildByName("PLUGIN");if(!plugin)return 3;
+            onlyClass=plugin->getStringAttribute("uniqueId").getHexValue32()-1;
+            const auto calls=File(path+".calls"+String(onlyClass));
+            calls.replaceWithText(String(calls.loadFileAsString().getIntValue()+1));
+            if(!File(path+".allow").existsAsFile()) {
+                if(onlyClass==1){TerminateProcess(GetCurrentProcess(),44);return 44;}
+                if(onlyClass==2)Sleep(INFINITE);
+            }
+        }
         if (path.contains("hang")) { Sleep(INFINITE); return 3; }
         if (path.contains("crash")) { TerminateProcess(GetCurrentProcess(), 44); return 44; }
         XmlElement response("SCAN");
@@ -120,8 +135,10 @@ int main()
         response.setAttribute("path", path);
         const auto format = request->getStringAttribute("format");
         response.setAttribute("format", format);
-        for (int i = 0; i < (path.contains("multi") ? 2 : 1); ++i)
+        if(path.contains("isolated")&&mode!="class")response.setAttribute("catalog",true);
+        for (int i = 0; i < (path.contains("isolated")?4:path.contains("multi") ? 2 : 1); ++i)
         {
+            if(onlyClass>=0&&i!=onlyClass)continue;
             PluginDescription plugin;
             plugin.name = "Simulated plugin " + String(i);
             plugin.pluginFormatName = format;
@@ -174,6 +191,25 @@ int main()
     try
     {
         require(root.createDirectory().wasOk(), "test directory");
+        {
+            const auto pe=root.getChildFile("architecture-fixture.dll");
+            MemoryOutputStream image;image.writeShort(IMAGE_DOS_SIGNATURE);image.writeRepeatedByte(0,0x3c-2);image.writeInt(0x40);image.writeInt(IMAGE_NT_SIGNATURE);image.writeShort(IMAGE_FILE_MACHINE_I386);
+            require(pe.replaceWithData(image.getData(),image.getDataSize()),"x86 fixture");
+            require(lightHostModern::scan::architectureError(pe)=="incompatible_architecture","PE architecture must be detected without relying on directory names");
+            pe.deleteFile();
+        }
+        {
+            PluginDescription declared,actual;
+            declared.pluginFormatName=actual.pluginFormatName="VST3";declared.uniqueId=actual.uniqueId=17;
+            declared.fileOrIdentifier=root.getChildFile("identity.vst3").getFullPathName();
+            actual.fileOrIdentifier=File(declared.fileOrIdentifier).getChildFile("Contents/x86_64-win/identity.vst3").getFullPathName();
+            declared.vst3ClassId=actual.vst3ClassId="0123456789abcdef0123456789abcdef";
+            require(lightHostModern::samePluginClass(declared,actual),"same class bundle and inner binary");
+            actual.vst3ClassId="0123456789abcdef0123456789abcdee";
+            require(!lightHostModern::samePluginClass(declared,actual),"CID mismatch cannot pass through a matching 32-bit hash");
+            actual.vst3ClassId=declared.vst3ClassId;actual.fileOrIdentifier=root.getChildFile("other.vst3").getFullPathName();
+            require(!lightHostModern::samePluginClass(declared,actual),"another module must not compare equal");
+        }
         for (const auto& name : names) require(root.getChildFile(name).replaceWithText("simulated module"), "test module");
         for (const auto& bundle : { "ignored.lv2", "ignored.vst3" }) {
             require(root.getChildFile(bundle).createDirectory().wasOk(), "foreign format bundle");
@@ -400,6 +436,31 @@ int main()
             waitIdle(controller);
             require(controller.status().completed == 1 && controller.status().failureCount == 0 && controller.takeResults().size() == 1,
                 "long paths were omitted or failed enumeration");
+        }
+        {
+            const auto directory=root.getChildFile("initially-missing");
+            const auto module=directory.getChildFile("restored.dll");
+            struct CleanupRestored {File directory,module;~CleanupRestored(){module.deleteFile();directory.deleteFile();}}clean{directory,module};
+            require(controller.begin(),"begin missing root");controller.enqueue(FileSearchPath(directory.getFullPathName()),"VST",{});waitIdle(controller);
+            require(controller.status().failureCount==1&&controller.status().incomplete,"missing root failure");
+            require(directory.createDirectory().wasOk()&&module.replaceWithText("fixture"),"restore missing root");
+            require(controller.retryFailures(),"retry restored root");waitIdle(controller);
+            require(controller.status().failureCount==0&&!controller.status().incomplete&&controller.status().recognized==1,"completed root resolves its previous failure");
+            controller.takeResults();
+            require(controller.begin(),"begin optional root");controller.enqueue(FileSearchPath(root.getChildFile("absent-optional").getFullPathName()),"VST",{},false,true);waitIdle(controller);
+            require(controller.status().failureCount==0&&controller.status().ignored==1,"optional missing directory is not a scan failure");
+        }
+        {
+            const auto module=root.getChildFile("isolated.dll");
+            struct CleanupIsolated {File module;~CleanupIsolated(){module.deleteFile();File(module.getFullPathName()+".allow").deleteFile();for(int i=0;i<4;++i)File(module.getFullPathName()+".calls"+String(i)).deleteFile();}}clean{module};
+            require(module.replaceWithText("fixture")&&controller.begin(),"isolated class fixture");
+            controller.enqueue(FileSearchPath(module.getFullPathName()),"VST",{},true);waitIdle(controller);
+            const auto isolatedStatus=controller.status();const auto isolatedResults=controller.takeResults();
+            if(isolatedStatus.failureCount!=2||isolatedResults.size()!=2){std::cerr<<"isolated failures="<<isolatedStatus.failureCount<<" results="<<isolatedResults.size()<<'\n';for(const auto& f:isolatedStatus.failures)std::cerr<<f.reason<<'\n';}
+            require(isolatedStatus.failureCount==2&&isolatedResults.size()==2,"class crash and timeout preserve earlier and later successes");
+            require(File(module.getFullPathName()+".allow").replaceWithText("ready")&&controller.retryFailures(),"retry only failed classes");waitIdle(controller);
+            require(controller.status().failureCount==0&&controller.status().recognized==4,"failed classes recover without duplicate counters");
+            for(int i:{0,3})require(File(module.getFullPathName()+".calls"+String(i)).loadFileAsString().getIntValue()==1,"successful classes were unnecessarily instantiated on retry");
         }
         std::cout << "Scanner controller regressions passed\n";
     }

@@ -3,6 +3,7 @@
 #include "PluginStateCapture.h"
 #include "PluginWindow.h"
 #include "RuntimeProfile.h"
+#include "VerboseLog.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -213,7 +214,7 @@ AudioEngine::AudioEngine(bool startInSafeMode, bool shouldRestoreActivePluginsOn
     deviceManager.addAudioCallback(&player);
     deviceManager.addChangeListener(this);
     startTimer(audioWatchdogTimerId, 250);
-    if (isDiagnosticsEnabled()) startTimer(diagnosticsTimerId, 30000);
+    if (isDiagnosticsEnabled() || lightHostModern::verbose::logger().active()) startTimer(diagnosticsTimerId, 30000);
     loadActivePlugins();
     if (!sessionLoadSuppressed && instances.writable) saveActivePluginList();
 }
@@ -541,30 +542,40 @@ void AudioEngine::scanPluginPath(const String& path, bool scanVst, bool scanVst3
 
 void AudioEngine::scanDefaultPluginLocations(bool scanVst, bool scanVst3)
 {
+    for (auto* format : formatManager.getFormats()) {
+        const auto name=format->getName();
+        if((name=="VST"&&!scanVst)||(name=="VST3"&&!scanVst3))continue;
+        pluginScanner.enqueue(getWindowsDefaultPluginSearchPath(*format,name=="VST",name=="VST3"),name,knownPluginList.getTypes(),false,true);
+    }
+}
 
-	for (int i = 0; i < formatManager.getNumFormats(); ++i)
-	{
-		auto* format = formatManager.getFormat(i);
-		if (format == nullptr)
-			continue;
-
-		const String formatName = format->getName();
-		const bool isVst3 = formatName.containsIgnoreCase("VST3");
-		const bool isVst = formatName.containsIgnoreCase("VST") && !isVst3;
-		if ((isVst && !scanVst) || (isVst3 && !scanVst3) || (!isVst && !isVst3))
-			continue;
-
-		const auto searchPath = getWindowsDefaultPluginSearchPath(*format, isVst, isVst3);
-		pluginScanner.enqueue(searchPath, formatName, knownPluginList.getTypes());
-	}
-
+void AudioEngine::scanPluginRoots(const var& roots)
+{
+    for(auto* format:formatManager.getFormats()) {
+        std::map<bool,FileSearchPath> groups;
+        for(const auto& root:*roots.getArray()) {
+            const auto kind=root["format"].toString();
+            if(kind!="all"&&kind!=format->getName())continue;
+            groups[(bool)root["optional"]].add(File(root["path"].toString()));
+        }
+        for(auto& [optional,paths]:groups) {
+            paths.removeRedundantPaths();
+            pluginScanner.enqueue(paths,format->getName(),knownPluginList.getTypes(),false,optional);
+        }
+    }
 }
 
 void AudioEngine::collectPluginScanResults()
 {
     auto results = pluginScanner.takeResults();
     if (results.empty()) return;
-    for (const auto& plugin : results) knownPluginList.addType(plugin);
+    for (auto plugin : results) {
+        // Keep the persisted path/ID (and therefore aliases/session links) when
+        // a manifest adds or removes the equivalent bundle representation.
+        for(const auto& existing:knownPluginList.getTypes())
+            if(lightHostModern::samePluginClass(existing,plugin)) {plugin.fileOrIdentifier=existing.fileOrIdentifier;break;}
+        knownPluginList.addType(plugin);
+    }
     knownPluginList.sendSynchronousChangeMessage();
     flushPendingSaves();
 }
@@ -906,7 +917,7 @@ void AudioEngine::setDiagnosticsEnabled(bool enabled)
         if (!enabled) player.callbackMeasurement().stop();
     }
     hostCpuSampler.reset(); workerCpuSampler.reset();
-    if (enabled) startTimer(diagnosticsTimerId, 30000);
+    if (enabled || lightHostModern::verbose::logger().active()) startTimer(diagnosticsTimerId, 30000);
     else stopTimer(diagnosticsTimerId);
     getAppProperties().getUserSettings()->setValue("diagnosticsEnabled", enabled);
     markSettingsDirty();
@@ -1073,7 +1084,7 @@ void AudioEngine::timerCallback(int timerId)
 
 	if (timerId == diagnosticsTimerId)
 	{
-		if (isDiagnosticsEnabled()) logDiagnosticsSnapshot();
+		if (isDiagnosticsEnabled() || lightHostModern::verbose::logger().active()) logDiagnosticsSnapshot();
 		return;
 	}
 }

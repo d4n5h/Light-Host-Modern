@@ -16,9 +16,14 @@ static std::wstring executablePath()
 static void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
 int wmain(int argc, wchar_t** argv)
 {
-    if (argc > 1)
+    const bool longWatchdog=argc==2&&std::wstring(argv[1])==L"--long-watchdog";
+    if (argc > 1&&!longWatchdog)
     {
         if (std::wstring(argv[1]) == L"hang") { Sleep(INFINITE); return 0; }
+        if (argc==3&&(std::wstring(argv[1])==L"productive"||std::wstring(argv[1])==L"productive-long")) {
+            const int steps=std::wstring(argv[1])==L"productive-long"?1250:15;
+            for(int i=0;i<steps;++i){std::ofstream file{std::filesystem::path(argv[2])};file<<i;file.close();Sleep(50);}return 0;
+        }
         if (std::wstring(argv[1]) == L"crash") { TerminateProcess(GetCurrentProcess(), 44); return 44; }
         if (argc == 3 && std::wstring(argv[1]) == L"owner")
         {
@@ -54,6 +59,18 @@ int wmain(int argc, wchar_t** argv)
         const auto success = run(executable, L"probe " + quoteArgument(L"Unicode \u65e5\u672c \\\"quoted\\\" \\"), never, 3000);
         require(success.outcome == Exit::success, "Worker must be in job; Unicode/quotes must round trip");
         const auto crash = run(executable, L"crash", never, 3000);
+        const auto progressFile=std::filesystem::temp_directory_path()/(L"LightHostModern-progress-"+std::to_wstring(GetCurrentProcessId()));
+        uint64_t progress=0;
+        const auto poll=[&]{std::ifstream input(progressFile);uint64_t current=0;if(input>>current)progress=current+1;};
+        require(run(executable,L"productive "+quoteArgument(progressFile.wstring()),never,200,poll,[&]{return progress;}).outcome==Exit::success,"productive operation must outlive inactivity timeout");
+        progress=0;
+        require(run(executable,L"productive "+quoteArgument(progressFile.wstring()),never,200,poll,[&]{return progress;},350).outcome==Exit::totalTimeout,"total timeout is distinct from inactivity");
+        std::filesystem::remove(progressFile);
+        if(longWatchdog) {
+            progress=0;
+            require(run(executable,L"productive-long "+quoteArgument(progressFile.wstring()),never,60000,poll,[&]{return progress;}).outcome==Exit::success,"productive root survives more than 60 seconds");
+            std::filesystem::remove(progressFile);
+        }
         require(crash.outcome == Exit::failed && crash.code == 44, "Worker crash must be reported");
         require(run(executable, L"hang", never, 100).outcome == Exit::timeout, "Hung worker must time out");
         std::atomic<bool> cancel { false };

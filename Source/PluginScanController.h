@@ -23,6 +23,8 @@ public:
         bool cancelled = false;
         int completed = 0, total = 0, cached = 0;
         int enumerations = 0, examined = 0;
+        int recognized = 0, ignored = 0;
+        bool enumerating = false, incomplete = false;
         juce::String scanId;
         uint64_t revision = 0;
         size_t failureCount = 0;
@@ -33,7 +35,7 @@ public:
     ~PluginScanController();
     bool begin();
     void enqueue(juce::FileSearchPath paths, juce::String format,
-                 juce::Array<juce::PluginDescription> known, bool force = false);
+                 juce::Array<juce::PluginDescription> known, bool force = false, bool optional = false);
     void cancel();
     // Bounded display snapshot; retry retains the complete internal failure list.
     Status status() const;
@@ -53,6 +55,7 @@ private:
         bool force;
         uint64_t generation;
         int attempt = 1;
+        bool optional = false;
     };
     void run();
     void scan(const Work&);
@@ -69,6 +72,7 @@ private:
     juce::File cacheDirectory;
     std::map<juce::String, juce::String> pluginMetadata;
     std::set<juce::String> seenModules;
+    std::set<juce::String> countedModules, completedModules, cachedModules, acceptedClasses;
     unsigned timeoutMs;
     std::thread worker;
 };

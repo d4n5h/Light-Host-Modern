@@ -103,6 +103,7 @@ public:
 
 	void scanDefaultPluginLocations(bool scanVst, bool scanVst3);
 	void scanPluginPath(const String& path, bool scanVst, bool scanVst3);
+    void scanPluginRoots(const var& roots);
 	PluginScanController::Status getPluginScanStatus() const { return pluginScanner.status(); }
 	std::pair<String, uint64_t> getPluginScanVersion() const { return pluginScanner.version(); }
 	void cancelPluginScan();

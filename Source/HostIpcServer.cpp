@@ -3,6 +3,8 @@
 #include "StartupRegistration.h"
 #include "DebugLog.h"
 #include "RuntimeProfile.h"
+#include "VerboseLog.h"
+#include "HostRestart.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -536,7 +538,17 @@ String HostIpcServer::processRequest(const String& json)
     auto request = lightHostModern::ipc::parseRequest(json);
     if (!request) return withEnvelope(lightHostModern::ipc::errorResponse(request), request.id);
     var response;
+    const auto operationStarted=GetTickCount64();
+    const auto logOperation=[&](const std::string& result) {
+        if(!lightHostModern::ipc::isReadOnly(request.command.toStdString()))
+            lightHostModern::verbose::log("ipc.result","id="+request.id.toStdString()+" command="+request.command.toStdString()+" result="+result+" milliseconds="+std::to_string(GetTickCount64()-operationStarted));
+    };
     try { response = JSON::parse(dispatchRequest(request)); }
+    catch (const std::exception& exception) {
+        logOperation(exception.what());
+        request.errorCode="command_exception";request.errorMessage=exception.what();
+        return withEnvelope(lightHostModern::ipc::errorResponse(request),request.id);
+    }
     catch (...)
     {
         request.errorCode = "command_exception";
@@ -544,6 +556,7 @@ String HostIpcServer::processRequest(const String& json)
         return withEnvelope(lightHostModern::ipc::errorResponse(request), request.id);
     }
     auto object = response.getDynamicObject();
+    logOperation(response["status"].toString().toStdString());
     if (object == nullptr)
     {
         request.errorCode = "internal_error";
@@ -575,6 +588,16 @@ String HostIpcServer::dispatchRequest(const lightHostModern::ipc::Request& reque
 {
     const auto& command = request.command;
     const auto& args = request.args;
+    if (!lightHostModern::ipc::isReadOnly(command.toStdString()))
+        lightHostModern::verbose::log("ipc", "command=" + command.toStdString());
+    if (command == "verbose-log-status") {
+        const auto state = lightHostModern::verbose::status();
+        auto* result = new DynamicObject(); result->setProperty("status", "ok");
+        result->setProperty("phase", String(state.phase)); result->setProperty("session", String(state.session));
+        result->setProperty("started", String(state.started)); result->setProperty("error", String(state.error));
+        result->setProperty("bytes", (int64) (state.session.empty() ? 0 : lightHostModern::verbose::bytes(lightHostModern::verbose::root()/lightHostModern::verbose::wide(state.session))));
+        return JSON::toString(var(result), true);
+    }
     if (command == "snapshot" || command == "state-snapshot") return buildSnapshot();
     if (command == "telemetry") { if (engine.isDiagnosticsEnabled()) lightHostModern::diagnosticsVisibleUntil.store(GetTickCount64() + 2000); return buildTelemetry(); }
     if (command == "enabled-audio-choices") return buildEnabledAudioChoices();
@@ -582,6 +605,20 @@ String HostIpcServer::dispatchRequest(const lightHostModern::ipc::Request& reque
         auto error = request; error.errorCode = code; error.errorMessage = message;
         return lightHostModern::ipc::errorResponse(error);
     };
+    if (command == "set-verbose-logs") { lightHostModern::verbose::arm((bool) args[0]); return commandOk(); }
+    if (command == "stop-verbose-logs") { lightHostModern::verbose::stop(); return commandOk(); }
+    if (command == "complete-verbose-logs") { lightHostModern::verbose::complete(args[0].toString().toStdString()); return commandOk(); }
+    if (command == "restart-host") {
+        if(quitRequested.load())return commandOk();
+        const auto options = args[0];
+        if(!options["uiPid"].isInt()&&!options["uiPid"].isInt64())return fail("invalid_arguments","Expected a UI process ID");
+        if(!options["uiCreated"].isString()||options["uiCreated"].toString().getLargeIntValue()<=0)return fail("invalid_arguments","Expected the UI process creation time");
+        if (!engine.flushSession()) return fail("session_save_failed", "The session could not be saved. Restart later.");
+        lightHostModern::restart::prepare((DWORD)(int64)options["uiPid"], (uint64)options["uiCreated"].toString().getLargeIntValue());
+        quitRequested.store(true);
+        if (!responseInFlight.load()) JUCEApplication::getInstance()->quit();
+        return commandOk();
+    }
     if (command == "audio-device-options") return JSON::toString(engine.getAudioDeviceOptions(args[0].toString()), true);
     if (command == "measure-callbacks")
     {
@@ -1158,6 +1195,14 @@ String HostIpcServer::dispatchRequest(const lightHostModern::ipc::Request& reque
 		engine.scanPluginPath(payload, true, true);
 		return "{\"status\":\"ok\",\"queued\":true}";
 	}
+    if(command=="scan-plugin-roots") {
+        const auto roots=args[0]["roots"];
+        if(!roots.isArray()||roots.size()>1000)return fail("invalid_arguments","Expected at most 1000 scan roots");
+        for(const auto& root:*roots.getArray())
+            if(!root.isObject()||!root["path"].isString()||!File::isAbsolutePath(root["path"].toString())||!root["optional"].isBool()
+                ||(root["format"]!="all"&&root["format"]!="VST"&&root["format"]!="VST3"))return fail("invalid_arguments","Invalid scan root");
+        engine.scanPluginRoots(roots);return commandOk();
+    }
 
     if (command == "cancel-plugin-scan") { engine.cancelPluginScan(); return commandOk(); }
     if (command == "begin-plugin-scan") { return commandResult(engine.beginPluginScan()); }
@@ -1173,6 +1218,10 @@ String HostIpcServer::dispatchRequest(const lightHostModern::ipc::Request& reque
         result->setProperty("completed", status.completed);
         result->setProperty("total", status.total);
         result->setProperty("cached", status.cached);
+        result->setProperty("recognized", status.recognized);
+        result->setProperty("ignored", status.ignored);
+        result->setProperty("enumerating", status.enumerating);
+        result->setProperty("incomplete", status.incomplete);
         result->setProperty("scanId", status.scanId);
         result->setProperty("revision", static_cast<int64>(status.revision));
         result->setProperty("enumerations", status.enumerations);

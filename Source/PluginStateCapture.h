@@ -1,5 +1,6 @@
 #pragma once
 #include "PluginInstances.h"
+#include "PluginIdentity.h"
 #include <stdexcept>
 
 namespace lightHostModern
@@ -10,16 +11,7 @@ namespace lightHostModern
 template<class Restore>
 void restorePluginState(PluginInstanceRecord& record, const juce::PluginDescription& actual, Restore&& restore)
 {
-    const auto& expected = record.description;
-    const auto classId = [](const juce::PluginDescription& value) { return value.uniqueId != 0 ? value.uniqueId : value.deprecatedUid; };
-    bool sameModule = expected.fileOrIdentifier == actual.fileOrIdentifier;
-    if (!sameModule && juce::File::isAbsolutePath(expected.fileOrIdentifier) && juce::File::isAbsolutePath(actual.fileOrIdentifier))
-    {
-        const juce::File requested(expected.fileOrIdentifier), loaded(actual.fileOrIdentifier);
-        sameModule = requested == loaded || (expected.pluginFormatName == "VST3" && requested.hasFileExtension("vst3")
-            && loaded.hasFileExtension("vst3") && loaded.isAChildOf(requested));
-    }
-    if (!sameModule || expected.pluginFormatName != actual.pluginFormatName || classId(expected) == 0 || classId(expected) != classId(actual))
+    if (!samePluginClass(record.description, actual))
         throw std::runtime_error("plugin_identity_mismatch");
     if (record.lastValidState.isEmpty()) return;
     juce::MemoryBlock binary;

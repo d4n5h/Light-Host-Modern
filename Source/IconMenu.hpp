@@ -3,10 +3,12 @@
 
 #include "AudioEngine.h"
 #include "HostIpcServer.h"
+#include "UiProcessLifetime.h"
 
 class IconMenu : public SystemTrayIconComponent, private MultiTimer
 {
 public:
+    void showInterface() { openWinUI(); }
     IconMenu(bool startInSafeMode = false, bool debugEnabled = false, bool restoreActivePluginsOnStartup = false);
     ~IconMenu() override;
 
@@ -25,6 +27,7 @@ private:
 	void timerCallback(int timerId) override;
 	void showNativeContextMenu();
 	void openWinUI();
+	void monitorWinUI(HANDLE process);
 	bool openPackagedWinUI(const String& parameters);
 	String resolvePackagedWinUIAumid();
 	void setIcon();
@@ -33,6 +36,7 @@ private:
 	std::unique_ptr<HostIpcServer> ipcServer;
     PopupMenu menu;
 	bool debugMode = false;
+	std::unique_ptr<lightHostModern::UiProcessLifetime> uiLifetime;
 	int x = 0, y = 0;
 
 };

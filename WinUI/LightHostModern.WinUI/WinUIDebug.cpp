@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "WinUIDebug.h"
 #include "../../Source/RuntimeProfile.h"
+#include "../../Source/VerboseLog.h"
 
 namespace
 {
@@ -73,6 +74,7 @@ void initialiseWinUIDebugConsole()
 
 void winUILog(std::string const& message)
 {
+    lightHostModern::verbose::log("ui",message);
 	if (!debugEnabled)
 		return;
 

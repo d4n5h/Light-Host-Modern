@@ -109,7 +109,7 @@ private:
                 const auto id = ipc::extractString(json, "id"), path = ipc::extractString(json, "path");
                 if (id.empty() || !identities.insert(id).second) throw std::runtime_error("Duplicate failure ID");
                 const auto reason = ipc::extractString(json, "reason");
-                const auto translated = catalog->text("scan.error." + reason, to_hstring(reason).c_str());
+                const auto translated = catalog->text("scan.error." + reason.substr(0,reason.find(':')), to_hstring(reason).c_str());
                 StackPanel row; row.Spacing(4); row.HorizontalAlignment(HorizontalAlignment::Stretch);
                 TextBlock pathText; pathText.Text(to_hstring(path)); pathText.TextWrapping(TextWrapping::Wrap);
                 pathText.Style(resources.Lookup(box_value(L"BodyStrongTextBlockStyle")).as<Style>());
@@ -124,8 +124,9 @@ private:
                 Automation::AutomationProperties::SetAutomationId(errorText, L"ScanFailureReason" + to_hstring(rows.size()));
                 Grid::SetColumn(errorText, 1); errorRow.Children().Append(errorText); row.Children().Append(errorRow);
                 TextBlock metadata; metadata.Style(resources.Lookup(box_value(L"SecondaryCaptionStyle")).as<Style>());
+                metadata.IsTextSelectionEnabled(true);
                 metadata.Text(to_hstring(ipc::extractString(json, "format")) + L" \u00b7 " + catalog->text("scan.attempt", L"Attempt")
-                    + L" " + to_hstring(static_cast<int>(ipc::extractNumber(json, "attempt"))));
+                    + L" " + to_hstring(static_cast<int>(ipc::extractNumber(json, "attempt")))+L" · "+to_hstring(reason)+L" · "+to_hstring(ipc::extractString(json,"kind")));
                 row.Children().Append(metadata);
                 Automation::AutomationProperties::SetName(row, to_hstring(path) + L". " + translated + L". " + metadata.Text());
                 rows.push_back(id); list.Items().Append(row);

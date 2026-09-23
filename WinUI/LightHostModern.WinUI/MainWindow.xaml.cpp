@@ -45,7 +45,7 @@ namespace
     constexpr wchar_t GITHUB_REPOSITORY_URL[] = L"https://github.com/heide-oficial/Light-Host-Modern";
     constexpr wchar_t GITHUB_SHOWCASE_URL[] = L"https://github.com/heide-oficial/Light-Host-Modern/issues/new?title=%5BSHOWCASE%20VIDEO%5D%20Video%20title%20here&labels=showcase%20video&body=Here%27s%20my%20video%20showcasing%20or%20featuring%20the%20app%3A%20%5BINSERT%20LINK%20HERE%5D";
     constexpr wchar_t KOFI_URL[] = L"https://ko-fi.com/heide_oficial";
-    constexpr wchar_t APP_VERSION[] = L"1.4.0";
+    constexpr wchar_t APP_VERSION[] = L"1.4.1";
     constexpr double COMPACT_CONTENT_MAX_WIDTH = 1000.0;
     std::string toLower(std::string value)
     {
@@ -1143,6 +1143,12 @@ namespace winrt::LightHostModernWinUI::implementation
             compactLayout = _wcsicmp(loadUiSetting(L"Appearance", L"LayoutMode", L"Expanded").c_str(), L"Compact") == 0;
             setComboItems(layoutModeBox, { "Compact", "Expanded" }, compactLayout ? 0 : 1);
 
+            sidebarOnOpenBox = ComboBox();
+            styleCombo(sidebarOnOpenBox);
+            Automation::AutomationProperties::SetAutomationId(sidebarOnOpenBox, L"SidebarOnOpen");
+            winrt::get_self<SettingsPageView>(settingsPageView)->SidebarOnOpenBoxHost().Children().Append(sidebarOnOpenBox);
+            setComboItems(sidebarOnOpenBox, { "Collapsed", "Expanded" }, sidebarStartsCollapsed() ? 0 : 1);
+
             iconModeBox = ComboBox();
             styleCombo(iconModeBox);
             Microsoft::UI::Xaml::Automation::AutomationProperties::SetAutomationId(iconModeBox, L"IconMode");
@@ -1244,6 +1250,7 @@ namespace winrt::LightHostModernWinUI::implementation
 
         localization.load(loadUiSetting(L"Localization", L"Language", L"en-us"));
         compactLayout = _wcsicmp(loadUiSetting(L"Appearance", L"LayoutMode", L"Expanded").c_str(), L"Compact") == 0;
+        sidebarCollapsed = sidebarStartsCollapsed();
         createDynamicControls(L"Dashboard");
 
         styleButton(RefreshButton());
@@ -1309,7 +1316,6 @@ namespace winrt::LightHostModernWinUI::implementation
         winUILog("Attaching UI events.");
         RootLayout().Loaded([this](IInspectable const&, RoutedEventArgs const&)
         {
-            sidebarCollapsed = true;
             updateSidebarLayout();
             applyResponsiveLayout(RootLayout().ActualWidth());
             try
@@ -1339,7 +1345,6 @@ namespace winrt::LightHostModernWinUI::implementation
         hideSupportTab = loadUiSetting(L"General", L"HideSupportTab", L"0") == L"1";
         SupportButton().Visibility(hideSupportTab ? Visibility::Collapsed : Visibility::Visible);
         applyLocalization();
-        sidebarCollapsed = true;
         updateSidebarLayout();
 
         winUILog("Creating refresh timer.");
@@ -1383,7 +1388,6 @@ namespace winrt::LightHostModernWinUI::implementation
         winUILog("Showing initial section.");
         SidebarRail().SelectedItem(DashboardButton());
         showSection(L"Dashboard");
-        sidebarCollapsed = true;
         updateSidebarLayout();
         winUILog("Initial snapshot deferred until first timer tick.");
         winUILog("MainWindow ready.");
@@ -1415,6 +1419,18 @@ namespace winrt::LightHostModernWinUI::implementation
             diagnosticsPageView = winrt::make<DiagnosticsPageView>();
             DiagnosticsPageHost().Content(diagnosticsPageView);
             diagnosticsPresenter.create(winrt::get_self<DiagnosticsPageView>(diagnosticsPageView)->DiagnosticsPanel(), localization);
+            verboseLogsPresenter=std::make_shared<lightHostModern::ui::VerboseLogsPresenter>();
+            HWND logsOwner=nullptr;this->try_as<::IWindowNative>()->get_WindowHandle(&logsOwner);
+            verboseLogsPresenter->create(winrt::get_self<DiagnosticsPageView>(diagnosticsPageView)->DiagnosticsPanel(),localization,hostConnection,logsOwner,
+                [weak=get_weak()](std::string command)->winrt::Windows::Foundation::IAsyncOperation<bool> {
+                    auto owner=weak.get();if(!owner||owner->windowClosing)co_return false;
+                    if(command.rfind("restart-host:",0)==0) {
+                        auto reply=winrt::to_string(co_await owner->hostConnection->requestAsync(std::move(command)));
+                        if(lightHostModern::ui::extractString(reply,"status")!="ok")co_return false;
+                        owner->closeQuitsHost=false;owner->Close();co_return true;
+                    }
+                    co_return co_await owner->sendCommand(std::move(command));
+                });
         }
         else if (section == L"Settings" && !Pages().SettingsLoaded()) {
             settingsPageView = winrt::make<SettingsPageView>();
@@ -1549,6 +1565,12 @@ namespace winrt::LightHostModernWinUI::implementation
                 applyResponsiveLayout(RootLayout().ActualWidth());
             });
             BackdropModeBox().DropDownOpened({ this, &MainWindow::ComboBox_DropDownOpened });
+            sidebarOnOpenBox.SelectionChanged([this](IInspectable const&, SelectionChangedEventArgs const&) {
+                if (syncingSidebarPreference || sidebarOnOpenBox.SelectedIndex() < 0) return;
+                saveUiSetting(L"Appearance", L"SidebarOnOpen", sidebarOnOpenBox.SelectedIndex() == 1 ? L"Expanded" : L"Collapsed");
+            });
+            sidebarOnOpenBox.DropDownOpened({ this, &MainWindow::ComboBox_DropDownOpened });
+            sidebarOnOpenBox.DropDownClosed({ this, &MainWindow::ComboBox_DropDownClosed });
             LayoutModeBox().DropDownOpened({ this, &MainWindow::ComboBox_DropDownOpened });
             AudioPersistenceModeBox().DropDownOpened({ this, &MainWindow::ComboBox_DropDownOpened });
             CustomRecoveryBackendBox().DropDownOpened({ this, &MainWindow::ComboBox_DropDownOpened });
@@ -1609,7 +1631,9 @@ namespace winrt::LightHostModernWinUI::implementation
     {
         if (diagnosticsEnabled != enabled) diagnosticsPresenter.resetCpuSampler();
         diagnosticsEnabled = enabled;
-        DiagnosticsButton().Visibility(enabled ? Visibility::Visible : Visibility::Collapsed);
+        const auto captureState=lightHostModern::verbose::status();
+        const bool capturePending=captureState.phase!="off";
+        DiagnosticsButton().Visibility(enabled||capturePending ? Visibility::Visible : Visibility::Collapsed);
         if (settingsPageView) {
             syncingDiagnosticsControls = true;
             auto page = winrt::get_self<SettingsPageView>(settingsPageView);
@@ -1618,7 +1642,7 @@ namespace winrt::LightHostModernWinUI::implementation
             page->DiagnosticsStateText().Text(localization.text(enabled ? "common.on" : "common.off", enabled ? L"On" : L"Off"));
             syncingDiagnosticsControls = false;
         }
-        if (!enabled && currentSection == L"Diagnostics") showSection(L"Settings");
+        // The log controls remain accessible independently of performance metrics.
     }
 
     winrt::fire_and_forget MainWindow::DiagnosticsEnabled_Toggled(IInspectable const&, RoutedEventArgs const&)
@@ -2196,6 +2220,7 @@ namespace winrt::LightHostModernWinUI::implementation
 
     void MainWindow::applyLocalization()
     {
+        if(verboseLogsPresenter)verboseLogsPresenter->translate(localization);
         const auto accessibleName = [this](FrameworkElement const& element, const char* key, const wchar_t* fallback)
         {
             if (element) Automation::AutomationProperties::SetName(element, localization.text(key, fallback));
@@ -2345,6 +2370,14 @@ namespace winrt::LightHostModernWinUI::implementation
         {
             auto settingsPage = winrt::get_self<SettingsPageView>(settingsPageView);
             settingsPage->DiagnosticsSettingTitle().Text(localization.text("nav.diagnostics", L"Diagnostics"));
+            settingsPage->SidebarOnOpenTitle().Text(localization.text("settings.sidebar.title", L"Sidebar on open"));
+            settingsPage->SidebarOnOpenDescription().Text(localization.text("settings.sidebar.description", L"Choose whether the sidebar is collapsed or expanded each time you open the app window."));
+            Automation::AutomationProperties::SetName(sidebarOnOpenBox, localization.text("settings.sidebar.title", L"Sidebar on open"));
+            syncingSidebarPreference = true;
+            setComboItems(sidebarOnOpenBox, {
+                to_string(localization.text("settings.sidebar.collapsed", L"Collapsed")),
+                to_string(localization.text("settings.sidebar.expanded", L"Expanded")) }, sidebarStartsCollapsed() ? 0 : 1);
+            syncingSidebarPreference = false;
             settingsPage->DiagnosticsSettingDescription().Text(localization.text("settings.diagnostics.description", L"Show the Diagnostics page and collect performance data."));
             Automation::AutomationProperties::SetName(settingsPage->DiagnosticsEnabledSwitch(), localization.text("settings.diagnostics.enable", L"Enable diagnostics"));
             syncDiagnosticsSetting(diagnosticsEnabled);
@@ -3894,12 +3927,12 @@ namespace winrt::LightHostModernWinUI::implementation
         if (windowClosing || commandInProgress || snapshotInProgress) co_return false;
         if (hostPipeName.empty())
         {
-            winUILog("Command skipped because host pipe is empty: " + command);
+            winUILog("Command skipped because host pipe is empty: " + command.substr(0,command.find(':')));
             HeaderStatusText().Text(localization.text("ipc.noPipe", L"No host pipe"));
             co_return false;
         }
 
-        winUILog("Sending command: " + command);
+        winUILog("Sending command: " + command.substr(0,command.find(':')));
         commandInProgress = true;
         if (Pages().PluginsLoaded()) RunningPluginsListView().IsHitTestVisible(false);
         if (Pages().PluginsLoaded()) InstalledPluginsListView().IsHitTestVisible(false);
@@ -3921,13 +3954,13 @@ namespace winrt::LightHostModernWinUI::implementation
         if (windowClosing) co_return !response.empty();
         if (response.empty())
         {
-            winUILog("Command failed with empty response; the host pipe closed or the plugin load crashed/froze the host: " + command);
+            winUILog("Command failed with empty response; the host pipe closed or the plugin load crashed/froze the host: " + command.substr(0,command.find(':')));
             HeaderStatusText().Text(localization.text("ipc.noResponseShort", L"Host did not respond"));
             showNotification(localization.text("ipc.noResponse", L"Host did not respond. An operation already started may still complete; its state will refresh after reconnection.").c_str());
             co_return false;
         }
 
-        winUILog("Command response: " + response);
+        winUILog("Command response: " + extractString(response,"status") + " code=" + extractString(response,"code"));
         if (extractString(response, "status") == "error")
         {
             const auto message = ipcErrorText(response, localization);
@@ -4137,9 +4170,14 @@ namespace winrt::LightHostModernWinUI::implementation
                     [weak = get_weak()](const std::vector<std::string>& paths) {
                         if (auto owner = weak.get(); owner && !owner->windowClosing) {
                             lightHostModern::ipc::JsonArray saved;
+                            lightHostModern::ipc::JsonArray optional;
+                            std::set<std::string> retainedOptional;
                             for (const auto& path : paths) saved.Append(lightHostModern::ipc::JsonValue::CreateStringValue(to_hstring(path)));
+                            for(const auto& path:paths)if(owner->optionalPluginScanPaths.count(path)){retainedOptional.insert(path);optional.Append(lightHostModern::ipc::JsonValue::CreateStringValue(to_hstring(path)));}
                             const auto json = saved.Stringify();
+                            if(!WritePrivateProfileStringW(L"Plugins",L"OptionalScanPaths",optional.Stringify().c_str(),uiSettingsFilePath().c_str()))return false;
                             if (!WritePrivateProfileStringW(L"Plugins", L"ScanPaths", json.c_str(), uiSettingsFilePath().c_str())) return false;
+                            owner->optionalPluginScanPaths=std::move(retainedOptional);
                             owner->pluginScanPaths = paths; owner->updateScanDialogActions(); return true;
                         }
                         return false;
@@ -4236,14 +4274,18 @@ namespace winrt::LightHostModernWinUI::implementation
         scanQueuePending = true;
         updateScanDialogActions();
         if (!(co_await sendCommand("begin-plugin-scan"))) { scanQueuePending = false; updateScanDialogActions(); co_return; }
-        bool queued = false;
-        // The host's format manager includes only the formats enabled for this
-        // session. Configured folders also apply when VST2 is disabled.
-        const auto paths = pluginScanPaths;
-        for (const auto& path : paths) {
-            if (windowClosing || scanCancelRequested) break;
-            if (co_await sendCommand("scan-plugin-path:" + path)) queued = true;
+        Windows::Data::Json::JsonArray roots;
+        const auto defaults=defaultPluginScanPaths();
+        for (const auto& path : pluginScanPaths) {
+            const bool optional=optionalPluginScanPaths.count(path)!=0;
+            Windows::Data::Json::JsonObject root;
+            root.SetNamedValue(L"path",Windows::Data::Json::JsonValue::CreateStringValue(to_hstring(path)));
+            root.SetNamedValue(L"optional",Windows::Data::Json::JsonValue::CreateBooleanValue(optional));
+            root.SetNamedValue(L"format",Windows::Data::Json::JsonValue::CreateStringValue(optional?(path.size()>=4&&path.substr(path.size()-4)=="VST3"?L"VST3":L"VST"):L"all"));
+            roots.Append(root);
         }
+        Windows::Data::Json::JsonObject request;request.SetNamedValue(L"roots",roots);
+        const bool queued=co_await sendCommand("scan-plugin-roots:"+to_string(request.Stringify()));
         scanQueuePending = false;
         updateScanDialogActions();
         if (windowClosing) co_return;
@@ -4291,12 +4333,13 @@ namespace winrt::LightHostModernWinUI::implementation
         scanFailureCount = failures;
         scanHasResult = !pluginScanActive && (total > 0 || failures > 0 || extractBool(json, "cancelled"));
         const bool busy = pluginScanActive || scanQueuePending;
-        const auto key = busy ? "scan.running" : (extractBool(json, "cancelled") ? "scan.cancelled" : "scan.finished");
+        const bool incomplete=extractBool(json,"incomplete");
+        const auto key = busy ? "scan.running" : (extractBool(json, "cancelled") ? "scan.cancelled" : incomplete?"scan.incomplete":"scan.finished");
         updateScanDialogActions();
         scanProgressDialog.Title(box_value(localization.text(key, L"Plugin scan")));
         PluginScanStatusText().Text(localization.text(busy ? (scanCancelRequested ? "scan.cancelling" : "scan.preparing")
             : (extractBool(json, "cancelled") ? "scan.cancelledDescription"
-                : (failures > 0 ? "scan.finishedWithFailures" : "scan.finishedSuccessfully")),
+                : (incomplete?"scan.incompleteDescription":failures > 0 ? "scan.finishedWithFailures" : "scan.finishedSuccessfully")),
             busy ? L"Searching the selected folders..." : L"The scan has finished."));
         auto view = winrt::get_self<DatabasePageView>(databasePageView);
         view->PluginScanCompletedValue().Text(to_hstring(completed) + L"/" + to_hstring(total));
@@ -4305,13 +4348,14 @@ namespace winrt::LightHostModernWinUI::implementation
         PluginScanProgress().Visibility(busy ? Visibility::Visible : Visibility::Collapsed);
         PluginScanProgress().Maximum((std::max)(1, total));
         PluginScanProgress().Value((std::min)(completed, total));
-        PluginScanProgress().IsIndeterminate(busy && (total == 0 || scanQueuePending));
+        PluginScanProgress().IsIndeterminate(busy && (extractBool(json,"enumerating") || total == 0 || scanQueuePending));
         const auto file = to_hstring(extractString(json, "currentFile"));
         view->PluginScanCurrentFileText().Text(file);
         view->PluginScanCurrentFileText().Visibility(busy && !file.empty() ? Visibility::Visible : Visibility::Collapsed);
         ToolTipService::SetToolTip(view->PluginScanCurrentFileText(), box_value(file));
-        PluginScanFailuresText().Text(localization.text("scan.background", L"You can close this window while the scan continues."));
-        PluginScanFailuresText().Visibility(busy ? Visibility::Visible : Visibility::Collapsed);
+        PluginScanFailuresText().Text(localization.format("scan.recognizedSummary",L"{0} plugins recognized. {1} items skipped.",
+            {std::to_wstring((int)extractNumber(json,"recognized")),std::to_wstring((int)extractNumber(json,"ignored"))}));
+        PluginScanFailuresText().Visibility(Visibility::Visible);
     }
 
     winrt::fire_and_forget MainWindow::ViewScanFailures_Click(IInspectable, RoutedEventArgs)
@@ -4877,6 +4921,14 @@ namespace winrt::LightHostModernWinUI::implementation
     void MainWindow::resetDefaultPluginScanPaths()
     {
         pluginScanPaths = defaultPluginScanPaths();
+        optionalPluginScanPaths={pluginScanPaths.begin(),pluginScanPaths.end()};
+        const auto optionalStored=loadUiSetting(L"Plugins",L"OptionalScanPaths",L"");
+        if(!optionalStored.empty()) {
+            lightHostModern::ipc::JsonArray optional;
+            if(lightHostModern::ipc::JsonArray::TryParse(optionalStored,optional)) {
+                optionalPluginScanPaths.clear();for(const auto& path:optional)if(path.ValueType()==lightHostModern::ipc::JsonValueType::String)optionalPluginScanPaths.insert(to_string(path.GetString()));
+            }
+        }
         const auto stored = loadUiSetting(L"Plugins", L"ScanPaths");
         if (!stored.empty()) {
             lightHostModern::ipc::JsonArray paths;
@@ -4897,6 +4949,7 @@ namespace winrt::LightHostModernWinUI::implementation
         windowMaterial.close();
         auto lifetime = get_strong();
         windowClosing = true;
+        if(verboseLogsPresenter)verboseLogsPresenter->close();
         updateService->cancel();
         if (refreshTimer) refreshTimer.Stop();
         hostConnection->close();
@@ -4921,6 +4974,14 @@ namespace winrt::LightHostModernWinUI::implementation
         catch (...) {}
 
         co_await updateService->cancelAndWaitAsync();
+        // End task bypasses this path. Only acknowledge a completed normal close,
+        // so a forced UI exit also stops the separate audio host.
+        const auto closeEventName = commandLineOptionValue(L"--ui-close-event");
+        if (!closeEventName.empty())
+        {
+            lightHostModern::ipc::Handle closeEvent(OpenEventW(EVENT_MODIFY_STATE, FALSE, closeEventName.c_str()));
+            if (closeEvent) SetEvent(closeEvent.get());
+        }
         Microsoft::UI::Xaml::Application::Current().Exit();
     }
 }

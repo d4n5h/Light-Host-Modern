@@ -4,6 +4,7 @@
 #include "RuntimeProfile.h"
 #include "ProductIdentity.h"
 #include "PreferenceMigration.h"
+#include "VerboseLog.h"
 
 #if JUCE_WINDOWS
  #ifndef NOMINMAX
@@ -26,6 +27,12 @@ public:
     {
         const auto& profile = lightHostModern::RuntimeProfile::current();
         profile.createDirectories();
+        try {
+            lightHostModern::verbose::startHost();
+            lightHostModern::verbose::log("startup", std::string("version=")+ProjectInfo::versionString+" architecture=x64 windows="+SystemStats::getOperatingSystemName().toStdString());
+        } catch(const std::exception& error) {
+            lightHostModern::verbose::reportFailure(lightHostModern::verbose::root(),error.what());
+        }
         const bool debugEnabled = hasParameter("--debug") || hasParameter("-debug");
         setLightHostModernDebugEnabled(debugEnabled);
         openLightHostModernDebugConsoleIfNeeded();
@@ -73,6 +80,7 @@ public:
             && !hasParameter("--no-restore-active-plugins")
             && !hasParameter("-no-restore-active-plugins");
         mainWindow = std::make_unique<IconMenu>(safeMode, debugEnabled, restoreActivePlugins);
+        if (hasParameter("--show-ui")) mainWindow->showInterface();
         if (profile.test)
         {
             auto info = new DynamicObject();
@@ -91,6 +99,8 @@ public:
         appProperties = nullptr;
         LookAndFeel::setDefaultLookAndFeel (nullptr);
         lightHostModernLog("Debug log saved to: " + getLightHostModernDebugLogPath());
+        lightHostModern::verbose::log("lifecycle","host_shutdown");
+        lightHostModern::verbose::logger().shutdown();
     }
 
     void systemRequestedQuit() override

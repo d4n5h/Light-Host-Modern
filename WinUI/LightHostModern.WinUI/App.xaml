@@ -10,6 +10,7 @@
             </ResourceDictionary.MergedDictionaries>
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="AppStatusLinkBrush" Color="#005A9E" />
                     <StaticResource x:Key="AppSidebarBrush" ResourceKey="LayerFillColorDefaultBrush" />
                     <StaticResource x:Key="AppCardBrush" ResourceKey="CardBackgroundFillColorDefaultBrush" />
                     <StaticResource x:Key="AppSolidBackgroundBrush" ResourceKey="SolidBackgroundFillColorBaseBrush" />
@@ -35,6 +36,7 @@
                     <StaticResource x:Key="AppStatusAvailableStrokeBrush" ResourceKey="TextFillColorSecondaryBrush" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="AppStatusLinkBrush" Color="#60A5FA" />
                     <StaticResource x:Key="AppSidebarBrush" ResourceKey="LayerFillColorDefaultBrush" />
                     <StaticResource x:Key="AppCardBrush" ResourceKey="CardBackgroundFillColorDefaultBrush" />
                     <StaticResource x:Key="AppSolidBackgroundBrush" ResourceKey="SolidBackgroundFillColorBaseBrush" />
@@ -60,6 +62,7 @@
                     <StaticResource x:Key="AppStatusAvailableStrokeBrush" ResourceKey="TextFillColorSecondaryBrush" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
+                    <StaticResource x:Key="AppStatusLinkBrush" ResourceKey="SystemColorHotlightColorBrush" />
                     <StaticResource x:Key="AppSidebarBrush" ResourceKey="SystemColorWindowColorBrush" />
                     <StaticResource x:Key="AppCardBrush" ResourceKey="SystemColorWindowColorBrush" />
                     <StaticResource x:Key="AppSolidBackgroundBrush" ResourceKey="SystemColorWindowColorBrush" />
@@ -85,6 +88,9 @@
                     <StaticResource x:Key="AppStatusAvailableStrokeBrush" ResourceKey="SystemColorButtonTextColorBrush" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
+            <Style x:Key="AppStatusLinkStyle" TargetType="HyperlinkButton">
+                <Setter Property="Foreground" Value="{ThemeResource AppStatusLinkBrush}" />
+            </Style>
             <Style x:Key="AppCardStyle" TargetType="Border">
                 <Setter Property="MinHeight" Value="72" />
                 <Setter Property="Padding" Value="16" />

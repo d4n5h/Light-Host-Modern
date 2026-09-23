@@ -1,5 +1,6 @@
 #include "DebugLog.h"
 #include "RuntimeProfile.h"
+#include "VerboseLog.h"
 
 #if JUCE_WINDOWS
  #ifndef NOMINMAX
@@ -55,8 +56,9 @@ namespace
 	class LightHostModernDebugLogger final : public Logger
 	{
 	public:
-		void logMessage(const String& message) override
-		{
+        void logMessage(const String& message) override
+        {
+            lightHostModern::verbose::log("juce",message.toStdString());
 			if (!debugEnabled)
 				return;
 
@@ -93,6 +95,7 @@ namespace
 #if JUCE_WINDOWS
 	LONG WINAPI lightHostModernUnhandledExceptionFilter(EXCEPTION_POINTERS* exceptionInfo)
 	{
+        lightHostModern::verbose::fatalException(exceptionInfo);
 		uint32 code = 0;
 		void* address = nullptr;
 
@@ -132,9 +135,11 @@ void setLightHostModernDebugEnabled(bool enabled)
 
 		Logger::setCurrentLogger(&debugLogger);
 	}
-	else if (Logger::getCurrentLogger() == &debugLogger)
+    else if (lightHostModern::verbose::logger().active())
+        Logger::setCurrentLogger(&debugLogger);
+    else if (Logger::getCurrentLogger() == &debugLogger)
 	{
-		Logger::setCurrentLogger(nullptr);
+        Logger::setCurrentLogger(nullptr);
 	}
 }
 
@@ -193,6 +198,7 @@ void installLightHostModernCrashDiagnostics()
 
 void lightHostModernLog(const String& message)
 {
+    lightHostModern::verbose::log("host",message.toStdString());
 	if (!debugEnabled)
 		return;
 

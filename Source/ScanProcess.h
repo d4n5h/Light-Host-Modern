@@ -1,6 +1,7 @@
 #pragma once
 #include "IpcPipe.h"
 #include "ProcessMetrics.h"
+#include "ScanTiming.h"
 #include <atomic>
 #include <functional>
 #include <string>
@@ -22,14 +23,15 @@ inline std::wstring quoteArgument(const std::wstring& value)
     return result + L'"';
 }
 
-enum class Exit { success, launchFailed, failed, timeout, cancelled };
+enum class Exit { success, launchFailed, failed, timeout, totalTimeout, cancelled };
 struct Result { Exit outcome; DWORD code; };
 
 inline Result run(const std::wstring& executable, const std::wstring& arguments,
                   const std::function<bool()>& cancelled, DWORD timeoutMs = 60000,
-                  const std::function<void()>& poll = {}, const std::function<uint64_t()>& progress = {})
+                  const std::function<void()>& poll = {}, const std::function<uint64_t()>& progress = {}, DWORD totalTimeoutMs = 1800000)
 {
     using lightHostModern::ipc::Handle;
+    StageTiming timing("process", "arguments=" + verbose::utf8(arguments));
     if (cancelled()) return { Exit::cancelled, ERROR_CANCELLED };
     Handle job(CreateJobObjectW(nullptr, nullptr));
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits {};
@@ -43,6 +45,30 @@ inline Result run(const std::wstring& executable, const std::wstring& arguments,
                         CREATE_SUSPENDED | CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process))
         return { Exit::launchFailed, GetLastError() };
     Handle child(process.hProcess), thread(process.hThread);
+    struct WorkerStatistics
+    {
+        HANDLE process;
+        StageTiming& timing;
+        ~WorkerStatistics() noexcept {
+            if (!timing.active()) return;
+            try {
+                timing.add("pid", GetProcessId(process));
+                FILETIME created{}, exited{}, kernel{}, user{};
+                if (GetProcessTimes(process, &created, &exited, &kernel, &user)) {
+                    const auto ticks = [](FILETIME t) { return (uint64_t(t.dwHighDateTime) << 32) | t.dwLowDateTime; };
+                    timing.add("cpuMs", double(ticks(kernel) + ticks(user)) / 10000.0);
+                }
+                IO_COUNTERS io{};
+                if (GetProcessIoCounters(process, &io)) {
+                    timing.add("readBytes", static_cast<double>(io.ReadTransferCount));
+                    timing.add("writeBytes", static_cast<double>(io.WriteTransferCount));
+                }
+                PROCESS_MEMORY_COUNTERS memory{}; memory.cb = sizeof(memory);
+                if (GetProcessMemoryInfo(process, &memory, sizeof(memory)))
+                    timing.add("peakWorkingSet", static_cast<double>(memory.PeakWorkingSetSize));
+            } catch (...) {}
+        }
+    } statistics{child.get(), timing};
     struct WorkerAccounting
     {
         HANDLE process;
@@ -80,11 +106,18 @@ inline Result run(const std::wstring& executable, const std::wstring& arguments,
     }
     if (ResumeThread(thread.get()) == static_cast<DWORD>(-1))
         return { Exit::launchFailed, GetLastError() };
+    timing.add("launchMs", timing.elapsedMs());
     auto deadline = GetTickCount64() + timeoutMs;
+    auto totalDeadline = GetTickCount64() + totalTimeoutMs;
     auto progressToken = progress ? progress() : 0;
     for (;;)
     {
+        // Consumer backpressure is intentional and must not count as worker
+        // inactivity or against its processing-time limit.
+        const auto beforePoll=GetTickCount64();
         if (poll) poll();
+        const auto consumerTime=GetTickCount64()-beforePoll;
+        deadline+=consumerTime;totalDeadline+=consumerTime;
         if (progress && progress() != progressToken)
         {
             progressToken = progress();
@@ -98,12 +131,12 @@ inline Result run(const std::wstring& executable, const std::wstring& arguments,
             if (!GetExitCodeProcess(child.get(), &code)) return { Exit::failed, GetLastError() };
             return { code == 0 ? Exit::success : Exit::failed, code };
         }
-        if (cancelled() || GetTickCount64() >= deadline || wait == WAIT_FAILED)
+        if (cancelled() || GetTickCount64() >= deadline || GetTickCount64() >= totalDeadline || wait == WAIT_FAILED)
         {
             const bool wasCancelled = cancelled();
             TerminateJobObject(job.get(), ERROR_CANCELLED);
             WaitForSingleObject(child.get(), 1000);
-            return { wasCancelled ? Exit::cancelled : (wait == WAIT_FAILED ? Exit::failed : Exit::timeout), ERROR_CANCELLED };
+            return { wasCancelled ? Exit::cancelled : (wait == WAIT_FAILED ? Exit::failed : GetTickCount64()>=totalDeadline?Exit::totalTimeout:Exit::timeout), ERROR_CANCELLED };
         }
     }
 }
