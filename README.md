@@ -28,8 +28,6 @@ LightHostModern is a native Windows audio plugin host for running VST3 and optio
 
 ## 🖼️ Demo
 
-LightHostModern 1.4.0, shown in an isolated demonstration profile. Device, plugin and diagnostic values illustrate the interface.
-
 ![LightHostModern dashboard](docs/images/dashboard.png)
 
 ![Audio device and stream configuration](docs/images/audio.png)
