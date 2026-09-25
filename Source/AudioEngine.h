@@ -139,6 +139,7 @@ public:
 	String removeStrip(const String& id);
 	String renameStrip(const String& id, const String& name);
 	String setStripRouting(const String& id, bool allInputs, bool allOutputs, const std::vector<int>& inputs, const std::vector<int>& outputs);
+	String setStripWidth(const String& id, bool stereo);
 	String setStripGain(const String& id, float gainDb);
 	String setStripPan(const String& id, float pan);
 	String setStripColor(const String& id, int color);
@@ -171,6 +172,7 @@ public:
 				+ ",\"name\":" + JSON::toString(var(strip.name), true)
 				+ ",\"allInputs\":" + String(strip.allInputs ? "true" : "false")
 				+ ",\"allOutputs\":" + String(strip.allOutputs ? "true" : "false")
+				+ ",\"stereo\":" + String(strip.stereo ? "true" : "false")
 				+ ",\"gainDb\":" + String(strip.gainDb, 2)
 				+ ",\"pan\":" + String(strip.pan, 3)
 				+ ",\"color\":" + String(strip.color)

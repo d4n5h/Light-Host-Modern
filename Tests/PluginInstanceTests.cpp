@@ -307,13 +307,27 @@ int main(int argc, char** argv)
         broken->getChildByName("STRIP")->setAttribute("id", extra.id);
         require(!round.deserialize(*broken) && round.strips.size() == 2, "duplicate strip id");
         broken = instances.serialize();
-        for (int index = 0; index < 15; ++index)
+        for (int index = 0; index < 190; ++index)
         {
             auto* strip = broken->createNewChildElement("STRIP");
             strip->setAttribute("id", String::toHexString(index + 3).paddedLeft('0', 32));
             strip->setAttribute("name", "S" + String(index));
         }
-        require(!round.deserialize(*broken) && round.strips.size() == 2, "17 strips");
+        require(round.deserialize(*broken) && round.strips.size() == 192, "192 strips");
+        broken = instances.serialize();
+        for (int index = 0; index < 191; ++index)
+        {
+            auto* strip = broken->createNewChildElement("STRIP");
+            strip->setAttribute("id", String::toHexString(index + 3).paddedLeft('0', 32));
+            strip->setAttribute("name", "S" + String(index));
+        }
+        require(!round.deserialize(*broken) && round.strips.size() == 192, "193 strips");
+        instances.strips[0].stereo = true;
+        instances.strips[0].allInputs = false;
+        instances.strips[0].inputs = { 1, 12 };
+        PluginInstances paired;
+        require(paired.deserialize(*instances.serialize()) && paired.strips[0].stereo
+            && paired.strips[0].inputs.size() == 2 && paired.strips[0].inputs[0] == 1 && paired.strips[0].inputs[1] == 12, "stereo pair");
         broken = instances.serialize();
         broken->setAttribute("version", 3);
         require(!round.deserialize(*broken) && round.records[0].id == record.id, "version 3");

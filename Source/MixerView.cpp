@@ -253,6 +253,7 @@ ChannelStripComponent::ChannelStripComponent(AudioEngine& engineIn, bool masterI
     {
         addAndMakeVisible(inputBox);
         addAndMakeVisible(outputBox);
+        addAndMakeVisible(outputBox2);
         addAndMakeVisible(plusButton);
         addAndMakeVisible(soloStrip);
         addAndMakeVisible(pan);
@@ -261,23 +262,28 @@ ChannelStripComponent::ChannelStripComponent(AudioEngine& engineIn, bool masterI
         plusButton.onClick = [this] { PluginBrowser::open(engine, stripId); };
         soloStrip.setClickingTogglesState(true);
         soloStrip.onClick = [this] { if (!applying) engine.setStripSolo(stripId, soloStrip.getToggleState()); };
-        inputBox.onChange = [this] {
-            if (applying) return;
-            auto strip = std::find_if(engine.chainStrips().begin(), engine.chainStrips().end(), [&](const auto& item) { return item.id == stripId; });
-            if (strip == engine.chainStrips().end()) return;
-            const int id = inputBox.getSelectedId();
-            if (id <= 1) engine.setStripRouting(stripId, true, strip->allOutputs, {}, strip->outputs);
-            else if (id - 2 < (int) inputChannels.size())
-                engine.setStripRouting(stripId, false, strip->allOutputs, { inputChannels[(size_t) (id - 2)] }, strip->outputs);
+        inputBox.setTextWhenNothingSelected("Inputs");
+        inputBox.onMenu = [this] { showInputMenu(); };
+        const auto chosen = [](const juce::ComboBox& box, const std::vector<int>& channels, int firstId) {
+            const int index = box.getSelectedId() - firstId;
+            return index >= 0 && index < (int) channels.size() ? channels[(size_t) index] : -1;
         };
-        outputBox.onChange = [this] {
+        outputBox.onChange = outputBox2.onChange = [this, chosen] {
             if (applying) return;
             auto strip = std::find_if(engine.chainStrips().begin(), engine.chainStrips().end(), [&](const auto& item) { return item.id == stripId; });
             if (strip == engine.chainStrips().end()) return;
-            const int id = outputBox.getSelectedId();
-            if (id <= 1) engine.setStripRouting(stripId, strip->allInputs, true, strip->inputs, {});
-            else if (id - 2 < (int) outputChannels.size())
-                engine.setStripRouting(stripId, strip->allInputs, false, strip->inputs, { outputChannels[(size_t) (id - 2)] });
+            if (outputBox.getSelectedId() <= 1)
+            {
+                engine.setStripRouting(stripId, strip->allInputs, true, strip->inputs, {});
+                return;
+            }
+            const int left = chosen(outputBox, outputChannels, 2);
+            const int right = chosen(outputBox2, outputChannels, 1);
+            if (left < 0) return;
+            if (right < 0 || right == left)
+                engine.setStripRouting(stripId, strip->allInputs, false, strip->inputs, { left });
+            else
+                engine.setStripRouting(stripId, strip->allInputs, false, strip->inputs, { left, right });
         };
         pan.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
         pan.setRange(-1.0, 1.0, 0.01);
@@ -321,8 +327,10 @@ void ChannelStripComponent::setStrip(const lightHostModern::ChainStrip& strip, c
     color = strip.color;
     colourHex = strip.colour;
     nameButton.setButtonText(strip.name);
+    const bool widthChanged = stereo != strip.stereo;
+    stereo = strip.stereo;
     const auto config = engine.getAudioDeviceConfiguration();
-    juce::String signature = "all";
+    juce::String signature = "inputs";
     std::vector<int> channels;
     for (int i = 0; i < (int) config.activeInputChannels.size(); ++i)
         if (config.activeInputChannels[(size_t) i])
@@ -336,28 +344,23 @@ void ChannelStripComponent::setStrip(const lightHostModern::ChainStrip& strip, c
     {
         inputSignature = signature;
         inputChannels = channels;
-        applying = true;
-        inputBox.clear(juce::dontSendNotification);
-        inputBox.addItem("All inputs", 1);
-        for (int i = 0; i < (int) inputChannels.size(); ++i)
-        {
-            const auto channel = inputChannels[(size_t) i];
-            const auto label = channel < (int) config.inputChannelNames.size() && config.inputChannelNames[(size_t) channel].isNotEmpty()
-                ? config.inputChannelNames[(size_t) channel] : "In " + juce::String(channel + 1);
-            inputBox.addItem(label, i + 2);
-        }
-        applying = false;
     }
+    const auto channelLabel = [&](int channel, const std::vector<juce::String>& names, const char* prefix) {
+        return channel < names.size() && names[channel].isNotEmpty() ? names[channel] : juce::String(prefix) + juce::String(channel + 1);
+    };
+    const auto selectChannel = [](juce::ComboBox& box, const std::vector<int>& choices, int channel, int firstId) {
+        const auto found = std::find(choices.begin(), choices.end(), channel);
+        if (found != choices.end()) box.setSelectedId((int) std::distance(choices.begin(), found) + firstId, juce::dontSendNotification);
+    };
     applying = true;
-    if (strip.allInputs) inputBox.setSelectedId(1, juce::dontSendNotification);
-    else if (strip.inputs.size() == 1)
+    if (strip.allInputs) inputBox.setText("All inputs", juce::dontSendNotification);
+    else
     {
-        const auto found = std::find(inputChannels.begin(), inputChannels.end(), strip.inputs[0]);
-        if (found != inputChannels.end()) inputBox.setSelectedId((int) std::distance(inputChannels.begin(), found) + 2, juce::dontSendNotification);
-        else inputBox.setText("1 input", juce::dontSendNotification);
+        juce::StringArray picked;
+        for (int channel : strip.inputs) picked.add(channelLabel(channel, config.inputChannelNames, "In "));
+        inputBox.setText(picked.isEmpty() ? "All inputs" : picked.joinIntoString(", "), juce::dontSendNotification);
     }
-    else inputBox.setText(juce::String((int) strip.inputs.size()) + " inputs", juce::dontSendNotification);
-    juce::String outputKey = "all";
+    juce::String outputKey = "outputs";
     std::vector<int> outputs;
     for (int i = 0; i < (int) config.activeOutputChannels.size(); ++i)
         if (config.activeOutputChannels[(size_t) i])
@@ -373,27 +376,32 @@ void ChannelStripComponent::setStrip(const lightHostModern::ChainStrip& strip, c
         outputChannels = outputs;
         applying = true;
         outputBox.clear(juce::dontSendNotification);
+        outputBox2.clear(juce::dontSendNotification);
         outputBox.addItem("All outputs", 1);
         for (int i = 0; i < (int) outputChannels.size(); ++i)
         {
             const auto channel = outputChannels[(size_t) i];
-            const auto label = channel < (int) config.outputChannelNames.size() && config.outputChannelNames[(size_t) channel].isNotEmpty()
-                ? config.outputChannelNames[(size_t) channel] : "Out " + juce::String(channel + 1);
+            const auto label = channelLabel(channel, config.outputChannelNames, "Out ");
             outputBox.addItem(label, i + 2);
+            outputBox2.addItem(label, i + 1);
         }
         applying = false;
     }
     applying = true;
     muteStrip.setToggleState(strip.muted, juce::dontSendNotification);
     soloStrip.setToggleState(strip.solo, juce::dontSendNotification);
+    const bool showPair = !strip.allOutputs;
+    const bool layoutChanged = widthChanged || outputBox2.isVisible() != showPair;
+    outputBox2.setVisible(showPair);
     if (strip.allOutputs) outputBox.setSelectedId(1, juce::dontSendNotification);
-    else if (strip.outputs.size() == 1)
+    else if (!strip.outputs.empty()) selectChannel(outputBox, outputChannels, strip.outputs[0], 2);
+    if (strip.outputs.size() > 1) selectChannel(outputBox2, outputChannels, strip.outputs[1], 1);
+    else if (!strip.outputs.empty())
     {
-        const auto found = std::find(outputChannels.begin(), outputChannels.end(), strip.outputs[0]);
-        if (found != outputChannels.end()) outputBox.setSelectedId((int) std::distance(outputChannels.begin(), found) + 2, juce::dontSendNotification);
-        else outputBox.setText("1 output", juce::dontSendNotification);
+        const int selected = strip.outputs[0];
+        const int other = selected % 2 == 0 ? selected + 1 : selected - 1;
+        selectChannel(outputBox2, outputChannels, other, 1);
     }
-    else outputBox.setText(juce::String((int) strip.outputs.size()) + " outputs", juce::dontSendNotification);
     if (!fader.isMouseButtonDown()) fader.setValue(strip.gainDb, juce::dontSendNotification);
     if (!pan.isMouseButtonDown()) pan.setValue(strip.pan, juce::dontSendNotification);
     applying = false;
@@ -405,6 +413,7 @@ void ChannelStripComponent::setStrip(const lightHostModern::ChainStrip& strip, c
     {
         for (int i = 0; i < inserts.size(); ++i)
             inserts[i]->setPlugin(plugins[(size_t) i].displayName(), !plugins[(size_t) i].bypassed);
+        if (layoutChanged) resized();
         repaint();
         return;
     }
@@ -424,6 +433,83 @@ void ChannelStripComponent::setStrip(const lightHostModern::ChainStrip& strip, c
         addAndMakeVisible(button);
     }
     resized();
+}
+
+void ChannelStripComponent::showInputMenu()
+{
+    auto strip = std::find_if(engine.chainStrips().begin(), engine.chainStrips().end(), [&](const auto& item) { return item.id == stripId; });
+    if (strip == engine.chainStrips().end()) return;
+    const auto config = engine.getAudioDeviceConfiguration();
+    struct Choice { bool all = true; std::vector<int> inputs; };
+    auto choice = std::make_shared<Choice>();
+    choice->all = strip->allInputs;
+    choice->inputs = strip->inputs;
+    struct Row : juce::PopupMenu::CustomComponent
+    {
+        int channel = -1;
+        juce::String text;
+        bool tick = false;
+        std::function<void()> toggle;
+        Row(int channel, juce::String text, bool tick, std::function<void()> toggle)
+            : CustomComponent(false), channel(channel), text(std::move(text)), tick(tick), toggle(std::move(toggle)) {}
+        void getIdealSize(int& width, int& height) override { width = 220; height = 24; }
+        void paint(juce::Graphics& graphics) override
+        {
+            if (isItemHighlighted()) graphics.fillAll(juce::Colour(0xff3d5a80));
+            auto box = juce::Rectangle<float>(8.0f, (getHeight() - 12.0f) / 2.0f, 12.0f, 12.0f);
+            graphics.setColour(juce::Colour(0xfff2f2f2));
+            graphics.drawRoundedRectangle(box, 2.0f, 1.0f);
+            if (tick) graphics.fillRoundedRectangle(box.reduced(3.0f), 1.0f);
+            graphics.drawText(text, getLocalBounds().withTrimmedLeft(28), juce::Justification::centredLeft);
+        }
+        void mouseUp(const juce::MouseEvent& event) override
+        {
+            if (event.mouseWasClicked() && toggle) toggle();
+        }
+    };
+    auto rows = std::make_shared<std::vector<Row*>>();
+    auto toggle = [this, choice, rows](int channel) {
+        if (channel < 0)
+        {
+            if (choice->all) return;
+            choice->all = true;
+            choice->inputs.clear();
+        }
+        else
+        {
+            choice->all = false;
+            auto found = std::find(choice->inputs.begin(), choice->inputs.end(), channel);
+            if (found != choice->inputs.end()) choice->inputs.erase(found);
+            else
+            {
+                if (choice->inputs.size() == 2) choice->inputs.erase(choice->inputs.begin());
+                choice->inputs.push_back(channel);
+            }
+            if (choice->inputs.empty()) choice->all = true;
+        }
+        for (auto* row : *rows)
+            row->tick = row->channel < 0 ? choice->all
+                : !choice->all && std::find(choice->inputs.begin(), choice->inputs.end(), row->channel) != choice->inputs.end();
+        for (auto* row : *rows) row->repaint();
+        auto current = std::find_if(engine.chainStrips().begin(), engine.chainStrips().end(), [&](const auto& item) { return item.id == stripId; });
+        if (current == engine.chainStrips().end()) return;
+        engine.setStripRouting(stripId, choice->all, current->allOutputs, choice->inputs, current->outputs);
+    };
+    juce::PopupMenu menu;
+    auto add = [&](int channel, juce::String text, bool tick) {
+        auto row = std::make_unique<Row>(channel, text, tick, [toggle, channel] { toggle(channel); });
+        rows->push_back(row.get());
+        menu.addCustomItem(channel + 2, std::move(row), nullptr, text);
+    };
+    add(-1, "All inputs", choice->all);
+    for (int channel : inputChannels)
+    {
+        const auto text = channel < (int) config.inputChannelNames.size() && config.inputChannelNames[(size_t) channel].isNotEmpty()
+            ? config.inputChannelNames[(size_t) channel] : "In " + juce::String(channel + 1);
+        const bool tick = !choice->all && std::find(choice->inputs.begin(), choice->inputs.end(), channel) != choice->inputs.end();
+        add(channel, text, tick);
+    }
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&inputBox));
 }
 
 void ChannelStripComponent::paint(juce::Graphics& graphics)
@@ -491,7 +577,11 @@ void ChannelStripComponent::resized()
         panReadout.setBounds(layout.pan.removeFromBottom(16));
     }
     auto insertsArea = layout.inserts;
-    if (!master) outputBox.setBounds(insertsArea.removeFromTop(28).reduced(0, 1));
+    if (!master)
+    {
+        outputBox.setBounds(insertsArea.removeFromTop(26).reduced(0, 1));
+        if (outputBox2.isVisible()) outputBox2.setBounds(insertsArea.removeFromTop(26).reduced(0, 1));
+    }
     const int rowHeight = 26;
     auto list = insertsArea;
     if (!master) list.setHeight(juce::jmax(0, list.getHeight() - rowHeight));

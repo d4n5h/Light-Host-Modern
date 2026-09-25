@@ -252,6 +252,17 @@ private:
     void showPluginGap(int y);
     void clearDrag();
     void dropPlugin(const juce::String& source);
+    void showInputMenu();
+
+    struct InputCombo : juce::ComboBox
+    {
+        std::function<void()> onMenu;
+        void showPopup() override
+        {
+            hidePopup();
+            if (onMenu) onMenu();
+        }
+    };
 
     AudioEngine& engine;
     bool master = false;
@@ -259,7 +270,8 @@ private:
     juce::String stripId;
     StripNameButton nameButton;
     ClickLabel gainLabel, panReadout;
-    juce::ComboBox inputBox, outputBox;
+    InputCombo inputBox;
+    juce::ComboBox outputBox, outputBox2;
     MarkButton muteStrip { "M", juce::Colour(0xffc44545) }, soloStrip { "S", juce::Colour(0xffd4a017) };
     juce::TextButton plusButton;
     juce::Slider pan, fader;
@@ -272,6 +284,7 @@ private:
     int pluginDropY = -1;
     int stripEdge = -1;
     juce::String pluginInsertBefore;
+    bool stereo = false;
     juce::String groupName, inputSignature, outputSignature;
     std::vector<int> inputChannels, outputChannels;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChannelStripComponent)

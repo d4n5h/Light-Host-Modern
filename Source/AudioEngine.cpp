@@ -734,10 +734,20 @@ void AudioEngine::loadActivePlugins()
             for (int physical : strip.inputs) item.inputMap.push_back(packed(inputMask, physical));
         if (!strip.allOutputs)
             for (int physical : strip.outputs) item.outputMap.push_back(packed(outputMask, physical));
+        if (!strip.allOutputs && item.outputMap.size() == 1 && item.outputMap[0] >= 0)
+        {
+            const int selected = item.outputMap[0];
+            const int other = selected % 2 == 0 ? selected + 1 : selected - 1;
+            if (other >= 0 && other < outputMask.countNumberOfSetBits())
+            {
+                item.outputMap[0] = juce::jmin(selected, other);
+                item.outputMap.push_back(juce::jmax(selected, other));
+            }
+        }
         if (!strip.allInputs || !strip.allOutputs)
         {
             item.busChannels = jmax(1, jmax((int) item.inputMap.size(), (int) item.outputMap.size()));
-            if (item.inputMap.size() == 1 && item.outputMap.size() >= 2) item.busChannels = jmax(item.busChannels, 2);
+            if (item.inputMap.size() <= 1 && item.outputMap.size() >= 2) item.busChannels = jmax(item.busChannels, 2);
         }
         for (size_t index = 0; index < snapshot->slots.size() && index < slotStrips.size(); ++index)
             if (slotStrips[index] == strip.id) item.slots.push_back(snapshot->slots[index]);
@@ -1304,7 +1314,7 @@ String AudioEngine::addStrip(const String& name)
 {
     if (!isSessionWritable()) return "session_read_only";
     instances.ensureStrips();
-    if ((int) instances.strips.size() >= 16) return "strip_limit";
+    if ((int) instances.strips.size() >= lightHostModern::maximumStrips) return "strip_limit";
     String normalized;
     if (!lightHostModern::normalizeInstanceName(name, normalized) || normalized.isEmpty()) return "profile_name_invalid";
     chainHistory.record(instances);
@@ -1317,8 +1327,11 @@ String AudioEngine::addStrip(const String& name)
     {
         const int input = device->getActiveInputChannels().findNextSetBit(0);
         if (input >= 0) strip.inputs.push_back(input);
-        if (device->getActiveOutputChannels()[0]) strip.outputs.push_back(0);
-        if (device->getActiveOutputChannels()[1]) strip.outputs.push_back(1);
+        const auto outputs = device->getActiveOutputChannels();
+        const int first = outputs.findNextSetBit(0);
+        const int second = first < 0 ? -1 : outputs.findNextSetBit(first + 1);
+        if (first >= 0) strip.outputs.push_back(first);
+        if (second >= 0) strip.outputs.push_back(second);
     }
     if (strip.inputs.empty()) strip.allInputs = true;
     if (strip.outputs.empty()) strip.allOutputs = true;
@@ -1363,12 +1376,87 @@ String AudioEngine::setStripRouting(const String& id, bool allInputs, bool allOu
     if (!isSessionWritable()) return "session_read_only";
     auto* strip = const_cast<lightHostModern::ChainStrip*>(instances.findStrip(id));
     if (!strip) return "strip_not_found";
-    if ((!allInputs && inputs.empty()) || (!allOutputs && outputs.empty())) return "invalid_arguments";
+    auto routed = outputs;
+    if (!allOutputs && routed.size() == 1)
+    {
+        const auto active = getAudioDeviceConfiguration().activeOutputChannels;
+        const int selected = routed[0];
+        const int other = selected % 2 == 0 ? selected + 1 : selected - 1;
+        if (other >= 0 && other < (int) active.size() && active[(size_t) other])
+            routed = { jmin(selected, other), jmax(selected, other) };
+    }
+    if ((!allInputs && inputs.empty()) || (!allOutputs && routed.empty())) return "invalid_arguments";
+    if (inputs.size() == 2 && inputs[0] == inputs[1]) return "invalid_arguments";
+    if (routed.size() == 2 && routed[0] == routed[1]) return "invalid_arguments";
+    if (!allInputs && inputs.size() > 2) return "invalid_arguments";
+    if (!allOutputs && routed.size() > 2) return "invalid_arguments";
+    if (strip->allInputs == allInputs && strip->allOutputs == allOutputs && strip->inputs == inputs && strip->outputs == routed)
+        return {};
     chainHistory.record(instances);
     strip->allInputs = allInputs;
     strip->allOutputs = allOutputs;
     strip->inputs = inputs;
-    strip->outputs = outputs;
+    strip->outputs = routed;
+    strip->stereo = !allInputs && inputs.size() == 2;
+    loadActivePlugins();
+    saveActivePluginChain(false);
+    return {};
+}
+
+String AudioEngine::setStripWidth(const String& id, bool stereo)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    auto* strip = const_cast<lightHostModern::ChainStrip*>(instances.findStrip(id));
+    if (!strip) return "strip_not_found";
+    if (strip->stereo == stereo) return {};
+    const auto config = getAudioDeviceConfiguration();
+    const auto partner = [](const std::vector<bool>& active, int current) {
+        for (int i = current + 1; i < (int) active.size(); ++i)
+            if (active[(size_t) i]) return i;
+        for (int i = 0; i < current && i < (int) active.size(); ++i)
+            if (active[(size_t) i]) return i;
+        return -1;
+    };
+    chainHistory.record(instances);
+    strip->stereo = stereo;
+    if (!stereo)
+    {
+        if (!strip->inputs.empty()) strip->inputs.resize(1);
+        if (!strip->outputs.empty()) strip->outputs.resize(1);
+    }
+    else
+    {
+        if (strip->allInputs)
+        {
+            const auto found = std::find(config.activeInputChannels.begin(), config.activeInputChannels.end(), true);
+            const int first = (int) std::distance(config.activeInputChannels.begin(), found);
+            if (first < (int) config.activeInputChannels.size())
+            {
+                strip->allInputs = false;
+                strip->inputs = { first };
+            }
+        }
+        if (!strip->allInputs && strip->inputs.size() == 1)
+        {
+            const int second = partner(config.activeInputChannels, strip->inputs[0]);
+            if (second >= 0) strip->inputs.push_back(second);
+        }
+        if (strip->allOutputs)
+        {
+            const auto found = std::find(config.activeOutputChannels.begin(), config.activeOutputChannels.end(), true);
+            const int first = (int) std::distance(config.activeOutputChannels.begin(), found);
+            if (first < (int) config.activeOutputChannels.size())
+            {
+                strip->allOutputs = false;
+                strip->outputs = { first };
+            }
+        }
+        if (!strip->allOutputs && strip->outputs.size() == 1)
+        {
+            const int second = partner(config.activeOutputChannels, strip->outputs[0]);
+            if (second >= 0) strip->outputs.push_back(second);
+        }
+    }
     loadActivePlugins();
     saveActivePluginChain(false);
     return {};

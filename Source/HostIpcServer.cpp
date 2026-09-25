@@ -702,7 +702,7 @@ String HostIpcServer::dispatchRequest(const lightHostModern::ipc::Request& reque
         if (code == "profile_catalog_invalid") return "The profile list is damaged and was not changed.";
         if (code == "profile_active") return "Switch to another profile before deleting this one.";
         if (code == "strip_not_found") return "That strip no longer exists.";
-        if (code == "strip_limit") return "You can add up to 16 strips.";
+        if (code == "strip_limit") return "You can add up to 192 channels.";
         if (code == "last_strip") return "The last strip cannot be removed.";
         if (code == "nothing_to_undo") return "Nothing to undo.";
         if (code == "nothing_to_redo") return "Nothing to redo.";

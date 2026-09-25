@@ -298,7 +298,7 @@ public:
         inputToggles.clear();
         outputToggles.clear();
         const auto addChannels = [this](juce::Component& parent, juce::OwnedArray<juce::ToggleButton>& store, const std::vector<juce::String>& names, const std::vector<bool>& active, bool inputSide) {
-            for (int i = 0; i < (int) names.size() && i < 32; ++i)
+            for (int i = 0; i < (int) names.size() && i < 192; ++i)
             {
                 auto* toggle = store.add(new juce::ToggleButton(names[(size_t) i]));
                 toggle->setToggleState(i < (int) active.size() && active[(size_t) i], juce::dontSendNotification);

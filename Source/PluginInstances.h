@@ -31,10 +31,13 @@ inline juce::String knownPluginId(const juce::PluginDescription& description)
     return juce::SHA256(identity.toRawUTF8(), identity.getNumBytesAsUTF8()).toHexString();
 }
 
+inline constexpr int maximumStrips = 192;
+
 struct ChainStrip
 {
     juce::String id, name = "Main";
     bool allInputs = true, allOutputs = true;
+    bool stereo = false;
     std::vector<int> inputs, outputs;
     float gainDb = 0.0f;
     float pan = 0.0f;
@@ -111,7 +114,7 @@ public:
     void ensureStrips()
     {
         if (strips.empty()) strips.push_back(defaultStrip());
-        if (strips.size() > 16) strips.resize(16);
+        if (strips.size() > (size_t) maximumStrips) strips.resize((size_t) maximumStrips);
         for (auto& record : records)
             if (record.stripId.isEmpty() || std::none_of(strips.begin(), strips.end(), [&](const auto& strip) { return strip.id == record.stripId; }))
                 record.stripId = strips.front().id;
@@ -237,6 +240,7 @@ public:
             item->setAttribute("name", strip.name);
             item->setAttribute("allInputs", strip.allInputs);
             item->setAttribute("allOutputs", strip.allOutputs);
+            item->setAttribute("stereo", strip.stereo);
             item->setAttribute("gainDb", clampGainDb(strip.gainDb));
             item->setAttribute("pan", clampPan(strip.pan));
             item->setAttribute("color", juce::jlimit(0, 8, strip.color));
@@ -312,6 +316,7 @@ public:
                 strip.name = name;
                 strip.allInputs = item->getBoolAttribute("allInputs", true);
                 strip.allOutputs = item->getBoolAttribute("allOutputs", true);
+                strip.stereo = item->getBoolAttribute("stereo", false);
                 strip.gainDb = clampGainDb(static_cast<float>(item->getDoubleAttribute("gainDb")));
                 strip.pan = clampPan(static_cast<float>(item->getDoubleAttribute("pan", 0.0)));
                 strip.color = juce::jlimit(0, 8, item->getIntAttribute("color", 0));
@@ -323,6 +328,7 @@ public:
                 if (!channels(item->getStringAttribute("inputs"), strip.inputs)
                     || !channels(item->getStringAttribute("outputs"), strip.outputs)) return false;
                 if ((!strip.allInputs && strip.inputs.empty()) || (!strip.allOutputs && strip.outputs.empty())) return false;
+                strip.stereo = !strip.allInputs && strip.inputs.size() == 2;
                 loadedStrips.push_back(std::move(strip));
                 continue;
             }
@@ -365,7 +371,7 @@ public:
             loaded.push_back(std::move(record));
         }
         if (version == 1) loadedStrips = { defaultStrip() };
-        if (loadedStrips.empty() || loadedStrips.size() > 16) return false;
+        if (loadedStrips.empty() || (int) loadedStrips.size() > maximumStrips) return false;
         for (auto& record : loaded)
         {
             if (version == 1) record.stripId = loadedStrips.front().id;

@@ -542,14 +542,16 @@ void RealtimeHostProcessor::processStrips(ChainSnapshot& snapshot, AudioBuffer<f
         }
         const auto& delayed = strip.runtime ? strip.runtime->align.output() : bus;
         const bool monoBus = busChannels == 1 && strip.outputMap.size() > 1;
+        const bool monoSource = strip.inputMap.size() <= 1;
+        const bool stereoImage = !strip.allInputs && !monoSource && strip.outputMap.size() >= 2;
         const float targetPan = strip.runtime ? strip.runtime->targetPan.load(std::memory_order_relaxed) : 0.0f;
         const bool panLive = strip.runtime && strip.outputMap.size() >= 2
-            && (strip.runtime->pan != 0.0f || targetPan != 0.0f);
+            && (stereoImage || strip.runtime->pan != 0.0f || targetPan != 0.0f);
         const auto scatter = [&](int sampleCount, int sampleOffset, float leftGain, float rightGain) {
             for (int index = 0; index < (int) strip.outputMap.size(); ++index)
             {
                 const int destination = strip.outputMap[static_cast<size_t>(index)];
-                const int source = monoBus ? 0 : index;
+                const int source = (monoBus || (monoSource && index < 2)) ? 0 : index;
                 if (destination < 0 || destination >= channels || source >= delayed.getNumChannels()) continue;
                 const float gain = index == 0 ? leftGain : index == 1 ? rightGain : 1.0f;
                 mixBus.addFrom(destination, sampleOffset, delayed, source, sampleOffset, sampleCount, gain);
@@ -565,9 +567,21 @@ void RealtimeHostProcessor::processStrips(ChainSnapshot& snapshot, AudioBuffer<f
             strip.runtime->pan += jlimit(-step, step, targetPan - strip.runtime->pan);
             const float position = strip.runtime->pan;
             float leftGain = 1.0f, rightGain = 1.0f;
+            if (stereoImage && delayed.getNumChannels() >= 1)
+            {
+                const float angle = (position + 1.0f) * 0.25f * juce::MathConstants<float>::pi;
+                const float inLeft = delayed.getSample(0, i);
+                const float inRight = delayed.getNumChannels() > 1 ? delayed.getSample(1, i) : 0.0f;
+                const float mix = (inLeft + inRight) * std::sqrt(2.0f);
+                const int destLeft = strip.outputMap[0];
+                const int destRight = strip.outputMap[1];
+                if (destLeft >= 0 && destLeft < channels) mixBus.addSample(destLeft, i, mix * std::cos(angle));
+                if (destRight >= 0 && destRight < channels) mixBus.addSample(destRight, i, mix * std::sin(angle));
+                continue;
+            }
             if (position != 0.0f)
             {
-                if (busChannels == 1)
+                if (busChannels == 1 || monoSource)
                 {
                     const float angle = (position + 1.0f) * 0.25f * juce::MathConstants<float>::pi;
                     leftGain = std::cos(angle);
