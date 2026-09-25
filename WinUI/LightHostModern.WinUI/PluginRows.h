@@ -34,6 +34,7 @@ inline std::string foldPluginText(const std::string& value)
         std::string manufacturer;
         std::string format;
         std::string path;
+        std::string stripId;
         std::string status;
         bool bypassed = false;
         int originalIndex = -1;
@@ -153,6 +154,7 @@ inline std::string foldPluginText(const std::string& value)
             row.manufacturer = rowString(object, L"manufacturer");
             row.format = rowString(object, L"format");
             row.path = rowString(object, L"path");
+            row.stripId = rowString(object, L"stripId");
             row.bypassed = rowBoolean(object, L"bypassed");
             row.status = row.bypassed ? "Bypassed" : "Active";
             const auto loading = rowString(object, L"loading", "loaded");

@@ -1,6 +1,6 @@
 # Architecture and IPC
 
-LightHostModern uses two cooperating native desktop processes. This keeps the realtime host independent from the lifetime and rendering work of the WinUI shell.
+The host window is a JUCE `DocumentWindow`. `--show-ui` and the notification-area icon open that window. It calls `AudioEngine` on the message thread. The named-pipe server remains for tests and other clients. `LightHostModernWinUI.exe` is no longer launched.
 
 ## Process model
 
@@ -70,7 +70,7 @@ Read operations include:
 
 Mutation commands cover audio selection, channel masks, persistence options, plugin scanning, database actions, chain actions, startup, tray behavior, VST2, and icon changes.
 
-Protocol 4 uses persistent `instanceId` strings for remove, duplicate, bypass, editor, move-up/down, move-to, and swap commands. Move-to and swap receive two instance IDs, resolved against the current processing order on the host message thread. An absent instance returns `instance_not_found`; it cannot redirect an old action to the new occupant of a list position. Installed actions use a stable `knownId`, derived from the original format, module identifier and class ID. Versions 1–3 are rejected before dispatch.
+Protocol 4 uses persistent `instanceId` strings for remove, duplicate, bypass, editor, move-up/down, move-to, and swap commands. Strip edits use `add-strip`, `remove-strip`, `rename-strip`, `set-strip-routing`, `set-strip-gain`, `set-master-gain`, `add-known-plugin-at`, `move-plugin-to-strip`, `undo-chain`, and `redo-chain`. Snapshots include `strips`, `masterGainDb`, `chainHistory`, and each plugin's `stripId`. Move-to and swap receive two instance IDs, resolved against the current processing order on the host message thread. An absent instance returns `instance_not_found`; it cannot redirect an old action to the new occupant of a list position. Installed actions use a stable `knownId`, derived from the original format, module identifier and class ID. Versions 1–3 are rejected before dispatch.
 
 An ordered instance collection owns UUIDs independently of plugin descriptions. The transitional `pluginInstancesV1` adapter preserves legacy XML and exact state keys and backs up the original preferences before migration. Duplicating never modifies vendor UIDs. Reordering, filtering, missing modules, and UI recreation do not generate new IDs. Ambiguous legacy data is retained without guessing another plugin's identity. The [versioned session writer](session-contract.md) now persists this model with atomic replacement and recoverable backups.
 

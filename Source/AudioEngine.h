@@ -10,6 +10,9 @@
 #include "HostAudioPlayer.h"
 #include "ProcessMetrics.h"
 #include "SessionStore.h"
+#include "ChainProfileStore.h"
+#include "TemplateStore.h"
+#include "ChainHistory.h"
 
 ApplicationProperties& getAppProperties();
 
@@ -47,6 +50,20 @@ public:
 	const StringArray& getStateCaptureFailures() const { return stateCaptureFailures; }
 	bool isSessionWritable() const { return instances.writable && !sessionLoadSuppressed; }
 	bool flushSession();
+	lightHostModern::ChainProfileCatalog chainProfileCatalog() const { return chainProfiles ? chainProfiles->catalog() : lightHostModern::ChainProfileCatalog{}; }
+	uint64 getProfileVersion() const noexcept { return profileVersion; }
+	String createChainProfile(const String& name);
+	String switchChainProfile(const String& id);
+	String renameChainProfile(const String& id, const String& name);
+	String duplicateChainProfile(const String& id);
+	String deleteChainProfile(const String& id);
+	std::vector<lightHostModern::TemplateEntry> listTemplates() const { return templates ? templates->list() : std::vector<lightHostModern::TemplateEntry>{}; }
+	String activeTemplateId() const { return getAppProperties().getUserSettings()->getValue("activeTemplate"); }
+	String createTemplate(const String& name);
+	String updateTemplate(const String& id);
+	String recallTemplate(const String& id);
+	String renameTemplate(const String& id, const String& name);
+	String deleteTemplate(const String& id);
 	int findKnownPluginIndexById(const String& id) const;
 	int findPluginIndexById(const PluginInstanceId& id) const;
 	void setGlobalMuted(bool value) { if (hostProcessor.setGlobalMuted(value)) ++chainVersion; }
@@ -117,6 +134,55 @@ public:
 
 	void addPluginFromMenuId(int menuId);
 	bool addKnownPluginByIndex(int sortedIndex);
+	String addKnownPluginAt(int sortedIndex, const String& stripId, const String& beforeInstanceId);
+	String addStrip(const String& name);
+	String removeStrip(const String& id);
+	String renameStrip(const String& id, const String& name);
+	String setStripRouting(const String& id, bool allInputs, bool allOutputs, const std::vector<int>& inputs, const std::vector<int>& outputs);
+	String setStripGain(const String& id, float gainDb);
+	String setStripPan(const String& id, float pan);
+	String setStripColor(const String& id, int color);
+	String setStripColour(const String& id, const String& hex);
+	String setStripMuted(const String& id, bool muted);
+	String setStripSolo(const String& id, bool solo);
+	String setStripGroup(const String& id, const String& group);
+	String orderStrips(const std::vector<std::pair<String, String>>& order);
+	float getStripLevel(const String& id) const { return hostProcessor.getStripLevel(id); }
+	float getMasterLevel() const { return hostProcessor.getMasterLevel(); }
+	String setMasterGain(float gainDb);
+	String movePluginToStrip(const String& instanceId, const String& stripId, const String& beforeInstanceId);
+	bool undoChain();
+	bool redoChain();
+	bool canUndoChain() const { return chainHistory.canUndo(); }
+	bool canRedoChain() const { return chainHistory.canRedo(); }
+	float masterGainDb() const { return instances.masterGainDb; }
+	const std::vector<lightHostModern::ChainStrip>& chainStrips() const { return instances.strips; }
+	String stripsJson() const
+	{
+		StringArray items;
+		for (const auto& strip : instances.strips)
+		{
+			const auto list = [](const std::vector<int>& values) {
+				String text = "[";
+				for (size_t i = 0; i < values.size(); ++i) text += (i ? "," : "") + String(values[i]);
+				return text + "]";
+			};
+			items.add("{\"id\":" + JSON::toString(var(strip.id), true)
+				+ ",\"name\":" + JSON::toString(var(strip.name), true)
+				+ ",\"allInputs\":" + String(strip.allInputs ? "true" : "false")
+				+ ",\"allOutputs\":" + String(strip.allOutputs ? "true" : "false")
+				+ ",\"gainDb\":" + String(strip.gainDb, 2)
+				+ ",\"pan\":" + String(strip.pan, 3)
+				+ ",\"color\":" + String(strip.color)
+				+ ",\"colour\":" + JSON::toString(var(strip.colour), true)
+				+ ",\"muted\":" + String(strip.muted ? "true" : "false")
+				+ ",\"solo\":" + String(strip.solo ? "true" : "false")
+				+ ",\"group\":" + JSON::toString(var(strip.group), true)
+				+ ",\"inputs\":" + list(strip.inputs)
+				+ ",\"outputs\":" + list(strip.outputs) + "}");
+		}
+		return "[" + items.joinIntoString(",") + "]";
+	}
 	void duplicatePlugin(int sortedIndex);
 	int removeKnownPluginByIndex(int sortedIndex);
 	int clearKnownPlugins();
@@ -124,7 +190,7 @@ public:
 	void removePlugin(int sortedIndex);
 	void movePluginUp(int sortedIndex);
 	void movePluginDown(int sortedIndex);
-	void movePluginToIndex(int fromSortedIndex, int toSortedIndex);
+	void movePluginToIndex(int fromSortedIndex, int toSortedIndex, bool recordHistory = true, bool adoptStrip = true);
 	void setPluginBypassed(int sortedIndex, bool shouldBypass);
 	bool renamePlugin(int sortedIndex, const String& name);
 	bool renameKnownPlugin(int sortedIndex, const String& name);
@@ -150,6 +216,7 @@ public:
 	uint64 getAudioConfigVersion() const noexcept { return deviceController.getVersion(); }
 
 private:
+	lightHostModern::TemplateSnapshot captureTemplate();
 	enum TimerIds
 	{
 		audioWatchdogTimerId = 1,
@@ -165,6 +232,8 @@ private:
 	void logDiagnosticsSnapshot();
 	std::unique_ptr<XmlElement> getXmlValuePreserving(const String& key);
 	void saveActivePluginList();
+	void syncEditorWindows(bool saveNow = false);
+	String prepareChainProfileChange();
 	void saveActivePluginChain(bool saveProcessorStates);
 	void saveCurrentAudioChannelState();
 	void applySavedAudioChannelState(AudioDeviceManager::AudioDeviceSetup& setup,
@@ -190,6 +259,7 @@ private:
 	uint64 settingsFlushCount = 0;
 	uint64 pluginStateSaveCount = 0;
 	uint64 chainVersion = 0;
+	uint64 profileVersion = 0;
 	uint64 pluginDatabaseVersion = 0;
 
 	PluginStateStore pluginStateStore;
@@ -199,7 +269,11 @@ private:
 	AudioPluginFormatManager formatManager;
 	KnownPluginList knownPluginList;
 	lightHostModern::PluginInstances instances;
+	lightHostModern::ChainHistory chainHistory;
+	double editorStableSince = 0;
 	std::unique_ptr<lightHostModern::SessionStore> sessionStore;
+	std::unique_ptr<lightHostModern::ChainProfileStore> chainProfiles;
+	std::unique_ptr<lightHostModern::TemplateStore> templates;
 	String sessionMigrationId;
 	StringArray stateCaptureFailures;
 	uint64 lastSessionStatusSerial = 0;

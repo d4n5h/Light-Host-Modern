@@ -1,0 +1,963 @@
+#include "MixerView.h"
+#include <juce_gui_extra/juce_gui_extra.h>
+
+namespace
+{
+juce::String panText(double value)
+{
+    const int amount = (int) std::lround(std::abs(value) * 100.0);
+    if (amount == 0) return "pan 0";
+    return value < 0 ? "pan < " + juce::String(amount) : "pan > " + juce::String(amount);
+}
+
+juce::String panEdit(double value)
+{
+    const int amount = (int) std::lround(std::abs(value) * 100.0);
+    if (amount == 0) return "C";
+    return juce::String(amount) + (value < 0 ? "L" : "R");
+}
+
+class PluginBrowser : public juce::Component
+{
+public:
+    static void open(AudioEngine& engine, const juce::String& stripId)
+    {
+        auto* browser = new PluginBrowser(engine, stripId);
+        juce::DialogWindow::LaunchOptions options;
+        options.content.setOwned(browser);
+        options.dialogTitle = "Add plugin";
+        options.dialogBackgroundColour = juce::Colour(0xff1e1e1e);
+        options.escapeKeyTriggersCloseButton = true;
+        options.useNativeTitleBar = true;
+        options.resizable = true;
+        options.launchAsync();
+    }
+
+    PluginBrowser(AudioEngine& engineIn, juce::String strip) : engine(engineIn), stripId(std::move(strip))
+    {
+        setLookAndFeel(&shellLook());
+        setSize(680, 480);
+        addAndMakeVisible(search);
+        addAndMakeVisible(format);
+        addAndMakeVisible(type);
+        addAndMakeVisible(manufacturer);
+        addAndMakeVisible(list);
+        addAndMakeVisible(add);
+        search.setTextToShowWhenEmpty("Search", juce::Colour(0xffb8b8b8));
+        add.setButtonText("Add");
+        format.addItem("All formats", 1);
+        format.addItem("VST3", 2);
+        format.addItem("VST", 3);
+        format.setSelectedId(1, juce::dontSendNotification);
+        const char* types[] = { "All", "Dynamics", "EQ", "Reverb", "Delay", "Modulation", "Distortion", "Filter", "Pitch", "Spatial", "Instrument", "Analyzer", "Restoration", "Tools", "Other" };
+        for (int i = 0; i < 15; ++i) type.addItem(types[i], i + 1);
+        type.setSelectedId(1, juce::dontSendNotification);
+        manufacturer.addItem("All manufacturers", 1);
+        juce::StringArray names;
+        for (const auto& plugin : engine.getKnownPluginsSorted())
+            if (plugin.manufacturerName.isNotEmpty()) names.addIfNotAlreadyThere(plugin.manufacturerName);
+        names.sort(true);
+        for (int i = 0; i < names.size(); ++i) manufacturer.addItem(names[i], i + 2);
+        manufacturer.setSelectedId(1, juce::dontSendNotification);
+        list.setModel(&model);
+        list.setRowHeight(28);
+        model.onActivate = [this](int) { addSelected(); };
+        auto refill = [this] { applyFilter(); };
+        search.onTextChange = refill;
+        format.onChange = refill;
+        type.onChange = refill;
+        manufacturer.onChange = refill;
+        add.onClick = [this] { addSelected(); };
+        applyFilter();
+    }
+
+    ~PluginBrowser() override { setLookAndFeel(nullptr); }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced(8);
+        auto bar = area.removeFromTop(28);
+        search.setBounds(bar.removeFromLeft(160));
+        bar.removeFromLeft(6);
+        format.setBounds(bar.removeFromLeft(100));
+        bar.removeFromLeft(6);
+        type.setBounds(bar.removeFromLeft(130));
+        bar.removeFromLeft(6);
+        manufacturer.setBounds(bar);
+        add.setBounds(area.removeFromBottom(32).removeFromRight(100));
+        area.removeFromBottom(8);
+        list.setBounds(area);
+    }
+
+    void paint(juce::Graphics& graphics) override { graphics.fillAll(juce::Colour(0xff1e1e1e)); }
+
+private:
+    void applyFilter()
+    {
+        const auto query = search.getText();
+        const auto chosenFormat = format.getSelectedId() <= 1 ? juce::String() : format.getText();
+        const auto chosenType = type.getSelectedId() <= 1 ? juce::String() : type.getText();
+        const auto chosenMaker = manufacturer.getSelectedId() <= 1 ? juce::String() : manufacturer.getText();
+        model.plugins.clear();
+        for (const auto& plugin : engine.getKnownPluginsSorted())
+            if (pluginMatches(plugin, query, chosenFormat, chosenMaker, chosenType)) model.plugins.push_back(plugin);
+        list.updateContent();
+        list.repaint();
+    }
+
+    void addSelected()
+    {
+        const int row = list.getSelectedRow();
+        if (row < 0 || row >= (int) model.plugins.size()) return;
+        engine.addKnownPluginAt(engine.findKnownPluginIndexById(lightHostModern::knownPluginId(model.plugins[(size_t) row])), stripId, {});
+        if (auto* window = findParentComponentOfClass<juce::DialogWindow>()) window->exitModalState(0);
+    }
+
+    AudioEngine& engine;
+    juce::String stripId;
+    juce::TextEditor search;
+    juce::ComboBox format, type, manufacturer;
+    juce::TextButton add;
+    PluginListModel model;
+    juce::ListBox list { "plugins", nullptr };
+};
+}
+
+class ChannelStripComponent::InsertButton : public juce::Component, public juce::DragAndDropTarget
+{
+public:
+    InsertButton(juce::String id, juce::String drag) : instanceId(std::move(id)), dragId(std::move(drag))
+    {
+        addAndMakeVisible(name);
+        addAndMakeVisible(dots);
+        name.row = this;
+        dots.row = this;
+        name.onClick = [this] { if (onOpen) onOpen(); };
+        dots.onClick = [this] { if (onMenu) onMenu(); };
+    }
+    void setPlugin(const juce::String& text, bool active)
+    {
+        name.setButtonText(text);
+        engaged = active;
+        repaint();
+    }
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        dots.setBounds(area.removeFromRight(18).reduced(1, 1));
+        name.setBounds(area);
+    }
+    bool isInterestedInDragSource(const SourceDetails& details) override
+    {
+        const auto source = details.description.toString();
+        return source.startsWith("known:") || source.startsWith("instance:");
+    }
+    void itemDragEnter(const SourceDetails& details) override { hover(details); }
+    void itemDragMove(const SourceDetails& details) override { hover(details); }
+    void itemDragExit(const SourceDetails&) override { if (onHover) onHover(-1); dropEdge = 0; }
+    void itemDropped(const SourceDetails& details) override
+    {
+        hover(details);
+        if (onDrop) onDrop(details.description.toString());
+        if (onHover) onHover(-1);
+    }
+    void setDropEdge(int edge)
+    {
+        if (dropEdge == edge) return;
+        dropEdge = edge;
+        repaint();
+    }
+    std::function<void()> onOpen, onMenu;
+    std::function<void(const juce::String&)> onDrop;
+    std::function<void(int)> onHover;
+    juce::String instanceId, dragId;
+    int dropEdge = 0;
+    bool engaged = true;
+
+private:
+    struct RowButton : juce::TextButton
+    {
+        InsertButton* row = nullptr;
+        void paintButton(juce::Graphics& graphics, bool over, bool down) override
+        {
+            auto colour = row != nullptr && row->engaged ? juce::Colour(0xff2a62c9) : juce::Colour(0xff5a5a5a);
+            if (down) colour = colour.darker(0.15f);
+            else if (over) colour = colour.brighter(0.12f);
+            graphics.setColour(colour);
+            graphics.fillRoundedRectangle(getLocalBounds().toFloat().reduced(0.5f), 3.0f);
+            graphics.setColour(juce::Colours::white);
+            if (getButtonText().isNotEmpty())
+                graphics.drawFittedText(getButtonText(), getLocalBounds().reduced(4, 0), juce::Justification::centredLeft, 1);
+            if (row == nullptr || row->dropEdge == 0) return;
+            graphics.setColour(juce::Colours::white);
+            graphics.fillRect(row->dropEdge == 1 ? getLocalBounds().removeFromTop(3) : getLocalBounds().removeFromBottom(3));
+        }
+        void mouseUp(const juce::MouseEvent& event) override
+        {
+            if (event.getDistanceFromDragStart() > 8)
+            {
+                setState(buttonNormal);
+                return;
+            }
+            juce::TextButton::mouseUp(event);
+        }
+    };
+    struct NameButton : RowButton
+    {
+        void mouseDrag(const juce::MouseEvent& event) override
+        {
+            if (row->dragId.isNotEmpty() && event.getDistanceFromDragStart() > 8)
+                if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor(this))
+                    container->startDragging(row->dragId, row);
+        }
+    };
+    struct DotsButton : RowButton
+    {
+        void paintButton(juce::Graphics& graphics, bool over, bool down) override
+        {
+            RowButton::paintButton(graphics, over, down);
+            graphics.setColour(juce::Colours::white);
+            const auto centre = getLocalBounds().getCentre().toFloat();
+            for (int i = -1; i <= 1; ++i)
+                graphics.fillEllipse(centre.x - 1.5f, centre.y + (float) i * 4.0f - 1.5f, 3.0f, 3.0f);
+        }
+    };
+    void hover(const SourceDetails& details) { if (onHover) onHover(getY() + details.localPosition.y); }
+    NameButton name;
+    DotsButton dots;
+};
+
+ChannelStripComponent::ChannelStripComponent(AudioEngine& engineIn, bool masterIn)
+    : engine(engineIn), master(masterIn)
+{
+    addAndMakeVisible(nameButton);
+    addAndMakeVisible(gainLabel);
+    addAndMakeVisible(fader);
+    addAndMakeVisible(muteStrip);
+    nameButton.onClick = [this] { showStripMenu(); };
+    nameButton.dragDescription = [this] { return master ? juce::String() : "strip:" + stripId; };
+    gainLabel.setJustificationType(juce::Justification::centred);
+    gainLabel.onClick = [this] { editValue(gainLabel, true); };
+    fader.setSliderStyle(juce::Slider::LinearVertical);
+    fader.setRange(-60.0, 12.0, 0.1);
+    fader.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    fader.setDoubleClickReturnValue(true, 0.0, juce::ModifierKeys());
+    fader.addListener(this);
+    muteStrip.setClickingTogglesState(true);
+    muteStrip.onClick = [this] {
+        if (applying) return;
+        if (master) engine.setGlobalMuted(muteStrip.getToggleState());
+        else engine.setStripMuted(stripId, muteStrip.getToggleState());
+    };
+    if (!master)
+    {
+        addAndMakeVisible(inputBox);
+        addAndMakeVisible(outputBox);
+        addAndMakeVisible(plusButton);
+        addAndMakeVisible(soloStrip);
+        addAndMakeVisible(pan);
+        addAndMakeVisible(panReadout);
+        plusButton.setButtonText("+");
+        plusButton.onClick = [this] { PluginBrowser::open(engine, stripId); };
+        soloStrip.setClickingTogglesState(true);
+        soloStrip.onClick = [this] { if (!applying) engine.setStripSolo(stripId, soloStrip.getToggleState()); };
+        inputBox.onChange = [this] {
+            if (applying) return;
+            auto strip = std::find_if(engine.chainStrips().begin(), engine.chainStrips().end(), [&](const auto& item) { return item.id == stripId; });
+            if (strip == engine.chainStrips().end()) return;
+            const int id = inputBox.getSelectedId();
+            if (id <= 1) engine.setStripRouting(stripId, true, strip->allOutputs, {}, strip->outputs);
+            else if (id - 2 < (int) inputChannels.size())
+                engine.setStripRouting(stripId, false, strip->allOutputs, { inputChannels[(size_t) (id - 2)] }, strip->outputs);
+        };
+        outputBox.onChange = [this] {
+            if (applying) return;
+            auto strip = std::find_if(engine.chainStrips().begin(), engine.chainStrips().end(), [&](const auto& item) { return item.id == stripId; });
+            if (strip == engine.chainStrips().end()) return;
+            const int id = outputBox.getSelectedId();
+            if (id <= 1) engine.setStripRouting(stripId, strip->allInputs, true, strip->inputs, {});
+            else if (id - 2 < (int) outputChannels.size())
+                engine.setStripRouting(stripId, strip->allInputs, false, strip->inputs, { outputChannels[(size_t) (id - 2)] });
+        };
+        pan.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        pan.setRange(-1.0, 1.0, 0.01);
+        pan.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+        pan.setDoubleClickReturnValue(true, 0.0, juce::ModifierKeys());
+        pan.addListener(this);
+        panReadout.setJustificationType(juce::Justification::centred);
+        panReadout.onClick = [this] { editValue(panReadout, false); };
+    }
+}
+
+ChannelStripComponent::~ChannelStripComponent() = default;
+
+void ChannelStripComponent::setMeter(float peak)
+{
+    if (std::abs(peak - meterPeak) < 0.001f) return;
+    meterPeak = peak;
+    repaint(meterBounds);
+}
+
+void ChannelStripComponent::setMaster(float gainDb)
+{
+    stripId.clear();
+    groupName.clear();
+    color = 0;
+    colourHex.clear();
+    nameButton.setButtonText("Master");
+    applying = true;
+    muteStrip.setToggleState(engine.isGlobalMuted(), juce::dontSendNotification);
+    if (!fader.isMouseButtonDown()) fader.setValue(gainDb, juce::dontSendNotification);
+    applying = false;
+    gainLabel.setText(juce::String(gainDb, 1) + " dB", juce::dontSendNotification);
+    inserts.clear();
+    resized();
+}
+
+void ChannelStripComponent::setStrip(const lightHostModern::ChainStrip& strip, const std::vector<lightHostModern::PluginInstanceRecord>& plugins)
+{
+    stripId = strip.id;
+    groupName = strip.group;
+    color = strip.color;
+    colourHex = strip.colour;
+    nameButton.setButtonText(strip.name);
+    const auto config = engine.getAudioDeviceConfiguration();
+    juce::String signature = "all";
+    std::vector<int> channels;
+    for (int i = 0; i < (int) config.activeInputChannels.size(); ++i)
+        if (config.activeInputChannels[(size_t) i])
+        {
+            channels.push_back(i);
+            const auto label = i < (int) config.inputChannelNames.size() && config.inputChannelNames[(size_t) i].isNotEmpty()
+                ? config.inputChannelNames[(size_t) i] : "In " + juce::String(i + 1);
+            signature += "|" + label;
+        }
+    if (signature != inputSignature)
+    {
+        inputSignature = signature;
+        inputChannels = channels;
+        applying = true;
+        inputBox.clear(juce::dontSendNotification);
+        inputBox.addItem("All inputs", 1);
+        for (int i = 0; i < (int) inputChannels.size(); ++i)
+        {
+            const auto channel = inputChannels[(size_t) i];
+            const auto label = channel < (int) config.inputChannelNames.size() && config.inputChannelNames[(size_t) channel].isNotEmpty()
+                ? config.inputChannelNames[(size_t) channel] : "In " + juce::String(channel + 1);
+            inputBox.addItem(label, i + 2);
+        }
+        applying = false;
+    }
+    applying = true;
+    if (strip.allInputs) inputBox.setSelectedId(1, juce::dontSendNotification);
+    else if (strip.inputs.size() == 1)
+    {
+        const auto found = std::find(inputChannels.begin(), inputChannels.end(), strip.inputs[0]);
+        if (found != inputChannels.end()) inputBox.setSelectedId((int) std::distance(inputChannels.begin(), found) + 2, juce::dontSendNotification);
+        else inputBox.setText("1 input", juce::dontSendNotification);
+    }
+    else inputBox.setText(juce::String((int) strip.inputs.size()) + " inputs", juce::dontSendNotification);
+    juce::String outputKey = "all";
+    std::vector<int> outputs;
+    for (int i = 0; i < (int) config.activeOutputChannels.size(); ++i)
+        if (config.activeOutputChannels[(size_t) i])
+        {
+            outputs.push_back(i);
+            const auto label = i < (int) config.outputChannelNames.size() && config.outputChannelNames[(size_t) i].isNotEmpty()
+                ? config.outputChannelNames[(size_t) i] : "Out " + juce::String(i + 1);
+            outputKey += "|" + label;
+        }
+    if (outputKey != outputSignature)
+    {
+        outputSignature = outputKey;
+        outputChannels = outputs;
+        applying = true;
+        outputBox.clear(juce::dontSendNotification);
+        outputBox.addItem("All outputs", 1);
+        for (int i = 0; i < (int) outputChannels.size(); ++i)
+        {
+            const auto channel = outputChannels[(size_t) i];
+            const auto label = channel < (int) config.outputChannelNames.size() && config.outputChannelNames[(size_t) channel].isNotEmpty()
+                ? config.outputChannelNames[(size_t) channel] : "Out " + juce::String(channel + 1);
+            outputBox.addItem(label, i + 2);
+        }
+        applying = false;
+    }
+    applying = true;
+    muteStrip.setToggleState(strip.muted, juce::dontSendNotification);
+    soloStrip.setToggleState(strip.solo, juce::dontSendNotification);
+    if (strip.allOutputs) outputBox.setSelectedId(1, juce::dontSendNotification);
+    else if (strip.outputs.size() == 1)
+    {
+        const auto found = std::find(outputChannels.begin(), outputChannels.end(), strip.outputs[0]);
+        if (found != outputChannels.end()) outputBox.setSelectedId((int) std::distance(outputChannels.begin(), found) + 2, juce::dontSendNotification);
+        else outputBox.setText("1 output", juce::dontSendNotification);
+    }
+    else outputBox.setText(juce::String((int) strip.outputs.size()) + " outputs", juce::dontSendNotification);
+    if (!fader.isMouseButtonDown()) fader.setValue(strip.gainDb, juce::dontSendNotification);
+    if (!pan.isMouseButtonDown()) pan.setValue(strip.pan, juce::dontSendNotification);
+    applying = false;
+    gainLabel.setText(juce::String(strip.gainDb, 1) + " dB", juce::dontSendNotification);
+    panReadout.setText(panText(strip.pan), juce::dontSendNotification);
+    std::vector<juce::String> ids;
+    for (const auto& plugin : plugins) ids.push_back(plugin.id);
+    if (ids == insertIds)
+    {
+        for (int i = 0; i < inserts.size(); ++i)
+            inserts[i]->setPlugin(plugins[(size_t) i].displayName(), !plugins[(size_t) i].bypassed);
+        repaint();
+        return;
+    }
+    insertIds = ids;
+    inserts.clear();
+    for (const auto& plugin : plugins)
+    {
+        auto* button = inserts.add(new InsertButton(plugin.id, "instance:" + plugin.id));
+        button->setPlugin(plugin.displayName(), !plugin.bypassed);
+        button->onOpen = [this, id = plugin.id] {
+            const int index = engine.findPluginIndexById(id);
+            if (index >= 0) engine.showPluginEditor(index);
+        };
+        button->onMenu = [this, id = plugin.id] { showPluginMenu(id); };
+        button->onHover = [this](int y) { if (y < 0) clearDrag(); else showPluginGap(y); };
+        button->onDrop = [this](const juce::String& source) { dropPlugin(source); };
+        addAndMakeVisible(button);
+    }
+    resized();
+}
+
+void ChannelStripComponent::paint(juce::Graphics& graphics)
+{
+    graphics.setColour(stripFill(color, master ? juce::String() : colourHex));
+    graphics.fillRoundedRectangle(getLocalBounds().toFloat().reduced(2), 6.0f);
+    if (!meterBounds.isEmpty())
+    {
+        graphics.setColour(juce::Colour(0xff1a1a1a));
+        graphics.fillRect(meterBounds);
+        const float db = juce::Decibels::gainToDecibels(meterPeak, -60.0f);
+        const float amount = juce::jlimit(0.0f, 1.0f, (db + 60.0f) / 60.0f);
+        auto filled = meterBounds;
+        filled.setTop(meterBounds.getBottom() - juce::roundToInt(meterBounds.getHeight() * amount));
+        graphics.setColour(db > -3.0f ? juce::Colour(0xffff5d5d) : db > -12.0f ? juce::Colour(0xffffd166) : juce::Colour(0xff3dcc7a));
+        graphics.fillRect(filled);
+        graphics.setColour(juce::Colour(0xffb8b8b8));
+        graphics.setFont(10.0f);
+        for (float mark : { 0.0f, -6.0f, -12.0f, -24.0f, -48.0f })
+        {
+            const int y = meterBounds.getBottom() - juce::roundToInt((float) meterBounds.getHeight() * ((mark + 60.0f) / 60.0f));
+            graphics.fillRect(meterBounds.getX() - 4, y, 3, 1);
+            graphics.drawText(juce::String(mark, 0), tickBounds.withY(y - 6).withHeight(12), juce::Justification::centredRight, false);
+        }
+    }
+    if (pluginDropY >= 0)
+    {
+        graphics.setColour(juce::Colour(0xff4da3ff));
+        graphics.fillRect(8, pluginDropY - 1, getWidth() - 16, 3);
+    }
+    if (stripEdge >= 0)
+    {
+        graphics.setColour(juce::Colour(0xff4da3ff));
+        graphics.fillRect(stripEdge == 0 ? 2 : getWidth() - 5, 6, 3, getHeight() - 12);
+    }
+}
+
+void ChannelStripComponent::mouseDrag(const juce::MouseEvent& event)
+{
+    if (master || event.eventComponent != this || event.getDistanceFromDragStart() <= 8) return;
+    if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor(this))
+        container->startDragging("strip:" + stripId, this);
+}
+
+void ChannelStripComponent::resized()
+{
+    auto layout = layoutChannelStrip(getLocalBounds(), !master);
+    nameButton.setBounds(layout.name);
+    auto faderArea = layout.fader;
+    auto marks = faderArea.removeFromTop(26);
+    if (master) muteStrip.setBounds(marks.reduced(1, 1));
+    else
+    {
+        muteStrip.setBounds(marks.removeFromLeft(marks.getWidth() / 2).reduced(1, 1));
+        soloStrip.setBounds(marks.reduced(1, 1));
+    }
+    meterBounds = faderArea.removeFromRight(8).reduced(1, 0);
+    tickBounds = faderArea.removeFromRight(22);
+    fader.setBounds(faderArea);
+    gainLabel.setBounds(layout.gain);
+    if (!master)
+    {
+        inputBox.setBounds(layout.route);
+        pan.setBounds(layout.pan.withTrimmedBottom(16));
+        panReadout.setBounds(layout.pan.removeFromBottom(16));
+    }
+    auto insertsArea = layout.inserts;
+    if (!master) outputBox.setBounds(insertsArea.removeFromTop(28).reduced(0, 1));
+    const int rowHeight = 26;
+    auto list = insertsArea;
+    if (!master) list.setHeight(juce::jmax(0, list.getHeight() - rowHeight));
+    for (auto* button : inserts)
+    {
+        if (list.getHeight() < rowHeight) break;
+        button->setBounds(list.removeFromTop(rowHeight).reduced(0, 1));
+    }
+    if (!master)
+        plusButton.setBounds((list.getHeight() >= rowHeight ? list.removeFromTop(rowHeight) : insertsArea.removeFromBottom(rowHeight)).reduced(0, 1));
+}
+
+bool ChannelStripComponent::isInterestedInDragSource(const SourceDetails& details)
+{
+    const auto source = details.description.toString();
+    if (source.startsWith("strip:")) return true;
+    return !master && (source.startsWith("known:") || source.startsWith("instance:"));
+}
+
+void ChannelStripComponent::itemDragEnter(const SourceDetails& details) { updateDrag(details); }
+void ChannelStripComponent::itemDragMove(const SourceDetails& details) { updateDrag(details); }
+void ChannelStripComponent::itemDragExit(const SourceDetails&) { clearDrag(); }
+
+void ChannelStripComponent::updateDrag(const SourceDetails& details)
+{
+    const auto source = details.description.toString();
+    if (source.startsWith("strip:"))
+    {
+        for (auto* button : inserts) button->setDropEdge(0);
+        pluginDropY = -1;
+        const int edge = master || details.localPosition.x < getWidth() / 2 ? 0 : 1;
+        if (stripEdge != edge) { stripEdge = edge; repaint(); }
+        return;
+    }
+    stripEdge = -1;
+    showPluginGap(details.localPosition.y);
+}
+
+void ChannelStripComponent::showPluginGap(int y)
+{
+    pluginInsertBefore.clear();
+    pluginDropY = -1;
+    for (auto* button : inserts)
+    {
+        if (y < button->getBounds().getCentreY())
+        {
+            button->setDropEdge(1);
+            pluginInsertBefore = button->instanceId;
+            for (auto* other : inserts) if (other != button) other->setDropEdge(0);
+            repaint();
+            return;
+        }
+    }
+    for (auto* button : inserts) button->setDropEdge(0);
+    if (auto* last = inserts.getLast()) last->setDropEdge(2);
+    else pluginDropY = plusButton.getY();
+    repaint();
+}
+
+void ChannelStripComponent::clearDrag()
+{
+    for (auto* button : inserts) button->setDropEdge(0);
+    pluginDropY = -1;
+    stripEdge = -1;
+    pluginInsertBefore.clear();
+    repaint();
+}
+
+void ChannelStripComponent::dropPlugin(const juce::String& source)
+{
+    const auto before = pluginInsertBefore;
+    clearDrag();
+    if (source.startsWith("known:"))
+    {
+        engine.addKnownPluginAt(engine.findKnownPluginIndexById(source.fromFirstOccurrenceOf("known:", false, false)), stripId, before);
+        return;
+    }
+    if (!source.startsWith("instance:")) return;
+    const auto instance = source.fromFirstOccurrenceOf("instance:", false, false);
+    if (instance == before) return;
+    const auto found = std::find(insertIds.begin(), insertIds.end(), instance);
+    if (found != insertIds.end())
+    {
+        const auto next = found + 1 == insertIds.end() ? juce::String() : *(found + 1);
+        if (next == before) return;
+    }
+    engine.movePluginToStrip(instance, stripId, before);
+}
+
+void ChannelStripComponent::itemDropped(const SourceDetails& details)
+{
+    const auto source = details.description.toString();
+    if (source.startsWith("strip:"))
+    {
+        const bool after = stripEdge == 1;
+        clearDrag();
+        if (onStripDrop) onStripDrop(source.fromFirstOccurrenceOf("strip:", false, false), after);
+        return;
+    }
+    showPluginGap(details.localPosition.y);
+    dropPlugin(source);
+}
+
+void ChannelStripComponent::sliderValueChanged(juce::Slider* slider)
+{
+    if (applying) return;
+    if (slider == &fader)
+    {
+        const auto gain = (float) fader.getValue();
+        gainLabel.setText(juce::String(gain, 1) + " dB", juce::dontSendNotification);
+        if (master) engine.setMasterGain(gain);
+        else engine.setStripGain(stripId, gain);
+    }
+    else
+    {
+        panReadout.setText(panText(pan.getValue()), juce::dontSendNotification);
+        engine.setStripPan(stripId, (float) pan.getValue());
+    }
+}
+
+void ChannelStripComponent::showStripMenu()
+{
+    if (master) return;
+    juce::PopupMenu menu;
+    menu.addItem(1, "Rename");
+    menu.addItem(2, "Outputs");
+    juce::PopupMenu colors;
+    const char* names[] = { "None", "Blue", "Green", "Orange", "Red", "Purple", "Teal", "Yellow", "Pink" };
+    for (int i = 0; i < 9; ++i) colors.addItem(10 + i, names[i], true, colourHex.isEmpty() && color == i);
+    colors.addItem(19, "Custom...");
+    menu.addSubMenu("Color", colors);
+    menu.addItem(4, "Group...");
+    if (groupName.isNotEmpty()) menu.addItem(5, "Remove from group");
+    menu.addItem(3, "Remove");
+    menu.showMenuAsync(juce::PopupMenu::Options(), [this](int result) {
+        if (result == 1)
+        {
+            auto editor = std::make_shared<juce::AlertWindow>("Rename", "Strip name", juce::AlertWindow::NoIcon);
+            editor->addTextEditor("name", nameButton.getButtonText());
+            editor->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
+            editor->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+            editor->enterModalState(true, juce::ModalCallbackFunction::create([this, editor](int choice) {
+                if (choice == 1) engine.renameStrip(stripId, editor->getTextEditorContents("name"));
+            }), false);
+        }
+        else if (result == 2) applyRouting();
+        else if (result == 3) engine.removeStrip(stripId);
+        else if (result == 4)
+        {
+            auto editor = std::make_shared<juce::AlertWindow>("Group", "Group name", juce::AlertWindow::NoIcon);
+            editor->addTextEditor("name", groupName);
+            editor->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
+            editor->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+            editor->enterModalState(true, juce::ModalCallbackFunction::create([this, editor](int choice) {
+                if (choice == 1) engine.setStripGroup(stripId, editor->getTextEditorContents("name"));
+            }), false);
+        }
+        else if (result == 5) engine.setStripGroup(stripId, {});
+        else if (result >= 10 && result <= 18) engine.setStripColor(stripId, result - 10);
+        else if (result == 19) pickColour();
+    });
+}
+
+void ChannelStripComponent::applyRouting()
+{
+    auto strip = std::find_if(engine.chainStrips().begin(), engine.chainStrips().end(), [&](const auto& item) { return item.id == stripId; });
+    if (strip == engine.chainStrips().end()) return;
+    auto dialog = std::make_shared<juce::AlertWindow>("Outputs", juce::String(), juce::AlertWindow::NoIcon);
+    const auto list = [](const std::vector<int>& values) {
+        juce::String text;
+        for (size_t i = 0; i < values.size(); ++i) text += (i ? "," : "") + juce::String(values[i]);
+        return text;
+    };
+    const auto allInputs = strip->allInputs;
+    const auto inputs = strip->inputs;
+    dialog->addTextEditor("outputs", list(strip->outputs), "Output channels");
+    dialog->addButton("All outputs", 2);
+    dialog->addButton("Save", 1);
+    dialog->addButton("Cancel", 0);
+    dialog->enterModalState(true, juce::ModalCallbackFunction::create([this, dialog, allInputs, inputs](int choice) {
+        if (choice == 2) engine.setStripRouting(stripId, allInputs, true, inputs, {});
+        if (choice != 1) return;
+        std::vector<int> outputs;
+        for (auto part : juce::StringArray::fromTokens(dialog->getTextEditorContents("outputs"), ",", ""))
+        {
+            part = part.trim();
+            if (part.isNotEmpty()) outputs.push_back(part.getIntValue());
+        }
+        engine.setStripRouting(stripId, allInputs, outputs.empty(), inputs, outputs);
+    }), false);
+}
+
+void ChannelStripComponent::editValue(juce::Label& label, bool gain)
+{
+    auto* editor = new juce::TextEditor();
+    editor->setBounds(label.getBounds());
+    editor->setText(gain ? juce::String(fader.getValue(), 1) : panEdit(pan.getValue()), false);
+    editor->setSelectAllWhenFocused(true);
+    addAndMakeVisible(editor);
+    editor->grabKeyboardFocus();
+    auto commit = std::make_shared<bool>(false);
+    editor->onReturnKey = editor->onFocusLost = [this, editor, gain, commit] {
+        if (*commit) return;
+        *commit = true;
+        float value = 0.0f;
+        const auto ok = gain ? parseGainText(editor->getText(), value) : parsePanText(editor->getText(), value);
+        if (ok)
+        {
+            if (gain) fader.setValue(value, juce::sendNotificationSync);
+            else pan.setValue(value, juce::sendNotificationSync);
+        }
+        juce::MessageManager::callAsync([editor] { delete editor; });
+    };
+}
+
+void ChannelStripComponent::pickColour()
+{
+    struct Picker : juce::Component
+    {
+        Picker(AudioEngine& engineIn, juce::String id, juce::Colour current) : engine(engineIn), stripId(std::move(id)), start(current.toDisplayString(false).toLowerCase())
+        {
+            addAndMakeVisible(selector);
+            selector.setCurrentColour(current);
+            setSize(300, 360);
+        }
+        ~Picker() override
+        {
+            const auto hex = selector.getCurrentColour().toDisplayString(false).toLowerCase();
+            if (hex != start) engine.setStripColour(stripId, hex);
+        }
+        void resized() override { selector.setBounds(getLocalBounds()); }
+        AudioEngine& engine;
+        juce::String stripId, start;
+        juce::ColourSelector selector { juce::ColourSelector::showColourAtTop | juce::ColourSelector::showSliders | juce::ColourSelector::showColourspace };
+    };
+    const auto current = colourHex.length() == 6 ? juce::Colour::fromString("ff" + colourHex) : color > 0 ? stripPalette(color) : juce::Colour(0xff4da3ff);
+    juce::CallOutBox::launchAsynchronously(std::make_unique<Picker>(engine, stripId, current), nameButton.getScreenBounds(), nullptr);
+}
+
+void ChannelStripComponent::showPluginMenu(const juce::String& instanceId)
+{
+    const int index = engine.findPluginIndexById(instanceId);
+    if (index < 0) return;
+    juce::PopupMenu menu;
+    menu.addItem(1, engine.isPluginBypassed(index) ? "Enable" : "Bypass");
+    menu.addItem(2, "Delete");
+    menu.showMenuAsync(juce::PopupMenu::Options(), [this, index](int result) {
+        if (result == 1) engine.setPluginBypassed(index, !engine.isPluginBypassed(index));
+        else if (result == 2) engine.removePlugin(index);
+    });
+}
+
+MixerView::MixerView(AudioEngine& engineIn)
+    : engine(engineIn)
+{
+    addButton.setButtonText("+ Add channel");
+    undoButton.setButtonText("Undo");
+    redoButton.setButtonText("Redo");
+    muteButton.setButtonText("Mute");
+    bypassButton.setButtonText("Bypass");
+    newProfile.setButtonText("New");
+    for (auto* button : { &addButton, &undoButton, &redoButton, &muteButton, &bypassButton, &newProfile })
+        addAndMakeVisible(button);
+    addAndMakeVisible(profiles);
+    addAndMakeVisible(viewport);
+    viewport.setViewedComponent(&row, false);
+    viewport.setScrollBarsShown(false, true);
+    addButton.onClick = [this] { engine.addStrip("Strip"); };
+    undoButton.onClick = [this] { engine.undoChain(); };
+    redoButton.onClick = [this] { engine.redoChain(); };
+    muteButton.setClickingTogglesState(true);
+    bypassButton.setClickingTogglesState(true);
+    muteButton.onClick = [this] { engine.setGlobalMuted(muteButton.getToggleState()); };
+    bypassButton.onClick = [this] { engine.setGlobalBypassed(bypassButton.getToggleState()); };
+    newProfile.onClick = [this] {
+        auto editor = std::make_shared<juce::AlertWindow>("New profile", "Profile name", juce::AlertWindow::NoIcon);
+        editor->addTextEditor("name", {});
+        editor->addButton("Create", 1, juce::KeyPress(juce::KeyPress::returnKey));
+        editor->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+        editor->enterModalState(true, juce::ModalCallbackFunction::create([this, editor](int choice) {
+            if (choice != 1) return;
+            if (const auto error = engine.createChainProfile(editor->getTextEditorContents("name")); error.isNotEmpty())
+                juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Profile", error);
+        }), false);
+    };
+    profiles.onChange = [this] {
+        if (applying || profiles.getSelectedId() <= 0) return;
+        const auto catalog = engine.chainProfileCatalog();
+        const auto index = profiles.getSelectedId() - 1;
+        if (index >= 0 && index < (int) catalog.profiles.size())
+            engine.switchChainProfile(catalog.profiles[(size_t) index].id);
+    };
+    startTimerHz(30);
+}
+
+void MixerView::paint(juce::Graphics& graphics)
+{
+    graphics.fillAll(juce::Colour(0xff1e1e1e));
+}
+
+void MixerView::refresh()
+{
+    const auto catalog = engine.chainProfileCatalog();
+    applying = true;
+    profiles.clear(juce::dontSendNotification);
+    for (int i = 0; i < (int) catalog.profiles.size(); ++i)
+    {
+        profiles.addItem(catalog.profiles[(size_t) i].name, i + 1);
+        if (catalog.profiles[(size_t) i].id == catalog.activeId) profiles.setSelectedId(i + 1, juce::dontSendNotification);
+    }
+    if (profiles.getSelectedId() == 0) profiles.setText("Unsaved", juce::dontSendNotification);
+    applying = false;
+    undoButton.setEnabled(engine.canUndoChain());
+    redoButton.setEnabled(engine.canRedoChain());
+    muteButton.setToggleState(engine.isGlobalMuted(), juce::dontSendNotification);
+    bypassButton.setToggleState(engine.isGlobalBypassed(), juce::dontSendNotification);
+    const auto& chain = engine.chainStrips();
+    const auto& records = engine.getPluginInstances();
+    if (strips.size() != (int) chain.size() + 1)
+    {
+        row.removeAllChildren();
+        strips.clear();
+        groupHeaders.clear();
+        layoutKey.clear();
+        for (size_t i = 0; i < chain.size(); ++i)
+            strips.add(new ChannelStripComponent(engine, false));
+        strips.add(new ChannelStripComponent(engine, true));
+    }
+    for (int i = 0; i < (int) chain.size(); ++i)
+    {
+        std::vector<lightHostModern::PluginInstanceRecord> plugins;
+        for (const auto& record : records)
+            if (record.stripId == chain[(size_t) i].id) plugins.push_back(record);
+        strips[i]->setStrip(chain[(size_t) i], plugins);
+    }
+    if (auto* masterStrip = strips.getLast()) masterStrip->setMaster(engine.masterGainDb());
+    for (auto* strip : strips)
+        strip->onStripDrop = [this, strip](const juce::String& dragged, bool after) { moveStripTo(dragged, *strip, after); };
+    layoutStrips();
+}
+
+void MixerView::timerCallback()
+{
+    if (!isShowing()) return;
+    const auto& chain = engine.chainStrips();
+    const int count = juce::jmin((int) chain.size(), strips.size());
+    for (int i = 0; i < count; ++i)
+        strips[i]->setMeter(engine.getStripLevel(chain[(size_t) i].id));
+    if (strips.size() == (int) chain.size() + 1)
+        if (auto* master = strips.getLast()) master->setMeter(engine.getMasterLevel());
+}
+
+void MixerView::moveStripTo(const juce::String& draggedId, ChannelStripComponent& target, bool after)
+{
+    struct Item
+    {
+        juce::String id, group;
+        bool operator==(const Item& other) const { return id == other.id && group == other.group; }
+    };
+    std::vector<Item> order;
+    const int channels = strips.size() > 0 ? strips.size() - 1 : 0;
+    const auto add = [&](int index) { order.push_back({ strips[index]->id(), strips[index]->group() }); };
+    for (int i = 0; i < channels; ++i)
+        if (strips[i]->group().isEmpty()) add(i);
+    juce::StringArray seen;
+    for (int i = 0; i < channels; ++i)
+    {
+        const auto name = strips[i]->group();
+        if (name.isEmpty() || seen.contains(name, true)) continue;
+        seen.add(name);
+        for (int member = 0; member < channels; ++member)
+            if (strips[member]->group().equalsIgnoreCase(name)) add(member);
+    }
+    const auto previous = order;
+    Item dragged;
+    order.erase(std::remove_if(order.begin(), order.end(), [&](const Item& item) {
+        if (item.id != draggedId) return false;
+        dragged = item;
+        return true;
+    }), order.end());
+    if (dragged.id.isEmpty()) return;
+    auto insertAt = order.end();
+    auto group = dragged.group;
+    if (!target.isMaster())
+    {
+        insertAt = std::find_if(order.begin(), order.end(), [&](const Item& item) { return item.id == target.id(); });
+        if (insertAt == order.end()) return;
+        group = insertAt->group;
+        if (after) ++insertAt;
+    }
+    else if (!order.empty())
+        group = order.back().group;
+    dragged.group = group;
+    order.insert(insertAt, dragged);
+    if (order == previous) return;
+    std::vector<std::pair<juce::String, juce::String>> next;
+    for (const auto& item : order) next.emplace_back(item.id, item.group);
+    engine.orderStrips(next);
+}
+
+void MixerView::toggleGroup(const juce::String& name)
+{
+        if (collapsed.contains(name, true)) collapsed.removeString(name, true);
+        else collapsed.add(name);
+    layoutStrips();
+}
+
+void MixerView::layoutStrips()
+{
+    const int height = juce::jmax(viewport.getHeight(), 480);
+    const int channels = strips.size() > 0 ? strips.size() - 1 : 0;
+    juce::String key = juce::String(height) + ":" + juce::String(channels) + ":" + collapsed.joinIntoString("|").toLowerCase();
+    for (int i = 0; i < channels; ++i) key += "\n" + strips[i]->group().toLowerCase();
+    if (key == layoutKey) return;
+    layoutKey = key;
+    groupHeaders.clear();
+    int x = 0;
+    for (int i = 0; i < channels; ++i) strips[i]->setVisible(false);
+    auto place = [&](juce::Component& component, int width) {
+        row.addAndMakeVisible(component);
+        component.setBounds(x, 0, width, height);
+        component.setVisible(true);
+        x += width;
+    };
+    for (int i = 0; i < channels; ++i)
+        if (strips[i]->group().isEmpty()) place(*strips[i], 128);
+    juce::StringArray seen;
+    for (int i = 0; i < channels; ++i)
+    {
+        const auto name = strips[i]->group();
+        if (name.isEmpty() || seen.contains(name, true)) continue;
+        seen.add(name);
+        const bool open = !collapsed.contains(name, true);
+        auto* header = groupHeaders.add(new juce::TextButton((open ? "v " : "> ") + name));
+        header->onClick = [this, name] { toggleGroup(name); };
+        place(*header, 36);
+        for (int member = 0; member < channels; ++member)
+        {
+            if (!strips[member]->group().equalsIgnoreCase(name)) continue;
+            strips[member]->setVisible(open);
+            if (open) place(*strips[member], 128);
+        }
+    }
+    row.setSize(juce::jmax(1, x), height);
+}
+
+void MixerView::resized()
+{
+    auto area = getLocalBounds().reduced(8);
+    auto bar = area.removeFromTop(36);
+    profiles.setBounds(bar.removeFromLeft(160));
+    bar.removeFromLeft(6);
+    newProfile.setBounds(bar.removeFromLeft(64));
+    bar.removeFromLeft(6);
+    undoButton.setBounds(bar.removeFromLeft(72));
+    redoButton.setBounds(bar.removeFromLeft(72));
+    muteButton.setBounds(bar.removeFromLeft(72));
+    bypassButton.setBounds(bar.removeFromLeft(80));
+    addButton.setBounds(bar.removeFromRight(130));
+    auto masterSlot = area.removeFromRight(136);
+    viewport.setBounds(area);
+    layoutStrips();
+    if (auto* master = strips.getLast())
+    {
+        addAndMakeVisible(master);
+        master->setVisible(true);
+        master->setBounds(masterSlot.getX() + 8, viewport.getY(), 128, juce::jmax(viewport.getHeight(), 480));
+    }
+}

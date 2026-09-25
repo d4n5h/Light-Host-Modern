@@ -3,6 +3,9 @@
 #include <juce_cryptography/juce_cryptography.h>
 #include "PluginInstanceId.h"
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -28,6 +31,50 @@ inline juce::String knownPluginId(const juce::PluginDescription& description)
     return juce::SHA256(identity.toRawUTF8(), identity.getNumBytesAsUTF8()).toHexString();
 }
 
+struct ChainStrip
+{
+    juce::String id, name = "Main";
+    bool allInputs = true, allOutputs = true;
+    std::vector<int> inputs, outputs;
+    float gainDb = 0.0f;
+    float pan = 0.0f;
+    int color = 0;
+    juce::String colour;
+    bool muted = false;
+    bool solo = false;
+    juce::String group;
+};
+
+inline juce::String defaultStripId()
+{
+    const auto seed = juce::String("LightHostModern default strip");
+    return juce::SHA256(seed.toRawUTF8(), seed.getNumBytesAsUTF8()).toHexString().substring(0, 32);
+}
+
+inline ChainStrip defaultStrip()
+{
+    ChainStrip strip;
+    strip.id = defaultStripId();
+    strip.name = "Main";
+    return strip;
+}
+
+inline float clampGainDb(float db)
+{
+    return juce::jlimit(-60.0f, 12.0f, db);
+}
+
+inline float clampPan(float pan)
+{
+    return juce::jlimit(-1.0f, 1.0f, pan);
+}
+
+inline float gainFromDb(float db)
+{
+    db = clampGainDb(db);
+    return db <= -60.0f ? 0.0f : std::pow(10.0f, db / 20.0f);
+}
+
 struct PluginInstanceRecord
 {
     PluginInstanceId id;
@@ -39,9 +86,15 @@ struct PluginInstanceRecord
     juce::String recoveryState; // undecodable/failed state must remain recoverable
     juce::String loading = "unloaded";
     juce::String error;
+    juce::String stripId;
     bool bypassed = false;
     bool identityResolved = true;
     bool stateCaptureAllowed = true;
+    bool editorOpen = false;
+    bool hasEditorPosition = false;
+    bool hasEditorSize = false;
+    int editorX = 0, editorY = 0;
+    int editorW = 0, editorH = 0;
 
     juce::String displayName() const { return customName.isEmpty() ? description.name : customName; }
 };
@@ -49,9 +102,26 @@ struct PluginInstanceRecord
 class PluginInstances
 {
 public:
+    std::vector<ChainStrip> strips;
     std::vector<PluginInstanceRecord> records;
+    float masterGainDb = 0.0f;
     juce::String recoveryError;
     bool writable = true;
+
+    void ensureStrips()
+    {
+        if (strips.empty()) strips.push_back(defaultStrip());
+        if (strips.size() > 16) strips.resize(16);
+        for (auto& record : records)
+            if (record.stripId.isEmpty() || std::none_of(strips.begin(), strips.end(), [&](const auto& strip) { return strip.id == record.stripId; }))
+                record.stripId = strips.front().id;
+    }
+
+    const ChainStrip* findStrip(const juce::String& id) const
+    {
+        for (const auto& strip : strips) if (strip.id == id) return &strip;
+        return nullptr;
+    }
 
     static juce::String legacyBaseKey(const juce::String& type, const juce::PluginDescription& plugin)
     {
@@ -142,14 +212,41 @@ public:
             if (record.error.isNotEmpty()) record.loading = "failed";
             records.push_back(std::move(record));
         }
+        strips = { defaultStrip() };
+        masterGainDb = 0.0f;
+        for (auto& record : records) record.stripId = strips.front().id;
     }
 
     std::unique_ptr<juce::XmlElement> serialize(juce::uint64 revision = 0) const
     {
+        auto written = strips.empty() ? std::vector<ChainStrip>{ defaultStrip() } : strips;
         auto root = std::make_unique<juce::XmlElement>("LIGHTHOSTSESSION");
-        root->setAttribute("version", 1);
+        root->setAttribute("version", 2);
         root->setAttribute("revision", juce::String(revision));
         root->setAttribute("recoveryError", recoveryError);
+        root->setAttribute("masterGainDb", clampGainDb(masterGainDb));
+        const auto channels = [](const std::vector<int>& values) {
+            juce::String text;
+            for (size_t i = 0; i < values.size(); ++i) text += (i ? "," : "") + juce::String(values[i]);
+            return text;
+        };
+        for (const auto& strip : written)
+        {
+            auto* item = root->createNewChildElement("STRIP");
+            item->setAttribute("id", strip.id);
+            item->setAttribute("name", strip.name);
+            item->setAttribute("allInputs", strip.allInputs);
+            item->setAttribute("allOutputs", strip.allOutputs);
+            item->setAttribute("gainDb", clampGainDb(strip.gainDb));
+            item->setAttribute("pan", clampPan(strip.pan));
+            item->setAttribute("color", juce::jlimit(0, 8, strip.color));
+            if (strip.colour.isNotEmpty()) item->setAttribute("colour", strip.colour);
+            item->setAttribute("muted", strip.muted);
+            item->setAttribute("solo", strip.solo);
+            item->setAttribute("group", strip.group);
+            item->setAttribute("inputs", channels(strip.inputs));
+            item->setAttribute("outputs", channels(strip.outputs));
+        }
         for (const auto& record : records)
         {
             auto* item = root->createNewChildElement("INSTANCE");
@@ -161,6 +258,18 @@ public:
             item->setAttribute("error", record.error);
             item->setAttribute("loading", record.loading);
             item->setAttribute("stateCaptureAllowed", record.stateCaptureAllowed);
+            item->setAttribute("strip", record.stripId.isEmpty() ? written.front().id : record.stripId);
+            item->setAttribute("editorOpen", record.editorOpen);
+            if (record.hasEditorPosition)
+            {
+                item->setAttribute("editorX", record.editorX);
+                item->setAttribute("editorY", record.editorY);
+            }
+            if (record.hasEditorSize)
+            {
+                item->setAttribute("editorW", record.editorW);
+                item->setAttribute("editorH", record.editorH);
+            }
             item->addChildElement(record.description.createXml().release());
             item->createNewChildElement("STATE")->addTextElement(record.lastValidState);
             item->createNewChildElement("RECOVERYSTATE")->addTextElement(record.recoveryState);
@@ -172,11 +281,51 @@ public:
     bool deserialize(const juce::XmlElement& root)
     {
         // Transactional: malformed data cannot turn a previously loaded session into an empty one.
-        if (!root.hasTagName("LIGHTHOSTSESSION") || root.getIntAttribute("version") != 1) return false;
+        const int version = root.getIntAttribute("version");
+        if (!root.hasTagName("LIGHTHOSTSESSION") || (version != 1 && version != 2)) return false;
+        std::vector<ChainStrip> loadedStrips;
         std::vector<PluginInstanceRecord> loaded;
-        std::set<juce::String> ids;
+        std::set<juce::String> ids, stripIds;
+        const auto channels = [](const juce::String& text, std::vector<int>& values) {
+            values.clear();
+            if (text.isEmpty()) return true;
+            for (auto part : juce::StringArray::fromTokens(text, ",", ""))
+            {
+                part = part.trim();
+                if (part.isEmpty() || !part.containsOnly("0123456789")) return false;
+                const int channel = part.getIntValue();
+                if (channel > 255 || std::find(values.begin(), values.end(), channel) != values.end()) return false;
+                values.push_back(channel);
+            }
+            return true;
+        };
         for (const auto* item : root.getChildIterator())
         {
+            if (item->hasTagName("STRIP"))
+            {
+                if (version != 2) return false;
+                ChainStrip strip;
+                strip.id = item->getStringAttribute("id").toLowerCase();
+                juce::String name;
+                if (!validStripId(strip.id) || !stripIds.insert(strip.id).second
+                    || !normalizeInstanceName(item->getStringAttribute("name"), name) || name.isEmpty()) return false;
+                strip.name = name;
+                strip.allInputs = item->getBoolAttribute("allInputs", true);
+                strip.allOutputs = item->getBoolAttribute("allOutputs", true);
+                strip.gainDb = clampGainDb(static_cast<float>(item->getDoubleAttribute("gainDb")));
+                strip.pan = clampPan(static_cast<float>(item->getDoubleAttribute("pan", 0.0)));
+                strip.color = juce::jlimit(0, 8, item->getIntAttribute("color", 0));
+                strip.colour = item->getStringAttribute("colour").trim().toLowerCase();
+                if (strip.colour.length() != 6 || !strip.colour.containsOnly("0123456789abcdef")) strip.colour.clear();
+                strip.muted = item->getBoolAttribute("muted", false);
+                strip.solo = item->getBoolAttribute("solo", false);
+                strip.group = item->getStringAttribute("group").trim();
+                if (!channels(item->getStringAttribute("inputs"), strip.inputs)
+                    || !channels(item->getStringAttribute("outputs"), strip.outputs)) return false;
+                if ((!strip.allInputs && strip.inputs.empty()) || (!strip.allOutputs && strip.outputs.empty())) return false;
+                loadedStrips.push_back(std::move(strip));
+                continue;
+            }
             PluginInstanceRecord record;
             record.id = item->getStringAttribute("id");
             const auto* description = item->getChildByName("PLUGIN");
@@ -190,6 +339,24 @@ public:
             record.customName = item->getStringAttribute("customName");
             record.error = item->getStringAttribute("error");
             record.stateCaptureAllowed = item->getBoolAttribute("stateCaptureAllowed", true);
+            record.stripId = item->getStringAttribute("strip").toLowerCase();
+            record.editorOpen = item->getBoolAttribute("editorOpen");
+            if (item->hasAttribute("editorX") && item->hasAttribute("editorY"))
+            {
+                const int x = item->getIntAttribute("editorX"), y = item->getIntAttribute("editorY");
+                if (std::abs(x) > 32000 || std::abs(y) > 32000) return false;
+                record.hasEditorPosition = true;
+                record.editorX = x;
+                record.editorY = y;
+            }
+            if (item->hasAttribute("editorW") && item->hasAttribute("editorH"))
+            {
+                const int width = item->getIntAttribute("editorW"), height = item->getIntAttribute("editorH");
+                if (width < 80 || height < 40 || width > 8000 || height > 8000) return false;
+                record.hasEditorSize = true;
+                record.editorW = width;
+                record.editorH = height;
+            }
             if (auto* state = item->getChildByName("STATE")) record.lastValidState = state->getAllSubText();
             if (auto* state = item->getChildByName("RECOVERYSTATE")) record.recoveryState = state->getAllSubText();
             if (auto* legacy = item->getChildByName("LEGACY")) record.legacyDescription = legacy->getAllSubText();
@@ -197,7 +364,16 @@ public:
             if (record.error.isNotEmpty()) record.loading = item->getStringAttribute("loading") == "missing" ? "missing" : "failed";
             loaded.push_back(std::move(record));
         }
+        if (version == 1) loadedStrips = { defaultStrip() };
+        if (loadedStrips.empty() || loadedStrips.size() > 16) return false;
+        for (auto& record : loaded)
+        {
+            if (version == 1) record.stripId = loadedStrips.front().id;
+            if (std::none_of(loadedStrips.begin(), loadedStrips.end(), [&](const auto& strip) { return strip.id == record.stripId; })) return false;
+        }
+        strips = std::move(loadedStrips);
         records = std::move(loaded);
+        masterGainDb = clampGainDb(static_cast<float>(root.getDoubleAttribute("masterGainDb")));
         recoveryError = root.getStringAttribute("recoveryError");
         return true;
     }
@@ -209,6 +385,10 @@ public:
     }
 
 private:
+    static bool validStripId(const juce::String& id)
+    {
+        return id.length() == 32 && id.containsOnly("0123456789abcdef");
+    }
     static void validateState(PluginInstanceRecord& record)
     {
         juce::MemoryBlock binary;

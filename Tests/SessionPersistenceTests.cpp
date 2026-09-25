@@ -107,6 +107,9 @@ int main(int argc, char** argv)
         const auto encoded = SessionCodec::encode(original);
         String error; auto restored = SessionCodec::decode(encoded.bytes, error);
         require(restored.has_value(), error.toRawUTF8()); assertRecords(*restored, original);
+        require(restored->instances.strips.size() == 1 && restored->instances.strips[0].name == "Main"
+            && restored->instances.records[0].stripId == restored->instances.strips[0].id, "v2 session strip");
+        require(static_cast<int>(JSON::parse(String(encoded.bytes))["formatVersion"]) == 1, "envelope stays version 1");
         auto changed = original; changed.revision = 100;
         require(SessionCodec::encode(changed).digest == encoded.digest, "Revision defeated content deduplication");
         auto corrupt = JSON::parse(String(encoded.bytes)); corrupt.getDynamicObject()->setProperty("sessionXml", "<bad/>");

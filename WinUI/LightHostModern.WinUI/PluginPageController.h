@@ -14,6 +14,7 @@ public:
     winrt::Windows::Foundation::Collections::IObservableVector<Item> items = winrt::single_threaded_observable_vector<Item>();
     std::vector<PluginRowData> source;
     bool running = false, allowChanges = true;
+    std::string stripId;
     explicit PluginPageController(bool isRunning) : running(isRunning) {}
 
     void adopt(std::vector<PluginRowData> rows) { source = std::move(rows); }
@@ -55,6 +56,8 @@ public:
         for (auto it = models.begin(); it != models.end();)
             if (!alive.contains(it->first)) it = models.erase(it); else ++it;
         auto ordered = filterAndSortPluginRows(source, query, sort, running);
+        if (running && !stripId.empty())
+            std::erase_if(ordered, [&](PluginRowData const& row) { return row.stripId != stripId; });
         if (grouped && !running) std::stable_sort(ordered.begin(), ordered.end(), [](const auto& a, const auto& b) {
             return foldPluginText(a.manufacturer) < foldPluginText(b.manufacturer);
         });
@@ -117,8 +120,8 @@ public:
             else if (!items.Size()) view.SelectedIndex(-1);
             else view.SelectedIndex((std::min)(oldSelectionIndex, static_cast<int32_t>(items.Size() - 1)));
         }
-        view.CanDragItems(allowChanges && running && sort == 0 && query.empty());
-        view.AllowDrop(view.CanDragItems());
+        view.CanDragItems(allowChanges && (running ? sort == 0 && query.empty() : true));
+        view.AllowDrop(allowChanges && running);
         if (groupingChanged && items.Size()) view.ScrollIntoView(items.GetAt(0), ScrollIntoViewAlignment::Leading);
         if (changed && anchor && !groupingChanged)
         {

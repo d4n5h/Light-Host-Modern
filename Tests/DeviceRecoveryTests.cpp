@@ -323,5 +323,55 @@ int main()
         selected.setup.inputDeviceName = selected.setup.outputDeviceName = "A"; require(apply(), "Device A did not reopen");
         require(scenario.settings.getBoolValue(scenario.controller.monoOutputKey(), false), "Returning to device lost preference");
     });
+    tests.run("stalled callbacks reopen the same device", [] {
+        Scenario scenario("disabled");
+        scenario.controller.start(false, false);
+        AudioDeviceSelection selected;
+        selected.backend = "Simulated";
+        selected.setup.inputDeviceName = selected.setup.outputDeviceName = "A";
+        selected.expectedGeneration = scenario.controller.getGeneration();
+        require(scenario.controller.selectConfiguration(selected), "Device A did not open");
+        const auto opens = scenario.manager.hardware.opens;
+        scenario.controller.observeCallbacks(0);
+        scenario.advance();
+        require(scenario.manager.hardware.opens == opens, "Reopened before 2 seconds");
+        scenario.advance();
+        require(scenario.manager.hardware.opens == opens + 1, "Frozen callbacks did not reopen");
+        require(scenario.manager.getCurrentAudioDevice() && scenario.manager.getCurrentAudioDevice()->getName() == "A", "Stall selected another device");
+        require(scenario.controller.createDiagnosticsSnapshot(scenario.manager).recoveryMessage == "Audio callbacks stopped. Reopening the device.", "Stall notice missing");
+    });
+    tests.run("moving callbacks do not reopen a playing device", [] {
+        Scenario scenario("disabled");
+        scenario.controller.start(false, false);
+        AudioDeviceSelection selected;
+        selected.backend = "Simulated";
+        selected.setup.inputDeviceName = selected.setup.outputDeviceName = "A";
+        selected.expectedGeneration = scenario.controller.getGeneration();
+        require(scenario.controller.selectConfiguration(selected), "Device A did not open");
+        const auto opens = scenario.manager.hardware.opens;
+        juce::uint64 count = 0;
+        for (int i = 0; i < 8; ++i)
+        {
+            scenario.controller.observeCallbacks(++count);
+            scenario.advance();
+        }
+        require(scenario.manager.hardware.opens == opens, "Live callbacks were reopened");
+    });
+    tests.run("stalled reopen stops at the attempt limit", [] {
+        Scenario scenario("disabled");
+        scenario.settings.setValue("audioPersistenceRetryAttempts", 3);
+        scenario.controller.start(false, false);
+        AudioDeviceSelection selected;
+        selected.backend = "Simulated";
+        selected.setup.inputDeviceName = selected.setup.outputDeviceName = "A";
+        selected.expectedGeneration = scenario.controller.getGeneration();
+        require(scenario.controller.selectConfiguration(selected), "Device A did not open");
+        scenario.controller.observeCallbacks(0);
+        const auto opens = scenario.manager.hardware.opens;
+        for (int i = 0; i < 12; ++i) scenario.advance();
+        require(scenario.manager.hardware.opens == opens + 3, "Attempt limit was not enforced");
+        require(scenario.controller.createDiagnosticsSnapshot(scenario.manager).recoveryState == "failed", "Stall did not fail closed");
+        require(scenario.controller.createDiagnosticsSnapshot(scenario.manager).recoveryMessage == "The audio stream stopped and did not restart.", "Failure notice missing");
+    });
     return tests.result();
 }

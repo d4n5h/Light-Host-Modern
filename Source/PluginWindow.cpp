@@ -14,19 +14,41 @@ PluginWindow::PluginWindow (Component* const pluginEditor,
       windowProperties (&properties),
       type (t)
 {
-    setSize (400, 300);
-    setUsingNativeTitleBar(true);
+    setUsingNativeTitleBar (true);
     setContentOwned (pluginEditor, true);
+    if (auto* editor = dynamic_cast<AudioProcessorEditor*>(pluginEditor))
+        setResizable (editor->isResizable(), false);
+
+    const int savedWidth = windowProperties->getWithDefault (getLastWProp (type), 0);
+    const int savedHeight = windowProperties->getWithDefault (getLastHProp (type), 0);
+    if (savedWidth >= 80 && savedHeight >= 40)
+        setSize (savedWidth, savedHeight);
 
     setTopLeftPosition (windowProperties->getWithDefault (getLastXProp (type), Random::getSystemRandom().nextInt (500)),
                         windowProperties->getWithDefault (getLastYProp (type), Random::getSystemRandom().nextInt (500)));
+    if (const auto* display = Desktop::getInstance().getDisplays().getDisplayForPoint(getBounds().getCentre().toFloat()))
+    {
+        const auto area = display->userBounds.toNearestInt();
+        if (!area.contains(getBounds().getCentre()))
+            setTopLeftPosition(jlimit(area.getX(), area.getRight() - getWidth(), getX()),
+                jlimit(area.getY(), area.getBottom() - getHeight(), getY()));
+    }
 
     windowProperties->set (getOpenProp (type), true);
 
     setVisible (true);
+    tracking = true;
+    storeBounds();
 
     activePluginWindows.add (this);
     
+}
+
+bool PluginWindow::isOpenFor (AudioProcessor& processor)
+{
+    for (auto* window : activePluginWindows)
+        if (window->owner == &processor) return true;
+    return false;
 }
 
 void PluginWindow::closeCurrentlyOpenWindowsFor (AudioProcessor& processor)
@@ -170,21 +192,35 @@ PluginWindow* PluginWindow::getWindowFor (AudioProcessor& processor,
 
 PluginWindow::~PluginWindow()
 {
+    storeBounds();
+    tracking = false;
     activePluginWindows.removeFirstMatchingValue (this);
     clearContentComponent();
 }
 
+void PluginWindow::storeBounds()
+{
+    if (!tracking || windowProperties == nullptr || getWidth() < 80 || getHeight() < 40) return;
+    windowProperties->set (getLastXProp (type), getX());
+    windowProperties->set (getLastYProp (type), getY());
+    windowProperties->set (getLastWProp (type), getWidth());
+    windowProperties->set (getLastHProp (type), getHeight());
+}
+
 void PluginWindow::moved()
 {
-    if (windowProperties != nullptr)
-    {
-        windowProperties->set (getLastXProp (type), getX());
-        windowProperties->set (getLastYProp (type), getY());
-    }
+    storeBounds();
+}
+
+void PluginWindow::resized()
+{
+    DocumentWindow::resized();
+    storeBounds();
 }
 
 void PluginWindow::closeButtonPressed()
 {
+    storeBounds();
     if (windowProperties != nullptr)
         windowProperties->set (getOpenProp (type), false);
 

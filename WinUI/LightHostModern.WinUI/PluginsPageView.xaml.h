@@ -19,6 +19,11 @@ struct PluginsPageView : PluginsPageViewT<PluginsPageView>
     void RunningPluginItem_Drop(winrt::Windows::Foundation::IInspectable arg0, Microsoft::UI::Xaml::DragEventArgs arg1);
     void RunningPluginsListView_DragItemsCompleted(winrt::Windows::Foundation::IInspectable const& arg0, Microsoft::UI::Xaml::Controls::DragItemsCompletedEventArgs const& arg1);
     void RunningPluginsListView_DragItemsStarting(winrt::Windows::Foundation::IInspectable const& arg0, Microsoft::UI::Xaml::Controls::DragItemsStartingEventArgs const& arg1);
+    void InstalledPluginsListView_DragItemsStarting(winrt::Windows::Foundation::IInspectable const& arg0, Microsoft::UI::Xaml::Controls::DragItemsStartingEventArgs const& arg1);
+    void StripMixer_DragOver(winrt::Windows::Foundation::IInspectable const& arg0, Microsoft::UI::Xaml::DragEventArgs const& arg1);
+    void StripMixer_Drop(winrt::Windows::Foundation::IInspectable const& arg0, Microsoft::UI::Xaml::DragEventArgs const& arg1);
+    void RunningPluginsListView_DragOver(winrt::Windows::Foundation::IInspectable const& arg0, Microsoft::UI::Xaml::DragEventArgs const& arg1);
+    void RunningPluginsListView_Drop(winrt::Windows::Foundation::IInspectable const& arg0, Microsoft::UI::Xaml::DragEventArgs const& arg1);
 };
 }
 namespace winrt::LightHostModernWinUI::factory_implementation

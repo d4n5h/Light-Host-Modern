@@ -9,6 +9,7 @@
 #include "HostJson.h"
 #include "ScanFailureDialog.h"
 #include "PluginDialogs.h"
+#include "StripRoutingDialog.h"
 #include "UiPreferences.h"
 #include "PluginPageController.h"
 #include "../../Source/RuntimeProfile.h"
@@ -65,7 +66,8 @@ namespace
     hstring ipcErrorText(std::string const& json, ::LightHostModernWinUI::LocalizationCatalog& localization)
     {
         const auto code = extractString(json, "code");
-        if (code == "session_save_failed" || code == "session_read_only")
+        if (code == "session_save_failed" || code == "session_read_only" || code.rfind("profile_", 0) == 0 || code == "last_profile"
+            || code.rfind("strip_", 0) == 0 || code == "last_strip" || code.rfind("nothing_to_", 0) == 0)
             return localization.text("ipc.error." + code, hs(extractString(json, "message", "Session operation failed")).c_str());
         if (code == "configuration_superseded" || code == "audio_configuration_failed")
             return localization.text("ipc." + code, hs(extractString(json, "message", "Audio selection failed")).c_str());
@@ -1408,6 +1410,34 @@ namespace winrt::LightHostModernWinUI::implementation
             winrt::get_self<PluginsPageView>(pluginsPageView)->owner = winrt::make_weak(get_strong().as<winrt::Windows::Foundation::IInspectable>());
             PluginsPageHost().Content(pluginsPageView);
             Pages().PluginsLoaded(true);
+            if (!chainAcceleratorsAttached)
+            {
+                chainAcceleratorsAttached = true;
+                auto bind = [this](Windows::System::VirtualKey key, Windows::System::VirtualKeyModifiers modifiers, bool redo) {
+                    Microsoft::UI::Xaml::Input::KeyboardAccelerator accelerator;
+                    accelerator.Key(key);
+                    accelerator.Modifiers(modifiers);
+                    accelerator.Invoked([weak = get_weak(), redo](auto const&, Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args) {
+                        auto owner = weak.get();
+                        if (!owner || owner->currentSection != L"Plugins") return;
+                        args.Handled(true);
+                        owner->sendCommand(redo ? "redo-chain" : "undo-chain");
+                    });
+                    (redo ? RunningRedoButton() : RunningUndoButton()).KeyboardAccelerators().Append(accelerator);
+                };
+                bind(Windows::System::VirtualKey::Z, Windows::System::VirtualKeyModifiers::Control, false);
+                bind(Windows::System::VirtualKey::Y, Windows::System::VirtualKeyModifiers::Control, true);
+                bind(Windows::System::VirtualKey::Z, static_cast<Windows::System::VirtualKeyModifiers>(
+                    static_cast<uint32_t>(Windows::System::VirtualKeyModifiers::Control) | static_cast<uint32_t>(Windows::System::VirtualKeyModifiers::Shift)), true);
+            }
+            RunningUndoButton().Click({ this, &MainWindow::UndoChain_Click });
+            RunningRedoButton().Click({ this, &MainWindow::RedoChain_Click });
+            RunningPluginsTabButton().AllowDrop(true);
+            RunningPluginsTabButton().DragOver([weak = get_weak()](IInspectable const&, DragEventArgs const& args) {
+                if (auto owner = weak.get(); owner && owner->pluginDragInProgress && owner->draggedPluginSourceId.rfind("known:", 0) == 0)
+                { args.AcceptedOperation(DataPackageOperation::Copy); args.Handled(true); owner->showPluginSubsection(L"Running"); }
+            });
+            if (!hostConnection->snapshotJson.empty()) updateChainProfileButton(hostConnection->snapshotJson);
         }
         else if (section == L"Support me" && !Pages().SupportLoaded()) {
             supportPageView = winrt::make<SupportPageView>();
@@ -1753,6 +1783,333 @@ namespace winrt::LightHostModernWinUI::implementation
     void MainWindow::InstalledPluginsTab_Click(IInspectable const&, RoutedEventArgs const&) { showPluginSubsection(L"Installed"); }
     void MainWindow::RunningPluginsListView_SelectionChanged(IInspectable const&, SelectionChangedEventArgs const&) { updateRunningPluginActions(); }
 
+    void MainWindow::updateStripMixer(std::string const& json)
+    {
+        if (!Pages().PluginsLoaded() || !StripMixerPanel()) return;
+        auto root = lightHostModern::ipc::parseObject(json);
+        struct Strip { std::string id, name; bool allInputs = true, allOutputs = true; float gain = 0, pan = 0; std::string summary; };
+        std::vector<Strip> strips;
+        float master = 0;
+        bool canUndo = false, canRedo = false;
+        if (root && root.HasKey(L"masterGainDb")) master = static_cast<float>(root.GetNamedNumber(L"masterGainDb", 0));
+        if (root && root.HasKey(L"chainHistory") && root.GetNamedValue(L"chainHistory").ValueType() == JsonValueType::Object)
+        {
+            auto history = root.GetNamedObject(L"chainHistory");
+            canUndo = history.GetNamedBoolean(L"canUndo", false);
+            canRedo = history.GetNamedBoolean(L"canRedo", false);
+        }
+        if (root && root.HasKey(L"strips") && root.GetNamedValue(L"strips").ValueType() == JsonValueType::Array)
+            for (auto value : root.GetNamedArray(L"strips"))
+            {
+                if (value.ValueType() != JsonValueType::Object) continue;
+                auto object = value.GetObject();
+                Strip strip;
+                strip.id = to_string(object.GetNamedString(L"id", L""));
+                strip.name = to_string(object.GetNamedString(L"name", L"Main"));
+                strip.allInputs = object.GetNamedBoolean(L"allInputs", true);
+                strip.allOutputs = object.GetNamedBoolean(L"allOutputs", true);
+                strip.gain = static_cast<float>(object.GetNamedNumber(L"gainDb", 0));
+                strip.pan = object.HasKey(L"pan") ? static_cast<float>(object.GetNamedNumber(L"pan")) : 0;
+                const auto listed = [](JsonObject const& source, wchar_t const* key) {
+                    std::string text;
+                    if (!source.HasKey(key) || source.GetNamedValue(key).ValueType() != JsonValueType::Array) return text;
+                    for (auto item : source.GetNamedArray(key))
+                    {
+                        if (item.ValueType() != JsonValueType::Number) continue;
+                        if (!text.empty()) text += "/";
+                        text += std::to_string(static_cast<int>(item.GetNumber()) + 1);
+                    }
+                    return text;
+                };
+                const auto inputs = strip.allInputs ? to_string(localization.text("strips.allInputs", L"All inputs")) : listed(object, L"inputs");
+                const auto outputs = strip.allOutputs ? to_string(localization.text("strips.allOutputs", L"All outputs")) : listed(object, L"outputs");
+                strip.summary = inputs + " \xe2\x86\x92 " + outputs;
+                if (!strip.id.empty()) strips.push_back(std::move(strip));
+            }
+        if (selectedStripId.empty() || std::none_of(strips.begin(), strips.end(), [&](auto const& strip) { return strip.id == selectedStripId; }))
+            selectedStripId = strips.empty() ? std::string() : strips.front().id;
+        if (RunningUndoButton()) RunningUndoButton().IsEnabled(sessionWritable && canUndo);
+        if (RunningRedoButton()) RunningRedoButton().IsEnabled(sessionWritable && canRedo);
+        if (stripFaderHeld) return;
+        auto panel = StripMixerPanel();
+        if (auto parent = RunningPluginsListView().Parent().try_as<Panel>())
+        {
+            uint32_t index = 0;
+            if (parent.Children().IndexOf(RunningPluginsListView(), index)) parent.Children().RemoveAt(index);
+        }
+        panel.Children().Clear();
+        stripInsertLists.clear();
+        if (!stripMixerSized)
+            if (auto scroller = panel.Parent().try_as<ScrollViewer>())
+            {
+                stripMixerSized = true;
+                scroller.SizeChanged([weak = get_weak()](IInspectable const& sender, SizeChangedEventArgs const&) {
+                    if (auto owner = weak.get())
+                        for (auto const& child : owner->StripMixerPanel().Children())
+                            if (auto card = child.try_as<Border>()) card.Height(sender.as<ScrollViewer>().ViewportHeight());
+                });
+            }
+        const auto hold = [weak = get_weak()](IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&) {
+            if (auto owner = weak.get()) owner->stripFaderHeld = true;
+        };
+        const auto release = [weak = get_weak()](IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&) {
+            if (auto owner = weak.get()) { owner->stripFaderHeld = false; if (owner->hostConnection) owner->updateStripMixer(owner->hostConnection->snapshotJson); }
+        };
+        const auto watchPointer = [&](Slider const& slider) {
+            slider.AddHandler(UIElement::PointerPressedEvent(), box_value(Microsoft::UI::Xaml::Input::PointerEventHandler(hold)), true);
+            slider.AddHandler(UIElement::PointerReleasedEvent(), box_value(Microsoft::UI::Xaml::Input::PointerEventHandler(release)), true);
+            slider.AddHandler(UIElement::PointerCaptureLostEvent(), box_value(Microsoft::UI::Xaml::Input::PointerEventHandler(release)), true);
+        };
+        const auto tile = [&](Strip const& strip, bool masterTile, bool first) {
+            Border card;
+            card.Width(168); card.Padding({8, 8, 8, 8}); card.VerticalAlignment(VerticalAlignment::Stretch);
+            card.Tag(box_value(to_hstring(masterTile ? "master" : strip.id)));
+            card.AllowDrop(!masterTile);
+            Automation::AutomationProperties::SetAutomationId(card, to_hstring(masterTile ? "strip-master" : "strip-" + strip.id));
+            Grid grid;
+            RowDefinition nameRow; nameRow.Height(GridLengthHelper::Auto());
+            RowDefinition routeRow; routeRow.Height(GridLengthHelper::Auto());
+            RowDefinition insertRow; insertRow.Height(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+            RowDefinition panRow; panRow.Height(GridLengthHelper::Auto());
+            RowDefinition faderRow; faderRow.Height(GridLengthHelper::Auto());
+            grid.RowDefinitions().Append(nameRow); grid.RowDefinitions().Append(routeRow);
+            grid.RowDefinitions().Append(insertRow); grid.RowDefinitions().Append(panRow); grid.RowDefinitions().Append(faderRow);
+            StackPanel titleRow; titleRow.Orientation(Orientation::Horizontal); titleRow.Spacing(4);
+            TextBlock heading; heading.Text(to_hstring(masterTile ? to_string(localization.text("strips.master", L"Master")) : strip.name));
+            heading.FontWeight(Windows::UI::Text::FontWeights::SemiBold()); heading.VerticalAlignment(VerticalAlignment::Center);
+            titleRow.Children().Append(heading);
+            if (!masterTile)
+            {
+                Button menu; menu.Content(box_value(L"...")); menu.Padding({8, 0, 8, 0});
+                MenuFlyout flyout;
+                auto item = [&](hstring const& label, auto&& action) {
+                    MenuFlyoutItem entry; entry.Text(label);
+                    entry.Click([action = std::forward<decltype(action)>(action)](IInspectable const&, RoutedEventArgs const&) { action(); });
+                    flyout.Items().Append(entry);
+                };
+                const auto stripId = strip.id;
+                const auto title = strip.name;
+                item(localization.text("strips.rename", L"Rename"), [weak = get_weak(), stripId, title] { if (auto owner = weak.get()) owner->promptStripName(stripId, title); });
+                item(localization.text("strips.routing", L"Inputs and outputs"), [weak = get_weak(), stripId] { if (auto owner = weak.get()) owner->promptStripRouting(stripId); });
+                item(localization.text("strips.remove", L"Remove"), [weak = get_weak(), stripId] { if (auto owner = weak.get()) owner->sendCommand("remove-strip:" + stripId); });
+                menu.Flyout(flyout);
+                titleRow.Children().Append(menu);
+                card.DragOver({ this, &MainWindow::StripMixer_DragOver });
+                card.Drop({ this, &MainWindow::StripMixer_Drop });
+            }
+            Grid::SetRow(titleRow, 0); grid.Children().Append(titleRow);
+            TextBlock detail; detail.Text(to_hstring(masterTile ? "" : strip.summary)); detail.Opacity(0.7); detail.TextWrapping(TextWrapping::Wrap);
+            Grid::SetRow(detail, 1); grid.Children().Append(detail);
+            if (!masterTile)
+            {
+                ListView inserts = first ? RunningPluginsListView() : ListView();
+                if (!first)
+                {
+                    inserts.ItemTemplate(RunningPluginsListView().ItemTemplate());
+                    inserts.ItemContainerStyle(RunningPluginsListView().ItemContainerStyle());
+                    inserts.DragItemsStarting({ this, &MainWindow::RunningPluginsListView_DragItemsStarting });
+                    inserts.DragItemsCompleted({ this, &MainWindow::RunningPluginsListView_DragItemsCompleted });
+                    inserts.DragOver({ this, &MainWindow::RunningPluginsListView_DragOver });
+                    inserts.Drop({ this, &MainWindow::RunningPluginsListView_Drop });
+                    inserts.ContainerContentChanging([](ListViewBase const&, ContainerContentChangingEventArgs const& args) {
+                        if (args.InRecycleQueue()) return;
+                        if (auto plugin = args.Item().try_as<winrt::LightHostModernWinUI::PluginItem>())
+                            Automation::AutomationProperties::SetAutomationId(args.ItemContainer(), L"running-" + plugin.Id());
+                    });
+                }
+                inserts.Tag(box_value(to_hstring("inserts:" + strip.id)));
+                inserts.AllowDrop(true);
+                inserts.SelectionMode(ListViewSelectionMode::Single);
+                Automation::AutomationProperties::SetAutomationId(inserts, to_hstring(first ? "RunningPluginsList" : "strip-inserts-" + strip.id));
+                Grid::SetRow(inserts, 2); grid.Children().Append(inserts);
+                stripInsertLists[strip.id] = inserts;
+                TextBlock panText;
+                const auto showPan = [panText](double value) {
+                    const int amount = (int) std::lround(std::abs(value));
+                    panText.Text(amount == 0 ? L"pan 0" : value < 0 ? to_hstring("pan < " + std::to_string(amount)) : to_hstring("pan > " + std::to_string(amount)));
+                };
+                Slider pan; pan.Minimum(-100); pan.Maximum(100); pan.Value(strip.pan * 100.0); pan.Tag(box_value(to_hstring("pan:" + strip.id)));
+                showPan(pan.Value());
+                pan.ValueChanged([weak = get_weak(), showPan](IInspectable const& sender, RangeBaseValueChangedEventArgs const&) {
+                    auto control = sender.as<Slider>(); showPan(control.Value());
+                    if (auto owner = weak.get()) owner->queueStripGain(control);
+                });
+                watchPointer(pan);
+                StackPanel panBox; panBox.Children().Append(panText); panBox.Children().Append(pan);
+                Grid::SetRow(panBox, 3); grid.Children().Append(panBox);
+            }
+            TextBlock gainText;
+            const auto off = localization.text("strips.off", L"Off");
+            const auto showGain = [gainText, off](double sliderValue) {
+                const float db = static_cast<float>(sliderValue) - 60.0f;
+                gainText.Text(db <= -60.0f ? off : to_hstring(std::to_string((int) std::lround(db)) + " dB"));
+            };
+            Slider volume; volume.Orientation(Orientation::Vertical); volume.Height(220); volume.HorizontalAlignment(HorizontalAlignment::Center);
+            volume.Minimum(0); volume.Maximum(72); volume.Value((masterTile ? master : strip.gain) + 60.0);
+            volume.Tag(box_value(to_hstring(masterTile ? "master" : strip.id)));
+            showGain(volume.Value());
+            volume.ValueChanged([weak = get_weak(), showGain](IInspectable const& sender, RangeBaseValueChangedEventArgs const&) {
+                auto control = sender.as<Slider>(); showGain(control.Value());
+                if (auto owner = weak.get()) owner->queueStripGain(control);
+            });
+            watchPointer(volume);
+            StackPanel fader; fader.HorizontalAlignment(HorizontalAlignment::Center); fader.Children().Append(volume); fader.Children().Append(gainText);
+            Grid::SetRow(fader, masterTile ? 2 : 4); grid.Children().Append(fader);
+            card.Child(grid);
+            if (auto scroller = panel.Parent().try_as<ScrollViewer>(); scroller && scroller.ViewportHeight() > 1) card.Height(scroller.ViewportHeight());
+            panel.Children().Append(card);
+        };
+        bool firstStrip = true;
+        for (auto const& strip : strips) { tile(strip, false, firstStrip); firstStrip = false; }
+        tile(Strip{}, true, false);
+        Button add; add.Content(box_value(localization.text("strips.add", L"Add strip"))); add.VerticalAlignment(VerticalAlignment::Center); add.IsEnabled(sessionWritable && strips.size() < 16);
+        add.Click([weak = get_weak()](IInspectable const&, RoutedEventArgs const&) {
+            if (auto owner = weak.get()) owner->sendCommand("add-strip:" + to_string(owner->localization.text("strips.new", L"Strip")));
+        });
+        panel.Children().Append(add);
+        fillStripInserts();
+    }
+
+    void MainWindow::fillStripInserts()
+    {
+        std::unordered_map<std::string, std::string> stripOf;
+        for (auto const& row : runningPage.source) stripOf[row.instanceId] = row.stripId;
+        using Item = winrt::LightHostModernWinUI::PluginItem;
+        std::unordered_map<std::string, winrt::Windows::Foundation::Collections::IObservableVector<Item>> groups;
+        for (auto const& entry : stripInsertLists)
+            groups[entry.first] = winrt::single_threaded_observable_vector<Item>();
+        for (uint32_t index = 0; index < runningPage.items.Size(); ++index)
+        {
+            auto item = runningPage.items.GetAt(index);
+            if (!item || item.IsGroupHeader() || !item.Running()) continue;
+            auto found = stripOf.find(to_string(item.Id()));
+            if (found != stripOf.end())
+                if (auto group = groups.find(found->second); group != groups.end()) group->second.Append(item);
+        }
+        const bool reorder = sessionWritable && runningPluginSortMode == 0 && runningPluginSearch.empty();
+        for (auto const& entry : stripInsertLists)
+        {
+            entry.second.ItemsSource(groups[entry.first]);
+            entry.second.CanDragItems(reorder);
+        }
+    }
+
+    void MainWindow::queueStripGain(Slider const& slider)
+    {
+        pendingStripGainId = to_string(unbox_value<hstring>(slider.Tag()));
+        pendingStripGain = pendingStripGainId.rfind("pan:", 0) == 0
+            ? static_cast<float>(slider.Value()) / 100.0f
+            : static_cast<float>(slider.Value()) - 60.0f;
+        if (!stripGainInFlight) flushStripGain();
+    }
+
+    winrt::fire_and_forget MainWindow::flushStripGain()
+    {
+        auto lifetime = get_strong();
+        stripGainInFlight = true;
+        while (!windowClosing)
+        {
+            const auto id = pendingStripGainId;
+            const auto gain = pendingStripGain;
+            std::string command = "set-master-gain:" + std::to_string(gain);
+            if (id.rfind("pan:", 0) == 0)
+            {
+                lightHostModern::ipc::JsonObject options;
+                options.SetNamedValue(L"stripId", lightHostModern::ipc::JsonValue::CreateStringValue(to_hstring(id.substr(4))));
+                options.SetNamedValue(L"pan", lightHostModern::ipc::JsonValue::CreateNumberValue(gain));
+                command = "set-strip-pan:" + to_string(options.Stringify());
+            }
+            else if (id != "master")
+            {
+                lightHostModern::ipc::JsonObject options;
+                options.SetNamedValue(L"stripId", lightHostModern::ipc::JsonValue::CreateStringValue(to_hstring(id)));
+                options.SetNamedValue(L"gainDb", lightHostModern::ipc::JsonValue::CreateNumberValue(gain));
+                command = "set-strip-gain:" + to_string(options.Stringify());
+            }
+            co_await sendCommand(command);
+            if (windowClosing || (pendingStripGainId == id && pendingStripGain == gain)) break;
+        }
+        stripGainInFlight = false;
+    }
+
+    winrt::fire_and_forget MainWindow::promptStripName(std::string stripId, std::string current)
+    {
+        auto lifetime = get_strong();
+        if (windowClosing || !sessionWritable) co_return;
+        ContentDialog dialog;
+        dialog.XamlRoot(RootLayout().XamlRoot());
+        dialog.Title(box_value(localization.text("strips.rename", L"Rename")));
+        dialog.PrimaryButtonText(localization.text("common.save", L"Save"));
+        dialog.CloseButtonText(localization.text("common.cancel", L"Cancel"));
+        TextBox box; box.Text(to_hstring(current));
+        dialog.Content(box);
+        if (co_await dialog.ShowAsync() != ContentDialogResult::Primary || windowClosing) co_return;
+        co_await sendCommand("rename-strip:" + stripId + ":" + to_string(box.Text()));
+    }
+
+    winrt::fire_and_forget MainWindow::promptStripRouting(std::string stripId)
+    {
+        auto lifetime = get_strong();
+        if (windowClosing || !sessionWritable || !hostConnection) co_return;
+        const auto json = hostConnection->snapshotJson;
+        auto root = lightHostModern::ipc::parseObject(json);
+        bool allIn = true, allOut = true;
+        std::vector<int> selectedInputs, selectedOutputs;
+        if (root && root.HasKey(L"strips"))
+            for (auto value : root.GetNamedArray(L"strips"))
+            {
+                if (value.ValueType() != lightHostModern::ipc::JsonValueType::Object) continue;
+                auto object = value.GetObject();
+                if (!object.HasKey(L"id") || to_string(object.GetNamedString(L"id")) != stripId) continue;
+                allIn = object.GetNamedBoolean(L"allInputs");
+                allOut = object.GetNamedBoolean(L"allOutputs");
+                const auto read = [](lightHostModern::ipc::JsonObject const& source, wchar_t const* key, std::vector<int>& values) {
+                    if (!source.HasKey(key) || source.GetNamedValue(key).ValueType() != lightHostModern::ipc::JsonValueType::Array) return;
+                    for (auto item : source.GetNamedArray(key))
+                        if (item.ValueType() == lightHostModern::ipc::JsonValueType::Number) values.push_back(static_cast<int>(item.GetNumber()));
+                };
+                read(object, L"inputs", selectedInputs);
+                read(object, L"outputs", selectedOutputs);
+            }
+        const auto channels = [&](char const* namesKey, char const* activeKey, std::vector<int> const& selected) {
+            std::vector<lightHostModern::ui::RoutingChannel> channels;
+            const auto names = lightHostModern::ipc::extractStringArray(json, namesKey);
+            const auto active = lightHostModern::ipc::extractBoolArray(json, activeKey);
+            for (size_t index = 0; index < names.size() && index < active.size(); ++index)
+            {
+                if (!active[index]) continue;
+                lightHostModern::ui::RoutingChannel channel;
+                channel.index = static_cast<int>(index);
+                channel.label = utf8ToWide(names[index]);
+                channel.selected = std::find(selected.begin(), selected.end(), channel.index) != selected.end();
+                channels.push_back(std::move(channel));
+            }
+            return channels;
+        };
+        lightHostModern::ui::StripRoutingEditor editor;
+        editor.build(RootLayout().XamlRoot(), localization.text("strips.routing", L"Inputs and outputs"),
+            localization.text("common.save", L"Save"), localization.text("common.cancel", L"Cancel"),
+            localization.text("strips.allInputs", L"All inputs"), localization.text("strips.allOutputs", L"All outputs"),
+            allIn, allOut, channels("inputChannelNames", "activeInputChannels", selectedInputs),
+            channels("outputChannelNames", "activeOutputChannels", selectedOutputs));
+        if (co_await editor.dialog.ShowAsync() != ContentDialogResult::Primary || windowClosing) co_return;
+        const auto list = [](std::vector<int> const& values) {
+            lightHostModern::ipc::JsonArray array;
+            for (int value : values) array.Append(lightHostModern::ipc::JsonValue::CreateNumberValue(value));
+            return array;
+        };
+        lightHostModern::ipc::JsonObject options;
+        options.SetNamedValue(L"stripId", lightHostModern::ipc::JsonValue::CreateStringValue(to_hstring(stripId)));
+        options.SetNamedValue(L"allInputs", lightHostModern::ipc::JsonValue::CreateBooleanValue(editor.allInputs.IsChecked().GetBoolean()));
+        options.SetNamedValue(L"allOutputs", lightHostModern::ipc::JsonValue::CreateBooleanValue(editor.allOutputs.IsChecked().GetBoolean()));
+        options.SetNamedValue(L"inputs", list(lightHostModern::ui::StripRoutingEditor::chosen(editor.inputs)));
+        options.SetNamedValue(L"outputs", list(lightHostModern::ui::StripRoutingEditor::chosen(editor.outputs)));
+        co_await sendCommand("set-strip-routing:" + to_string(options.Stringify()));
+    }
+
+    void MainWindow::UndoChain_Click(IInspectable const&, RoutedEventArgs const&) { sendCommand("undo-chain"); }
+    void MainWindow::RedoChain_Click(IInspectable const&, RoutedEventArgs const&) { sendCommand("redo-chain"); }
+
     void MainWindow::RunningPluginsListView_DragItemsStarting(IInspectable const&, DragItemsStartingEventArgs const& args)
     {
         if (runningPluginSortMode != 0 || !runningPluginSearch.empty() || args.Items().Size() != 1)
@@ -1765,6 +2122,92 @@ namespace winrt::LightHostModernWinUI::implementation
         args.Data().SetText(item.Id());
     }
 
+    void MainWindow::InstalledPluginsListView_DragItemsStarting(IInspectable const&, DragItemsStartingEventArgs const& args)
+    {
+        if (!sessionWritable || args.Items().Size() != 1) { args.Cancel(true); return; }
+        const auto item = args.Items().GetAt(0).as<winrt::LightHostModernWinUI::PluginItem>();
+        if (item.IsGroupHeader()) { args.Cancel(true); return; }
+        draggedPluginSourceId = "known:" + to_string(item.KnownId());
+        pluginDragInProgress = true;
+        args.Data().RequestedOperation(DataPackageOperation::Copy);
+        args.Data().SetText(to_hstring(draggedPluginSourceId));
+    }
+
+    void MainWindow::StripMixer_DragOver(IInspectable const&, DragEventArgs const& args)
+    {
+        if (!pluginDragInProgress) return;
+        args.AcceptedOperation(draggedPluginSourceId.rfind("known:", 0) == 0 ? DataPackageOperation::Copy : DataPackageOperation::Move);
+        args.Handled(true);
+    }
+
+    winrt::fire_and_forget MainWindow::StripMixer_Drop(IInspectable sender, DragEventArgs args)
+    {
+        auto lifetime = get_strong();
+        if (!pluginDragInProgress) co_return;
+        args.Handled(true);
+        const auto sourceId = draggedPluginSourceId;
+        pluginDragInProgress = false;
+        draggedPluginSourceId.clear();
+        std::string stripId = selectedStripId;
+        if (auto element = sender.try_as<FrameworkElement>())
+            if (auto tag = element.Tag())
+                try { const auto tagged = to_string(unbox_value<hstring>(tag)); if (!tagged.empty() && tagged != "master") stripId = tagged; } catch (...) {}
+        if (stripId.empty()) co_return;
+        if (sourceId.rfind("known:", 0) == 0)
+        {
+            lightHostModern::ipc::JsonObject options;
+            options.SetNamedValue(L"knownId", lightHostModern::ipc::JsonValue::CreateStringValue(to_hstring(sourceId.substr(6))));
+            options.SetNamedValue(L"stripId", lightHostModern::ipc::JsonValue::CreateStringValue(to_hstring(stripId)));
+            options.SetNamedValue(L"beforeInstanceId", lightHostModern::ipc::JsonValue::CreateStringValue(L""));
+            co_await sendCommand("add-known-plugin-at:" + to_string(options.Stringify()));
+        }
+        else if (!sourceId.empty())
+        {
+            lightHostModern::ipc::JsonObject options;
+            options.SetNamedValue(L"instanceId", lightHostModern::ipc::JsonValue::CreateStringValue(to_hstring(sourceId)));
+            options.SetNamedValue(L"stripId", lightHostModern::ipc::JsonValue::CreateStringValue(to_hstring(stripId)));
+            options.SetNamedValue(L"beforeInstanceId", lightHostModern::ipc::JsonValue::CreateStringValue(L""));
+            co_await sendCommand("move-plugin-to-strip:" + to_string(options.Stringify()));
+        }
+    }
+
+    void MainWindow::RunningPluginsListView_DragOver(IInspectable const&, DragEventArgs const& args)
+    {
+        if (!pluginDragInProgress) return;
+        args.AcceptedOperation(draggedPluginSourceId.rfind("known:", 0) == 0 ? DataPackageOperation::Copy : DataPackageOperation::Move);
+        args.Handled(true);
+    }
+
+    winrt::fire_and_forget MainWindow::RunningPluginsListView_Drop(IInspectable sender, DragEventArgs args)
+    {
+        auto lifetime = get_strong();
+        std::string stripId = selectedStripId;
+        if (auto element = sender.try_as<FrameworkElement>())
+            if (auto tag = element.Tag())
+                try {
+                    const auto text = to_string(unbox_value<hstring>(tag));
+                    if (text.rfind("inserts:", 0) == 0) stripId = text.substr(8);
+                } catch (...) {}
+        if (!pluginDragInProgress || stripId.empty()) co_return;
+        args.Handled(true);
+        const auto sourceId = draggedPluginSourceId;
+        pluginDragInProgress = false;
+        draggedPluginSourceId.clear();
+        lightHostModern::ipc::JsonObject options;
+        options.SetNamedValue(L"stripId", lightHostModern::ipc::JsonValue::CreateStringValue(to_hstring(stripId)));
+        options.SetNamedValue(L"beforeInstanceId", lightHostModern::ipc::JsonValue::CreateStringValue(L""));
+        if (sourceId.rfind("known:", 0) == 0)
+        {
+            options.SetNamedValue(L"knownId", lightHostModern::ipc::JsonValue::CreateStringValue(to_hstring(sourceId.substr(6))));
+            co_await sendCommand("add-known-plugin-at:" + to_string(options.Stringify()));
+        }
+        else if (!sourceId.empty())
+        {
+            options.SetNamedValue(L"instanceId", lightHostModern::ipc::JsonValue::CreateStringValue(to_hstring(sourceId)));
+            co_await sendCommand("move-plugin-to-strip:" + to_string(options.Stringify()));
+        }
+    }
+
     void MainWindow::RunningPluginsListView_DragItemsCompleted(IInspectable const&, DragItemsCompletedEventArgs const&)
     { pluginDragInProgress = false; draggedPluginSourceId.clear(); draggedPluginSourceIndex = -1; }
 
@@ -1774,8 +2217,9 @@ namespace winrt::LightHostModernWinUI::implementation
     {
         const auto element = sender.try_as<FrameworkElement>();
         const auto item = element ? element.DataContext().try_as<winrt::LightHostModernWinUI::PluginItem>() : nullptr;
-        if (!pluginDragInProgress || !item || !item.CanReorder()) return;
-        args.AcceptedOperation(DataPackageOperation::Move);
+        const bool known = draggedPluginSourceId.rfind("known:", 0) == 0;
+        if (!pluginDragInProgress || !item || item.IsGroupHeader() || (!item.CanReorder() && !known)) return;
+        args.AcceptedOperation(known ? DataPackageOperation::Copy : DataPackageOperation::Move);
         args.DragUIOverride().Caption(item.AccessibleName());
         args.Handled(true);
     }
@@ -1785,13 +2229,25 @@ namespace winrt::LightHostModernWinUI::implementation
         auto lifetime = get_strong();
         const auto element = sender.try_as<FrameworkElement>();
         const auto item = element ? element.DataContext().try_as<winrt::LightHostModernWinUI::PluginItem>() : nullptr;
-        if (!pluginDragInProgress || !item || !item.CanReorder()) co_return;
+        const bool known = draggedPluginSourceId.rfind("known:", 0) == 0;
+        if (!pluginDragInProgress || !item || item.IsGroupHeader() || (!item.CanReorder() && !known)) co_return;
         args.Handled(true);
         const auto sourceId = draggedPluginSourceId;
         const auto targetId = to_string(item.Id());
         pluginDragInProgress = false;
         draggedPluginSourceId.clear();
-        if (!sourceId.empty() && sourceId != targetId) co_await sendCommand("move-plugin-to:" + sourceId + ":" + targetId);
+        if (sourceId.rfind("known:", 0) == 0)
+        {
+            lightHostModern::ipc::JsonObject options;
+            options.SetNamedValue(L"knownId", lightHostModern::ipc::JsonValue::CreateStringValue(to_hstring(sourceId.substr(6))));
+            std::string stripId = selectedStripId;
+            for (auto const& row : runningPage.source)
+                if (row.instanceId == targetId) { stripId = row.stripId; break; }
+            options.SetNamedValue(L"stripId", lightHostModern::ipc::JsonValue::CreateStringValue(to_hstring(stripId)));
+            options.SetNamedValue(L"beforeInstanceId", lightHostModern::ipc::JsonValue::CreateStringValue(to_hstring(targetId)));
+            co_await sendCommand("add-known-plugin-at:" + to_string(options.Stringify()));
+        }
+        else if (!sourceId.empty() && sourceId != targetId) co_await sendCommand("move-plugin-to:" + sourceId + ":" + targetId);
     }
 
     void MainWindow::FluentDropdownButton_Click(IInspectable const& sender, RoutedEventArgs const&)
@@ -2288,7 +2744,10 @@ namespace winrt::LightHostModernWinUI::implementation
             OriginalRepositoryButton().Content(box_value(localization.text("support.repository.action", L"Go to repo")));
         }
         if (Pages().PluginsLoaded()) {
+            if (!hostConnection->snapshotJson.empty()) updateChainProfileButton(hostConnection->snapshotJson);
             RunningPluginSortButton().Label(localization.text("plugins.sort.action", L"Sort"));
+            RunningUndoButton().Label(localization.text("plugins.undo", L"Undo"));
+            RunningRedoButton().Label(localization.text("plugins.redo", L"Redo"));
             InstalledPluginSortButton().Label(localization.text("plugins.sort.action", L"Sort"));
             winrt::get_self<PluginsPageView>(pluginsPageView)->ScanForPluginsButton().Label(localization.text("plugins.scanForPlugins", L"Scan for plugins"));
         }
@@ -3156,10 +3615,22 @@ namespace winrt::LightHostModernWinUI::implementation
         const bool available = selection.GetNamedBoolean(L"processingAvailable", false);
         const bool suspended = selection.GetNamedBoolean(L"suspended", false);
         const bool unconfigured = selection.GetNamedString(L"recoveryState", L"") == L"unconfigured";
-        const auto message = localization.text(suspended ? "audio.suspendedNotice" : unconfigured ? "audio.unconfiguredNotice" : "audio.unavailableNotice",
-            suspended ? L"Audio is stopped. Select a device to start processing." : unconfigured ? L"Select an audio device to start processing." : L"The selected audio device is unavailable. LightHostModern is not processing audio.");
+        const auto recoveryMessage = winrt::to_string(selection.GetNamedString(L"recoveryMessage", L""));
+        hstring message;
+        if (recoveryMessage == "Audio callbacks stopped. Reopening the device.")
+            message = localization.text("audio.recovery.callbacksStopped", L"Audio callbacks stopped. Reopening the device.");
+        else if (recoveryMessage == "A plugin is blocking audio. Restart LightHostModern.")
+            message = localization.text("audio.recovery.pluginBlocking", L"A plugin is blocking audio. Restart LightHostModern.");
+        else if (recoveryMessage == "The audio stream stopped and did not restart.")
+            message = localization.text("audio.recovery.streamStopped", L"The audio stream stopped and did not restart.");
+        else
+            message = localization.text(suspended ? "audio.suspendedNotice" : unconfigured ? "audio.unconfiguredNotice" : "audio.unavailableNotice",
+                suspended ? L"Audio is stopped. Select a device to start processing." : unconfigured ? L"Select an audio device to start processing." : L"The selected audio device is unavailable. LightHostModern is not processing audio.");
+        const bool stallNotice = recoveryMessage == "Audio callbacks stopped. Reopening the device."
+            || recoveryMessage == "A plugin is blocking audio. Restart LightHostModern."
+            || recoveryMessage == "The audio stream stopped and did not restart.";
         for (auto notice : { DashboardAudioNotice(), AudioUnavailableNotice() })
-            if (notice) { notice.Message(message); notice.IsOpen(!available && hostConnection->connected); }
+            if (notice) { notice.Message(message); notice.IsOpen((stallNotice || !available) && hostConnection->connected); }
         const auto previous = syncingHostControls; syncingHostControls = true;
         const auto key = selection.GetNamedString(L"preferenceKey", L"");
         channelPreferenceKey = std::wstring(key);
@@ -3429,6 +3900,7 @@ namespace winrt::LightHostModernWinUI::implementation
         const auto inputChannels = (int) extractNumber(json, "inputChannels");
         const auto outputChannels = (int) extractNumber(json, "outputChannels");
         const auto chainVersion = (int64_t) extractNumber(json, "chainVersion", -1);
+        const auto profileVersion = (int64_t) extractNumber(json, "profileVersion", -1);
         const auto pluginDbVersion = (int64_t) extractNumber(json, "pluginDbVersion", -1);
         const auto audioConfigVersion = (int64_t) extractNumber(json, "audioConfigVersion", -1);
 
@@ -3456,6 +3928,7 @@ namespace winrt::LightHostModernWinUI::implementation
 
         const bool stateChanged = !hasFullSnapshot
             || chainVersion != lastChainVersion
+            || profileVersion != lastProfileVersion
             || pluginDbVersion != lastPluginDbVersion
             || audioConfigVersion != lastAudioConfigVersion;
         if (stateChanged)
@@ -3518,6 +3991,7 @@ namespace winrt::LightHostModernWinUI::implementation
         const auto reloads = (int) extractNumber(json, "chainReloads");
         const auto flushes = (int) extractNumber(json, "settingsFlushes");
         lastChainVersion = (int64_t) extractNumber(json, "chainVersion", (double) lastChainVersion);
+        lastProfileVersion = (int64_t) extractNumber(json, "profileVersion", (double) lastProfileVersion);
         lastPluginDbVersion = (int64_t) extractNumber(json, "pluginDbVersion", (double) lastPluginDbVersion);
         lastAudioConfigVersion = (int64_t) extractNumber(json, "audioConfigVersion", (double) lastAudioConfigVersion);
         hasFullSnapshot = true;
@@ -3535,6 +4009,7 @@ namespace winrt::LightHostModernWinUI::implementation
         sessionWritable = sessionState.ValueType() == lightHostModern::ipc::JsonValueType::Object
             && extractBool(to_string(sessionState.Stringify()), "writable");
         runningPage.allowChanges = installedPage.allowChanges = sessionWritable;
+        updateChainProfileButton(json);
         auto allKnownPluginRows = extractKnownPluginRows(json);
         applyInstalledPluginRuntimeStatus(allKnownPluginRows, allPluginRows);
         activePluginIdentityKeys.clear();
@@ -3870,7 +4345,13 @@ namespace winrt::LightHostModernWinUI::implementation
         if (Pages().SettingsLoaded())
         {
             hstring persistenceStatus;
-            if (recoveryState == "suspended" || recoveryState == "blocked" || recoveryState == "failed")
+            if (recoveryMessage == "Audio callbacks stopped. Reopening the device.")
+                persistenceStatus = localization.text("audio.recovery.callbacksStopped", L"Audio callbacks stopped. Reopening the device.");
+            else if (recoveryMessage == "A plugin is blocking audio. Restart LightHostModern.")
+                persistenceStatus = localization.text("audio.recovery.pluginBlocking", L"A plugin is blocking audio. Restart LightHostModern.");
+            else if (recoveryMessage == "The audio stream stopped and did not restart.")
+                persistenceStatus = localization.text("audio.recovery.streamStopped", L"The audio stream stopped and did not restart.");
+            else if (recoveryState == "suspended" || recoveryState == "blocked" || recoveryState == "failed")
                 persistenceStatus = localization.text("audio.recovery." + recoveryState, L"Audio device is unavailable.");
             else if (recoveryState == "retrying")
                 persistenceStatus = localization.format("audio.recovery.retrying", L"Retrying preferred audio device ({0}/{1}).",
@@ -3892,6 +4373,8 @@ namespace winrt::LightHostModernWinUI::implementation
         activePluginCount = (int) allPluginRows.size();
         installedPluginCount = (int) allKnownPluginRows.size();
         updateInstalledPluginActions();
+        updateStripMixer(json);
+        runningPage.stripId.clear();
         runningPage.adopt(std::move(allPluginRows));
         installedPage.adopt(std::move(allKnownPluginRows));
         refreshPluginViews();
@@ -3903,6 +4386,7 @@ namespace winrt::LightHostModernWinUI::implementation
     void MainWindow::refreshPluginViews()
     {
         if (!Pages().PluginsLoaded() || windowClosing) return;
+        runningPage.stripId.clear();
         // Language changes render the current models without waiting for a
         // structural host snapshot, so section labels belong to this refresh.
         RunningPluginsTabButton().Text(hstring(std::wstring(localization.text("plugins.running", L"Running").c_str())
@@ -3910,10 +4394,11 @@ namespace winrt::LightHostModernWinUI::implementation
         InstalledPluginsTabButton().Text(hstring(std::wstring(localization.text("plugins.installed", L"Installed").c_str())
             + L" (" + std::to_wstring(installedPluginCount) + L")"));
         runningPage.render(runningPluginSearch, runningPluginSortMode, compactPluginCards, localization, RunningPluginsListView());
+        fillStripInserts();
         installedPage.render(installedPluginSearch, installedPluginSortMode, compactPluginCards, localization, InstalledPluginsListView(), installedGrouped);
         RunningPluginsSummaryText().Text(L"");
         InstalledPluginsSummaryText().Text(L"");
-        setVisible(RunningPluginsListView(), runningPage.items.Size() != 0);
+        setVisible(RunningPluginsListView(), true);
         setVisible(RunningPluginsEmptyText(), runningPage.items.Size() == 0);
         setVisible(InstalledPluginsListView(), installedPage.items.Size() != 0);
         setVisible(InstalledPluginsEmptyText(), installedPage.items.Size() == 0);
@@ -3995,6 +4480,143 @@ namespace winrt::LightHostModernWinUI::implementation
         }
 
         return selectedIndex;
+    }
+
+    void MainWindow::updateChainProfileButton(std::string const& json)
+    {
+        if (!Pages().PluginsLoaded() || !RunningProfileButton()) return;
+        auto root = lightHostModern::ipc::parseObject(json);
+        std::string activeId;
+        std::vector<std::pair<std::string, std::string>> profiles;
+        if (root && root.HasKey(L"chainProfiles"))
+        {
+            auto value = root.GetNamedValue(L"chainProfiles");
+            if (value.ValueType() == JsonValueType::Object)
+            {
+                auto object = value.GetObject();
+                if (object.HasKey(L"activeId") && object.GetNamedValue(L"activeId").ValueType() == JsonValueType::String)
+                    activeId = to_string(object.GetNamedString(L"activeId"));
+                if (object.HasKey(L"profiles") && object.GetNamedValue(L"profiles").ValueType() == JsonValueType::Array)
+                    for (auto item : object.GetNamedArray(L"profiles"))
+                        if (item.ValueType() == JsonValueType::Object)
+                        {
+                            auto profile = item.GetObject();
+                            if (!profile.HasKey(L"id") || !profile.HasKey(L"name")) continue;
+                            profiles.push_back({to_string(profile.GetNamedString(L"id")), to_string(profile.GetNamedString(L"name"))});
+                        }
+            }
+        }
+        std::string activeName;
+        for (auto const& profile : profiles)
+            if (profile.first == activeId) activeName = profile.second;
+        const auto label = activeName.empty() ? localization.text("profiles.unsaved", L"Unsaved") : to_hstring(activeName);
+        RunningProfileButton().Content(box_value(label));
+        Automation::AutomationProperties::SetName(RunningProfileButton(), label);
+        RunningProfileButton().IsEnabled(sessionWritable);
+        chainProfileActiveId = activeId;
+        std::string signature = activeId + "\n" + (sessionWritable ? "1" : "0") + "\n" + to_string(label)
+            + "\n" + to_string(localization.text("profiles.saveAs", L"Save as new profile"));
+        for (auto const& profile : profiles) signature += profile.first + "=" + profile.second + "\n";
+        if (signature == chainProfileSignature) return;
+        chainProfileSignature = std::move(signature);
+        auto menu = RunningProfileMenu();
+        menu.Items().Clear();
+        for (auto const& profile : profiles)
+        {
+            auto item = ToggleMenuFlyoutItem();
+            item.Text(to_hstring(profile.second));
+            item.IsChecked(profile.first == activeId);
+            item.IsEnabled(sessionWritable);
+            Automation::AutomationProperties::SetAutomationId(item, to_hstring("Profile-" + profile.first));
+            item.Click([weak = get_weak(), id = profile.first](IInspectable const&, RoutedEventArgs const&) {
+                if (auto owner = weak.get()) owner->runProfileCommand("switch:" + id);
+            });
+            menu.Items().Append(item);
+        }
+        if (!profiles.empty()) menu.Items().Append(MenuFlyoutSeparator());
+        const auto action = [&](wchar_t const* automationId, hstring const& text, std::string const& command, bool needsActive, bool enabled = true) {
+            auto item = MenuFlyoutItem();
+            item.Text(text);
+            item.IsEnabled(sessionWritable && enabled && (!needsActive || !activeId.empty()));
+            Automation::AutomationProperties::SetAutomationId(item, automationId);
+            item.Click([weak = get_weak(), command](IInspectable const&, RoutedEventArgs const&) {
+                if (auto owner = weak.get()) owner->runProfileCommand(command);
+            });
+            menu.Items().Append(item);
+        };
+        action(L"ProfileSave", localization.text("profiles.saveAs", L"Save as new profile"), "save", false);
+        action(L"ProfileRename", localization.text("profiles.rename", L"Rename profile"), "rename", true);
+        action(L"ProfileDuplicate", localization.text("profiles.duplicate", L"Duplicate profile"), "duplicate", true);
+        action(L"ProfileDelete", localization.text("profiles.delete", L"Delete profile"), "delete", true, profiles.size() > 1);
+    }
+
+    winrt::fire_and_forget MainWindow::runProfileCommand(std::string command)
+    {
+        auto lifetime = get_strong();
+        if (profileDialogOpen || windowClosing || !sessionWritable) co_return;
+        if (command.rfind("switch:", 0) == 0)
+        {
+            const auto id = command.substr(7);
+            if (!id.empty() && id != chainProfileActiveId) co_await sendCommand("switch-chain-profile:" + id);
+            co_return;
+        }
+        if (command == "duplicate")
+        {
+            if (!chainProfileActiveId.empty()) co_await sendCommand("duplicate-chain-profile:" + chainProfileActiveId);
+            co_return;
+        }
+        profileDialogOpen = true;
+        struct Finish { bool& flag; ~Finish() { flag = false; } } finish{profileDialogOpen};
+        try
+        {
+            if (command == "delete")
+            {
+                if (chainProfileActiveId.empty() || windowClosing) co_return;
+                ContentDialog dialog;
+                dialog.XamlRoot(RootLayout().XamlRoot());
+                dialog.RequestedTheme(RootLayout().ActualTheme());
+                dialog.Title(box_value(localization.text("profiles.deleteTitle", L"Delete this profile?")));
+                TextBlock message;
+                message.TextWrapping(TextWrapping::Wrap);
+                message.Text(localization.text("profiles.deleteBody", L"The chain saved in this profile will be removed. The running chain switches to another profile."));
+                dialog.Content(message);
+                dialog.PrimaryButtonText(localization.text("profiles.delete", L"Delete profile"));
+                dialog.CloseButtonText(localization.text("common.cancel", L"Cancel"));
+                Automation::AutomationProperties::SetAutomationId(dialog, L"DeleteProfileDialog");
+                if (co_await dialog.ShowAsync() == ContentDialogResult::Primary && !windowClosing)
+                    co_await sendCommand("delete-chain-profile:" + chainProfileActiveId);
+                co_return;
+            }
+            ContentDialog dialog;
+            dialog.XamlRoot(RootLayout().XamlRoot());
+            dialog.RequestedTheme(RootLayout().ActualTheme());
+            const bool rename = command == "rename";
+            dialog.Title(box_value(rename ? localization.text("profiles.rename", L"Rename profile") : localization.text("profiles.saveAs", L"Save as new profile")));
+            dialog.PrimaryButtonText(localization.text("common.save", L"Save"));
+            dialog.CloseButtonText(localization.text("common.cancel", L"Cancel"));
+            dialog.DefaultButton(ContentDialogButton::Primary);
+            TextBox input;
+            input.MaxLength(128);
+            input.Header(box_value(localization.text("profiles.name", L"Profile name")));
+            if (rename && RunningProfileButton().Content())
+                try { input.Text(unbox_value<hstring>(RunningProfileButton().Content())); } catch (...) {}
+            Automation::AutomationProperties::SetAutomationId(input, L"ProfileNameInput");
+            dialog.Content(input);
+            dialog.IsPrimaryButtonEnabled(!input.Text().empty());
+            input.TextChanged([&dialog](IInspectable const& sender, auto const&) {
+                dialog.IsPrimaryButtonEnabled(!sender.as<TextBox>().Text().empty());
+            });
+            Automation::AutomationProperties::SetAutomationId(dialog, L"ProfileNameDialog");
+            if (co_await dialog.ShowAsync() != ContentDialogResult::Primary || windowClosing) co_return;
+            const auto name = to_string(input.Text());
+            if (name.empty()) co_return;
+            if (rename)
+            {
+                if (!chainProfileActiveId.empty()) co_await sendCommand("rename-chain-profile:" + chainProfileActiveId + ":" + name);
+            }
+            else co_await sendCommand("create-chain-profile:" + name);
+        }
+        catch (hresult_error const& error) { winUILog("Profile dialog: " + to_string(error.message())); }
     }
 
     void MainWindow::updateRunningPluginActions()

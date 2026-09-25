@@ -24,17 +24,21 @@ public:
 
     static PluginWindow* getWindowFor (AudioProcessor&, NamedValueSet&, WindowFormatType);
 
+    static bool isOpenFor (AudioProcessor&);
     static void closeCurrentlyOpenWindowsFor (AudioProcessor&);
     static void closeAllCurrentlyOpenWindows();
     static bool containsActiveWindows();
 
     void moved() override;
+    void resized() override;
     void closeButtonPressed() override;
 
 private:
+    void storeBounds();
     AudioProcessor* owner;
     NamedValueSet* windowProperties;
     WindowFormatType type;
+    bool tracking = false;
 
     float getDesktopScaleFactor() const override     { return 1.0f; }
 
@@ -55,6 +59,8 @@ inline String toString (PluginWindow::WindowFormatType type)
 
 inline String getLastXProp (PluginWindow::WindowFormatType type)    { return "uiLastX_" + toString (type); }
 inline String getLastYProp (PluginWindow::WindowFormatType type)    { return "uiLastY_" + toString (type); }
+inline String getLastWProp (PluginWindow::WindowFormatType type)    { return "uiLastW_" + toString (type); }
+inline String getLastHProp (PluginWindow::WindowFormatType type)    { return "uiLastH_" + toString (type); }
 inline String getOpenProp  (PluginWindow::WindowFormatType type)    { return "uiopen_"  + toString (type); }
 
 

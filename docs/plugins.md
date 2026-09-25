@@ -6,7 +6,13 @@ The Plugins page separates the active processing chain from the installed plugin
 
 ## Running
 
-**Running** contains plugin instances in processing order. Each card shows the plugin name, manufacturer, format, a status badge, and an action menu. The toolbar combines search, output mute, chain bypass, and sorting.
+**Running** contains plugin instances in processing order. Each card shows the plugin name, manufacturer, format, a status badge, and an action menu. The toolbar combines the chain profile, search, output mute, chain bypass, and sorting.
+
+The Running tab is a row of vertical channel strips. Each strip lists its plugins from top to bottom, then a pan control and a vertical volume fader. The master strip at the right has volume only. Pan at center leaves the strip as it was. Full left or full right sends a one-channel strip to only the first or second chosen output.
+
+Each strip chooses inputs and outputs. The main pair is the default output. Up to 16 strips can be added. An editor that is open when the app quits opens again at its saved position, on a visible display.
+
+The profile menu saves and switches the running chain only: strips, routing, faders, order, bypass, custom names, and plugin state. Audio devices, recovery, appearance, and scan paths stay as they are. The first writable launch creates a profile named `Default` from the current chain. Edits update the active profile and the session file. Switching reloads that chain in the current host and closes editors whose instance is not in the selected profile. Up to 32 profiles can be saved. Names can be 128 characters and must be unique ignoring case. The last profile cannot be deleted. Deleting the active profile switches to another one first. Safe mode and a damaged session disable profile changes. The notification-area **Profiles** menu switches profiles while the window is closed. Global mute and bypass are unchanged by a switch. An open profile name of **Unsaved** means the recovered chain does not match a saved profile; saving or switching chooses one without overwriting the others.
 
 Available actions include:
 
@@ -18,6 +24,8 @@ Available actions include:
 - swap positions with another instance;
 - remove the instance from the chain;
 - reorder the chain by drag and drop or the available move actions.
+- drag an installed plugin onto a running card to insert it, or onto a strip to append it.
+- undo and redo chain edits from the toolbar or Ctrl+Z, Ctrl+Y, and Ctrl+Shift+Z. A text box keeps its own undo.
 
 Duplicating a plugin creates another independent running instance. Reordering changes signal flow immediately because audio is processed from the first card to the last.
 

@@ -6,6 +6,7 @@
 #include <memory>
 #include <vector>
 #include <array>
+#include <map>
 #include <mutex>
 #include "PluginInstanceId.h"
 #include "GlobalAudioControls.h"
@@ -73,6 +74,32 @@ private:
 	float transitionStep = 1.0f;
 };
 
+struct StripRuntime
+{
+	std::atomic<float> targetGain { 1.0f };
+	std::atomic<float> targetPan { 0.0f };
+	float gain = 1.0f;
+	float pan = 0.0f;
+	std::atomic<bool> muted { false };
+	std::atomic<bool> solo { false };
+	std::atomic<float> level { 0.0f };
+	DryDelay align;
+};
+
+struct StripSnapshot
+{
+	juce::String id;
+	bool allInputs = true, allOutputs = true;
+	float gainLinear = 1.0f;
+	float pan = 0.0f;
+	bool muted = false;
+	bool solo = false;
+	std::shared_ptr<StripRuntime> runtime;
+	std::vector<int> inputMap, outputMap;
+	int busChannels = 2, latencySamples = 0;
+	std::vector<std::shared_ptr<PluginSlot>> slots;
+};
+
 struct ChainSnapshot
 {
 	double sampleRate = 44100.0;
@@ -81,9 +108,11 @@ struct ChainSnapshot
 	int outputChannels = 2;
 	int maxPluginChannels = 2;
 	int totalLatencySamples = 0;
+	float masterGainLinear = 1.0f;
 	uint64 reusedSlots = 0;
 	uint64 rebuiltSlots = 0;
 	std::vector<std::shared_ptr<PluginSlot>> slots;
+	std::vector<StripSnapshot> strips;
 };
 
 class RealtimeHostProcessor final : public AudioProcessor
@@ -112,6 +141,34 @@ public:
 	void setDiagnosticsEnabled(bool enabled);
 	bool setGlobalMuted(bool value) { return globalControls.setMuted(value); }
 	bool setGlobalBypassed(bool value) { return globalControls.setBypassed(value); }
+	void setMasterGain(float linear) noexcept { masterTarget.store(juce::jlimit(0.0f, 4.0f, linear), std::memory_order_relaxed); }
+	void setStripGain(const juce::String& id, float linear) noexcept
+	{
+		if (const auto found = stripRuntimes.find(id); found != stripRuntimes.end() && found->second)
+			found->second->targetGain.store(juce::jlimit(0.0f, 4.0f, linear), std::memory_order_relaxed);
+	}
+	void setStripPan(const juce::String& id, float pan) noexcept
+	{
+		if (const auto found = stripRuntimes.find(id); found != stripRuntimes.end() && found->second)
+			found->second->targetPan.store(juce::jlimit(-1.0f, 1.0f, pan), std::memory_order_relaxed);
+	}
+	void setStripMuted(const juce::String& id, bool muted) noexcept
+	{
+		if (const auto found = stripRuntimes.find(id); found != stripRuntimes.end() && found->second)
+			found->second->muted.store(muted, std::memory_order_relaxed);
+	}
+	void setStripSolo(const juce::String& id, bool solo) noexcept
+	{
+		if (const auto found = stripRuntimes.find(id); found != stripRuntimes.end() && found->second)
+			found->second->solo.store(solo, std::memory_order_relaxed);
+	}
+	void setAnySolo(bool value) noexcept { anySolo.store(value, std::memory_order_relaxed); }
+	float getStripLevel(const juce::String& id) const noexcept
+	{
+		const auto found = stripRuntimes.find(id);
+		return found != stripRuntimes.end() && found->second ? found->second->level.load(std::memory_order_relaxed) : 0.0f;
+	}
+	float getMasterLevel() const noexcept { return masterLevel.load(std::memory_order_relaxed); }
 	void setMonoInputs(bool value) noexcept { monoInputs.store(value, std::memory_order_relaxed); }
     bool isMonoInputs() const noexcept { return monoInputs.load(std::memory_order_relaxed); }
     void setMonoOutput(bool value) noexcept { monoOutput.store(value, std::memory_order_relaxed); }
@@ -170,6 +227,9 @@ private:
 	void prepareSnapshot(ChainSnapshot& snapshot);
 	void prepareBuffers();
 	void processSlot(PluginSlot& slot, AudioBuffer<float>& buffer, MidiBuffer& midiMessages);
+	std::shared_ptr<StripRuntime> runtimeFor(const juce::String& id);
+	void processStrips(ChainSnapshot& snapshot, AudioBuffer<float>& segment, MidiBuffer& midi, uint64& dropped);
+	std::map<juce::String, std::shared_ptr<StripRuntime>> stripRuntimes;
 
 	mutable std::shared_ptr<ChainSnapshot> activeSnapshot;
 	std::atomic<ChainSnapshot*> realtimeSnapshot { nullptr };
@@ -183,9 +243,14 @@ private:
 	std::atomic<float> lastOutputLevel { 0.0f };
 	double currentSampleRate = 44100.0;
 	int currentBlockSize = 512;
-	AudioBuffer<float> scratchBuffer;
+	AudioBuffer<float> scratchBuffer, stripBus, mixBus;
+	std::atomic<float> masterTarget { 1.0f };
+	std::atomic<float> masterLevel { 0.0f };
+	std::atomic<bool> anySolo { false };
+	float masterGain = 1.0f;
 	std::array<AudioBuffer<float>, maxScratchChannels + 1> segmentViews;
 	std::array<AudioBuffer<float>, maxScratchChannels + 1> expandedViews;
+	std::array<AudioBuffer<float>, maxScratchChannels + 1> stripViews;
 	MidiBuffer segmentMidi, filteredMidi, outputMidi;
 	static constexpr int midiCapacity = lightHostModern::midiCapacityBytes;
 	MidiBuffer* preparedMidiDestination = nullptr;

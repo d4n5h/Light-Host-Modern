@@ -24,6 +24,14 @@ inline Arguments argumentsFor(std::string_view command)
         {"plugin-scan-failures", A::object}, {"retry-plugin-scan-selection", A::object},
         {"known-plugin-details", A::text},
         {"instance-details", A::text},
+        {"chain-profiles", A::none},
+        {"create-chain-profile", A::text}, {"switch-chain-profile", A::text},
+        {"rename-chain-profile", A::twoTexts}, {"duplicate-chain-profile", A::text},
+        {"delete-chain-profile", A::text},
+        {"add-strip", A::text}, {"remove-strip", A::text}, {"rename-strip", A::twoTexts},
+        {"set-strip-routing", A::object}, {"set-strip-gain", A::object}, {"set-strip-pan", A::object}, {"set-master-gain", A::number},
+        {"add-known-plugin-at", A::object}, {"move-plugin-to-strip", A::object},
+        {"undo-chain", A::none}, {"redo-chain", A::none},
         {"begin-plugin-scan", A::none},
         {"clear-known-plugins", A::none}, {"retry-audio-device", A::none},
         {"delete-plugin-states", A::none}, {"quit-host", A::none}, {"flush-session", A::none},
@@ -70,6 +78,7 @@ inline bool isReadOnly(std::string_view command)
         || command == "callback-measurement"
         || command == "audio-device-options"
         || command == "enabled-audio-choices" || command == "plugin-scan-status"
-        || command == "plugin-scan-failures" || command == "known-plugin-details" || command == "instance-details";
+        || command == "plugin-scan-failures" || command == "known-plugin-details" || command == "instance-details"
+        || command == "chain-profiles";
 }
 }

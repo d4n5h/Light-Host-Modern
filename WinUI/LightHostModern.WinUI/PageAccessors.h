@@ -110,9 +110,21 @@
         Microsoft::UI::Xaml::Controls::AppBarToggleButton RunningGlobalBypassButton() const
         { return pluginsPageView ? winrt::get_self<PluginsPageView>(pluginsPageView)->RunningGlobalBypassButton() : Microsoft::UI::Xaml::Controls::AppBarToggleButton{nullptr}; }
 
+        Microsoft::UI::Xaml::Controls::DropDownButton RunningProfileButton() const
+        { return pluginsPageView ? winrt::get_self<PluginsPageView>(pluginsPageView)->RunningProfileButton() : Microsoft::UI::Xaml::Controls::DropDownButton{nullptr}; }
+
+        Microsoft::UI::Xaml::Controls::MenuFlyout RunningProfileMenu() const
+        { return pluginsPageView ? winrt::get_self<PluginsPageView>(pluginsPageView)->RunningProfileMenu() : Microsoft::UI::Xaml::Controls::MenuFlyout{nullptr}; }
+
         Microsoft::UI::Xaml::Controls::AutoSuggestBox RunningPluginSearchBox() const
         { return pluginsPageView ? winrt::get_self<PluginsPageView>(pluginsPageView)->RunningPluginSearchBox() : Microsoft::UI::Xaml::Controls::AutoSuggestBox{nullptr}; }
 
+        Microsoft::UI::Xaml::Controls::StackPanel StripMixerPanel() const
+        { return pluginsPageView ? winrt::get_self<PluginsPageView>(pluginsPageView)->StripMixerPanel() : Microsoft::UI::Xaml::Controls::StackPanel{nullptr}; }
+        Microsoft::UI::Xaml::Controls::AppBarButton RunningUndoButton() const
+        { return pluginsPageView ? winrt::get_self<PluginsPageView>(pluginsPageView)->RunningUndoButton() : Microsoft::UI::Xaml::Controls::AppBarButton{nullptr}; }
+        Microsoft::UI::Xaml::Controls::AppBarButton RunningRedoButton() const
+        { return pluginsPageView ? winrt::get_self<PluginsPageView>(pluginsPageView)->RunningRedoButton() : Microsoft::UI::Xaml::Controls::AppBarButton{nullptr}; }
         Microsoft::UI::Xaml::Controls::AppBarButton RunningPluginSortButton() const
         { return pluginsPageView ? winrt::get_self<PluginsPageView>(pluginsPageView)->RunningPluginSortButton() : Microsoft::UI::Xaml::Controls::AppBarButton{nullptr}; }
 

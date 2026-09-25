@@ -266,7 +266,9 @@ var DeviceController::selectionState() const
     result->setProperty("suspended", audioStartSuspended);
     result->setProperty("preferenceKey", monoInputsKey());
     result->setProperty("mainOutputPairActive", available && current.outputChannels[0] && current.outputChannels[1]);
-    result->setProperty("recoveryState", audioRecoveryState); result->setProperty("attempt", failedAudioRecoveryAttempts);
+    result->setProperty("recoveryState", audioRecoveryState);
+    result->setProperty("recoveryMessage", audioRecoveryMessage);
+    result->setProperty("attempt", failedAudioRecoveryAttempts);
     return var(result);
 }
 
@@ -435,6 +437,8 @@ void DeviceController::invalidateConfiguration()
     nextRetry = clock();
     failedAudioRecoveryAttempts = 0;
     applicationsSuspended = false;
+    stallPrimed = false;
+    stallAttempts = 0;
 }
 
 String DeviceController::deviceInventory() const
@@ -467,10 +471,83 @@ bool DeviceController::hasPermittedCandidate()
     return false;
 }
 
+void DeviceController::observeCallbacks(uint64 count)
+{
+    callbacksObserved = true;
+    latestCallbacks = count;
+    if (!stallPrimed)
+    {
+        stallPrimed = true;
+        lastCallbacks = count;
+        stallSince = clock();
+    }
+}
+
+bool DeviceController::isStallMessage(const String& message)
+{
+    return message == "Audio callbacks stopped. Reopening the device."
+        || message == "A plugin is blocking audio. Restart LightHostModern."
+        || message == "The audio stream stopped and did not restart.";
+}
+
+bool DeviceController::recoverStalledStream()
+{
+    if (!callbacksObserved || !stallPrimed || audioStartSuspended || manualAudioSelectionInProgress || applicationsSuspended)
+        return false;
+    auto* device = deviceManager.getCurrentAudioDevice();
+    if (!device || !device->isOpen() || !device->isPlaying()) return false;
+    if (latestCallbacks != lastCallbacks)
+    {
+        lastCallbacks = latestCallbacks;
+        stallSince = clock();
+        stallAttempts = 0;
+        if (isStallMessage(audioRecoveryMessage))
+        {
+            audioRecoveryMessage.clear();
+            audioRecoveryState = "running";
+            ++audioConfigVersion;
+        }
+        return false;
+    }
+    if (clock() - stallSince < std::chrono::seconds(2) || clock() < stallNextRetry) return false;
+    if (!deviceManager.getAudioCallbackLock().tryEnter())
+    {
+        if (audioRecoveryMessage != "A plugin is blocking audio. Restart LightHostModern.")
+        {
+            audioRecoveryState = "blocked";
+            audioRecoveryMessage = "A plugin is blocking audio. Restart LightHostModern.";
+            ++audioConfigVersion;
+        }
+        return true;
+    }
+    deviceManager.getAudioCallbackLock().exit();
+    const auto attempts = getAudioRecoveryConfiguration().retryAttempts;
+    if (stallAttempts >= attempts)
+    {
+        if (audioRecoveryMessage != "The audio stream stopped and did not restart.")
+        {
+            audioRecoveryState = "failed";
+            audioRecoveryMessage = "The audio stream stopped and did not restart.";
+            ++audioConfigVersion;
+        }
+        return true;
+    }
+    if (configuredBackend.isEmpty()) return false;
+    ++stallAttempts;
+    audioRecoveryState = "retrying";
+    audioRecoveryMessage = "Audio callbacks stopped. Reopening the device.";
+    apply(deviceManager, configuredBackend, configuredSetup);
+    stallSince = clock();
+    stallNextRetry = clock() + std::chrono::seconds(getAudioRecoveryConfiguration().retrySeconds);
+    ++audioConfigVersion;
+    return true;
+}
+
 void DeviceController::tick()
 {
-    if (audioStartSuspended || manualAudioSelectionInProgress || applicationsSuspended
-        || scheduledGeneration != generation || clock() < nextRetry) return;
+    if (audioStartSuspended || manualAudioSelectionInProgress || applicationsSuspended) return;
+    if (recoverStalledStream()) return;
+    if (scheduledGeneration != generation || clock() < nextRetry) return;
     scheduleRetry();
     closeCurrentAudioDeviceIfBlocked("recovery");
     if (!hasPermittedCandidate())
@@ -488,6 +565,8 @@ void DeviceController::tick()
     if (device && device->isOpen() && device->isPlaying()
         && (mode == "disabled" || currentAudioDeviceMatchesPreferred(config)))
     {
+        if (callbacksObserved && latestCallbacks == lastCallbacks && isStallMessage(audioRecoveryMessage))
+            return;
         failedAudioRecoveryAttempts = 0;
         if (audioRecoveryState != "running") ++audioConfigVersion;
         audioRecoveryState = "running";
@@ -1772,6 +1851,8 @@ bool DeviceController::retryPreferredAudioDeviceNow()
 	audioStartSuspended = false;
     preferences.setValue("audioSelectionSuspended", false); markSettingsDirty();
 	failedAudioRecoveryAttempts = 0;
+    stallAttempts = 0;
+    stallPrimed = false;
 	audioRecoveryState = "retrying";
 	audioRecoveryMessage = "Manual retry requested.";
 	const auto config = getAudioRecoveryConfiguration();
@@ -2328,5 +2409,73 @@ void DeviceController::saveAudioDeviceState()
     saveCurrentAudioChannelState();
     if (auto state = deviceManager.createStateXml()) preferences.setValue("audioDeviceState", state.get());
     markSettingsDirty();
+}
+
+DeviceController::CapturedAudioSetup DeviceController::captureAudioSetup()
+{
+    CapturedAudioSetup captured;
+    if (auto* device = deviceManager.getCurrentAudioDevice(); device != nullptr && device->isOpen())
+    {
+        captured.device = deviceManager.createStateXml();
+        AudioDeviceManager::AudioDeviceSetup setup;
+        deviceManager.getAudioDeviceSetup(setup);
+        const auto inputChannels = setup.inputChannels.isZero() ? device->getActiveInputChannels() : setup.inputChannels;
+        const auto outputChannels = setup.outputChannels.isZero() ? device->getActiveOutputChannels() : setup.outputChannels;
+        captured.channels = std::make_unique<XmlElement>("CHANNELS");
+        captured.channels->setAttribute("backend", device->getTypeName());
+        captured.channels->setAttribute("input", setup.inputDeviceName);
+        captured.channels->setAttribute("output", setup.outputDeviceName);
+        captured.channels->setAttribute("inputChannels", inputChannels.toString(2));
+        captured.channels->setAttribute("outputChannels", outputChannels.toString(2));
+        captured.channels->setAttribute("useDefaultInputChannels", setup.useDefaultInputChannels);
+        captured.channels->setAttribute("useDefaultOutputChannels", setup.useDefaultOutputChannels);
+        return captured;
+    }
+    captured.device = preferences.getXmlValue("audioDeviceState");
+    if (captured.device != nullptr)
+    {
+        const auto backend = captured.device->getStringAttribute("deviceType");
+        const auto input = captured.device->getStringAttribute("audioInputDeviceName");
+        const auto output = captured.device->getStringAttribute("audioOutputDeviceName");
+        if (backend.isNotEmpty())
+            captured.channels = preferences.getXmlValue(audioChannelStateKey(backend, input, output));
+    }
+    return captured;
+}
+
+String DeviceController::applyAudioSetup(const XmlElement* device, const XmlElement* channels, const String& persistence)
+{
+    setAudioPersistenceMode(persistence);
+    if (channels != nullptr)
+    {
+        const auto backend = channels->getStringAttribute("backend");
+        const auto input = channels->getStringAttribute("input");
+        const auto output = channels->getStringAttribute("output");
+        if (backend.isNotEmpty())
+            preferences.setValue(audioChannelStateKey(backend, input, output), channels);
+    }
+    String error;
+    if (device != nullptr)
+    {
+        error = initialise(deviceManager, device, false);
+        if (error.isEmpty())
+        {
+            if (auto* actual = deviceManager.getCurrentAudioDevice())
+            {
+                configuredBackend = actual->getTypeName();
+                deviceManager.getAudioDeviceSetup(configuredSetup);
+                auto setup = configuredSetup;
+                applySavedAudioChannelState(setup, configuredBackend, setup.inputDeviceName, setup.outputDeviceName);
+                if (const auto applyError = deviceManager.setAudioDeviceSetup(setup, true); applyError.isNotEmpty())
+                    error = applyError;
+                else deviceManager.getAudioDeviceSetup(configuredSetup);
+            }
+        }
+        if (auto state = deviceManager.createStateXml()) preferences.setValue("audioDeviceState", state.get());
+        else preferences.setValue("audioDeviceState", device);
+    }
+    markSettingsDirty();
+    ++audioConfigVersion;
+    return error;
 }
 

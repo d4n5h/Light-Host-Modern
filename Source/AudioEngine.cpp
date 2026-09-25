@@ -6,6 +6,7 @@
 #include "VerboseLog.h"
 #include <algorithm>
 #include <cmath>
+#include <set>
 #include <vector>
 
 void lightHostModernLog(const String& message);
@@ -176,7 +177,14 @@ AudioEngine::AudioEngine(bool startInSafeMode, bool shouldRestoreActivePluginsOn
     if (recovered.document)
     {
         instances = recovered.document->instances;
+        instances.ensureStrips();
         sessionMigrationId = recovered.document->migrationId;
+        if (recovered.bytes.find("version=\\\"2\\\"") == std::string::npos && recovered.bytes.find("version=\\\"1\\\"") != std::string::npos)
+        {
+            const auto primary = settings->getFile().getSiblingFile(settings->getFile().getFileName() + ".session.json");
+            const auto backup = primary.getSiblingFile(primary.getFileName() + ".v1.bak");
+            if (!backup.existsAsFile() && primary.existsAsFile()) primary.copyFileTo(backup);
+        }
         if (recovered.warning.isNotEmpty())
             instances.recoveryError = (instances.recoveryError.isEmpty() ? String() : instances.recoveryError + "\n") + recovered.warning;
     }
@@ -209,6 +217,19 @@ AudioEngine::AudioEngine(bool startInSafeMode, bool shouldRestoreActivePluginsOn
         }
     }
     sessionStore = std::make_unique<lightHostModern::SessionStore>(std::move(storage), recovered);
+    chainProfiles = std::make_unique<lightHostModern::ChainProfileStore>(settings->getFile());
+    templates = std::make_unique<lightHostModern::TemplateStore>(settings->getFile());
+    if (instances.writable && !sessionLoadSuppressed)
+    {
+        String sessionHash;
+        if (!recovered.bytes.empty())
+        {
+            const auto parsed = JSON::parse(String::fromUTF8(recovered.bytes.data(), static_cast<int>(recovered.bytes.size())));
+            if (parsed.isObject()) sessionHash = parsed["contentHash"].toString();
+        }
+        if (const auto error = chainProfiles->ensureDefault(instances, sessionMigrationId, sessionHash); error.isNotEmpty())
+            lightHostModernLog("Chain profile catalog: " + error);
+    }
     deviceController.start(safeMode, lightHostModern::RuntimeProfile::current().noAudio);
     player.setProcessor(&hostProcessor);
     deviceManager.addAudioCallback(&player);
@@ -616,6 +637,7 @@ void AudioEngine::loadActivePlugins()
         snapshot->outputChannels = jmax(1, device->getActiveOutputChannels().countNumberOfSetBits());
     }
     auto previous = hostProcessor.getActiveSnapshot();
+    std::vector<String> slotStrips;
     for (auto& record : instances.records)
     {
         if (sessionLoadSuppressed) { record.loading = "suspended"; continue; }
@@ -666,8 +688,60 @@ void AudioEngine::loadActivePlugins()
         record.loading = "loaded";
         record.error.clear();
         slot->bypassed.store(record.bypassed, std::memory_order_release);
+        if (!slot->windowProperties.contains("uiLastX_Normal") && record.hasEditorPosition)
+        {
+            slot->windowProperties.set("uiLastX_Normal", record.editorX);
+            slot->windowProperties.set("uiLastY_Normal", record.editorY);
+            slot->windowProperties.set("uiLastX_Generic", record.editorX);
+            slot->windowProperties.set("uiLastY_Generic", record.editorY);
+        }
+        if (!slot->windowProperties.contains("uiLastW_Normal") && record.hasEditorSize)
+        {
+            slot->windowProperties.set("uiLastW_Normal", record.editorW);
+            slot->windowProperties.set("uiLastH_Normal", record.editorH);
+            slot->windowProperties.set("uiLastW_Generic", record.editorW);
+            slot->windowProperties.set("uiLastH_Generic", record.editorH);
+        }
         snapshot->maxPluginChannels = jmax(snapshot->maxPluginChannels, jmax(slot->inputChannels, slot->outputChannels));
         snapshot->slots.push_back(std::move(slot));
+        slotStrips.push_back(record.stripId);
+    }
+    instances.ensureStrips();
+    snapshot->masterGainLinear = lightHostModern::gainFromDb(instances.masterGainDb);
+    BigInteger inputMask, outputMask;
+    if (auto* device = deviceManager.getCurrentAudioDevice())
+    {
+        inputMask = device->getActiveInputChannels();
+        outputMask = device->getActiveOutputChannels();
+    }
+    const auto packed = [](const BigInteger& mask, int physical) {
+        if (physical < 0 || !mask[physical]) return -1;
+        int index = 0;
+        for (int bit = mask.findNextSetBit(0); bit >= 0 && bit < physical; bit = mask.findNextSetBit(bit + 1)) ++index;
+        return index;
+    };
+    for (const auto& strip : instances.strips)
+    {
+        StripSnapshot item;
+        item.id = strip.id;
+        item.allInputs = strip.allInputs;
+        item.allOutputs = strip.allOutputs;
+        item.gainLinear = lightHostModern::gainFromDb(strip.gainDb);
+        item.pan = strip.pan;
+        item.muted = strip.muted;
+        item.solo = strip.solo;
+        if (!strip.allInputs)
+            for (int physical : strip.inputs) item.inputMap.push_back(packed(inputMask, physical));
+        if (!strip.allOutputs)
+            for (int physical : strip.outputs) item.outputMap.push_back(packed(outputMask, physical));
+        if (!strip.allInputs || !strip.allOutputs)
+        {
+            item.busChannels = jmax(1, jmax((int) item.inputMap.size(), (int) item.outputMap.size()));
+            if (item.inputMap.size() == 1 && item.outputMap.size() >= 2) item.busChannels = jmax(item.busChannels, 2);
+        }
+        for (size_t index = 0; index < snapshot->slots.size() && index < slotStrips.size(); ++index)
+            if (slotStrips[index] == strip.id) item.slots.push_back(snapshot->slots[index]);
+        snapshot->strips.push_back(std::move(item));
     }
     {
         RealtimeHostProcessor::ScopedSuspension suspension(hostProcessor);
@@ -680,6 +754,12 @@ void AudioEngine::loadActivePlugins()
     ++chainVersion;
     clearLightHostModernCrashContext();
     markSettingsDirty();
+    if (!sessionLoadSuppressed)
+        for (int index = 0; index < (int) instances.records.size(); ++index)
+            if (instances.records[(size_t) index].editorOpen)
+                if (auto* live = findActiveSlotFor(instances.records[(size_t) index].id))
+                    if (live->processor && !PluginWindow::isOpenFor(*live->processor))
+                        showPluginEditor(index);
 }
 
 void AudioEngine::addPluginFromMenuId(int menuId)
@@ -704,7 +784,10 @@ bool AudioEngine::addKnownPluginByIndex(int sortedIndex)
 {
     const auto known = getKnownPluginsSorted();
     if (!instances.writable || sessionLoadSuppressed || !isPositiveAndBelow(sortedIndex, static_cast<int>(known.size()))) return false;
+    instances.ensureStrips();
+    chainHistory.record(instances);
     auto record = lightHostModern::newKnownPluginInstance(*getAppProperties().getUserSettings(), known[static_cast<size_t>(sortedIndex)]);
+    record.stripId = instances.strips.front().id;
     const auto id = record.id;
     instances.records.push_back(std::move(record));
     loadActivePlugins();
@@ -716,6 +799,7 @@ void AudioEngine::duplicatePlugin(int sortedIndex)
 {
     if (!instances.writable || sessionLoadSuppressed || !isPositiveAndBelow(sortedIndex, static_cast<int>(instances.records.size()))) return;
     savePluginStates();
+    chainHistory.record(instances);
     auto record = instances.records[static_cast<size_t>(sortedIndex)];
     record.id = Uuid().toString();
     instances.records.insert(instances.records.begin() + sortedIndex + 1, std::move(record));
@@ -743,6 +827,7 @@ int AudioEngine::removeKnownPluginByIndex(int sortedIndex)
 int AudioEngine::clearKnownPlugins()
 {
     if (!instances.writable || sessionLoadSuppressed) return 0;
+    chainHistory.clear();
     cancelPluginScan();
     const int removed = static_cast<int>(instances.records.size());
     instances.records.clear();
@@ -768,6 +853,8 @@ void AudioEngine::openKnownPluginLocation(int sortedIndex) const
 void AudioEngine::removePlugin(int sortedIndex)
 {
     if (!isSessionWritable() || !isPositiveAndBelow(sortedIndex, static_cast<int>(instances.records.size()))) return;
+    savePluginStates();
+    chainHistory.record(instances);
     instances.records.erase(instances.records.begin() + sortedIndex);
     loadActivePlugins();
     saveActivePluginChain(false);
@@ -775,21 +862,44 @@ void AudioEngine::removePlugin(int sortedIndex)
 
 void AudioEngine::movePluginUp(int sortedIndex)
 {
-    if (sortedIndex > 0) movePluginToIndex(sortedIndex, sortedIndex - 1);
+    if (!isSessionWritable() || !isPositiveAndBelow(sortedIndex, (int) instances.records.size())) return;
+    const auto strip = instances.records[(size_t) sortedIndex].stripId;
+    for (int index = sortedIndex - 1; index >= 0; --index)
+        if (instances.records[(size_t) index].stripId == strip)
+        {
+            chainHistory.record(instances);
+            std::swap(instances.records[(size_t) sortedIndex], instances.records[(size_t) index]);
+            loadActivePlugins();
+            saveActivePluginChain(false);
+            return;
+        }
 }
 
 void AudioEngine::movePluginDown(int sortedIndex)
 {
-    movePluginToIndex(sortedIndex, sortedIndex + 1);
+    if (!isSessionWritable() || !isPositiveAndBelow(sortedIndex, (int) instances.records.size())) return;
+    const auto strip = instances.records[(size_t) sortedIndex].stripId;
+    for (int index = sortedIndex + 1; index < (int) instances.records.size(); ++index)
+        if (instances.records[(size_t) index].stripId == strip)
+        {
+            chainHistory.record(instances);
+            std::swap(instances.records[(size_t) sortedIndex], instances.records[(size_t) index]);
+            loadActivePlugins();
+            saveActivePluginChain(false);
+            return;
+        }
 }
 
-void AudioEngine::movePluginToIndex(int fromSortedIndex, int toSortedIndex)
+void AudioEngine::movePluginToIndex(int fromSortedIndex, int toSortedIndex, bool recordHistory, bool adoptStrip)
 {
     const int count = static_cast<int>(instances.records.size());
     if (!isSessionWritable() || !isPositiveAndBelow(fromSortedIndex, count) || count == 0) return;
     toSortedIndex = jlimit(0, count - 1, toSortedIndex);
     if (fromSortedIndex == toSortedIndex) return;
+    const auto targetStrip = instances.records[static_cast<size_t>(toSortedIndex)].stripId;
+    if (recordHistory) chainHistory.record(instances);
     auto record = std::move(instances.records[static_cast<size_t>(fromSortedIndex)]);
+    if (adoptStrip) record.stripId = targetStrip;
     instances.records.erase(instances.records.begin() + fromSortedIndex);
     instances.records.insert(instances.records.begin() + toSortedIndex, std::move(record));
     loadActivePlugins();
@@ -801,6 +911,7 @@ void AudioEngine::setPluginBypassed(int sortedIndex, bool shouldBypass)
     if (!isSessionWritable() || !isPositiveAndBelow(sortedIndex, static_cast<int>(instances.records.size()))) return;
     auto& record = instances.records[static_cast<size_t>(sortedIndex)];
     if (record.bypassed == shouldBypass) return;
+    chainHistory.record(instances);
     record.bypassed = shouldBypass;
     if (auto* slot = findActiveSlotFor(record.id)) slot->bypassed.store(shouldBypass, std::memory_order_release);
     if (isDiagnosticsEnabled()) ++bypassToggleCount;
@@ -811,6 +922,7 @@ void AudioEngine::setPluginBypassed(int sortedIndex, bool shouldBypass)
 void AudioEngine::deletePluginStates()
 {
     if (!instances.writable || sessionLoadSuppressed) return;
+    chainHistory.clear();
     RealtimeHostProcessor::ScopedSuspension suspension(hostProcessor);
     if (auto snapshot = hostProcessor.getActiveSnapshot())
         for (const auto& slot : snapshot->slots) if (slot) PluginWindow::closeCurrentlyOpenWindowsFor(*slot->processor);
@@ -829,6 +941,7 @@ void AudioEngine::deletePluginStates()
 
 void AudioEngine::savePluginStates()
 {
+    syncEditorWindows(true);
     if (!instances.writable || sessionLoadSuppressed) return;
     jassert(MessageManager::getInstance()->isThisTheMessageThread());
     RealtimeHostProcessor::ScopedSuspension suspension(hostProcessor);
@@ -863,6 +976,183 @@ void AudioEngine::saveActivePluginList()
 {
     if (!instances.writable || sessionLoadSuppressed) return;
     if (sessionStore) sessionStore->submit(instances, instances.records.empty(), sessionMigrationId);
+    if (chainProfiles)
+        if (const auto error = chainProfiles->writeActive(instances, sessionMigrationId); error.isNotEmpty())
+            lightHostModernLog("Chain profile save: " + error);
+}
+
+String AudioEngine::prepareChainProfileChange()
+{
+    if (!isSessionWritable() || !chainProfiles) return "session_read_only";
+    savePluginStates();
+    if (const auto error = chainProfiles->writeActive(instances, sessionMigrationId); error.isNotEmpty()) return error;
+    if (sessionStore && !sessionStore->flush()) return "session_save_failed";
+    return {};
+}
+
+String AudioEngine::createChainProfile(const String& name)
+{
+    if (const auto error = prepareChainProfileChange(); error.isNotEmpty()) return error;
+    String id;
+    if (const auto error = chainProfiles->create(instances, sessionMigrationId, name, id); error.isNotEmpty()) return error;
+    ++profileVersion;
+    return {};
+}
+
+String AudioEngine::switchChainProfile(const String& id)
+{
+    if (!isSessionWritable() || !chainProfiles) return "session_read_only";
+    if (chainProfiles->catalog().activeId == id) return {};
+    const auto previousRecords = instances.records;
+    const auto previousStrips = instances.strips;
+    const auto previousMaster = instances.masterGainDb;
+    const auto previousRecovery = instances.recoveryError;
+    const auto previousMigration = sessionMigrationId;
+    if (const auto error = prepareChainProfileChange(); error.isNotEmpty()) return error;
+    lightHostModern::PluginInstances loaded;
+    String migrationId;
+    if (const auto error = chainProfiles->switchTo(id, loaded, migrationId); error.isNotEmpty()) return error;
+    instances.records = std::move(loaded.records);
+    instances.strips = std::move(loaded.strips);
+    instances.masterGainDb = loaded.masterGainDb;
+    instances.recoveryError = loaded.recoveryError;
+    sessionMigrationId = migrationId;
+    loadActivePlugins();
+    if (const auto error = chainProfiles->setActive(id); error.isNotEmpty())
+    {
+        instances.records = previousRecords;
+        instances.strips = previousStrips;
+        instances.masterGainDb = previousMaster;
+        instances.recoveryError = previousRecovery;
+        sessionMigrationId = previousMigration;
+        loadActivePlugins();
+        saveActivePluginList();
+        return error;
+    }
+    saveActivePluginList();
+    if (sessionStore && !sessionStore->flush()) return "session_save_failed";
+    chainHistory.clear();
+    ++profileVersion;
+    return {};
+}
+
+String AudioEngine::renameChainProfile(const String& id, const String& name)
+{
+    if (!isSessionWritable() || !chainProfiles) return "session_read_only";
+    if (const auto error = chainProfiles->rename(id, name); error.isNotEmpty()) return error;
+    ++profileVersion;
+    return {};
+}
+
+String AudioEngine::duplicateChainProfile(const String& id)
+{
+    if (const auto error = prepareChainProfileChange(); error.isNotEmpty()) return error;
+    String copyId;
+    if (const auto error = chainProfiles->duplicate(id, copyId); error.isNotEmpty()) return error;
+    ++profileVersion;
+    return {};
+}
+
+String AudioEngine::deleteChainProfile(const String& id)
+{
+    if (!isSessionWritable() || !chainProfiles) return "session_read_only";
+    const auto profiles = chainProfiles->catalog().profiles;
+    if (profiles.size() <= 1) return "last_profile";
+    if (chainProfiles->catalog().activeId == id)
+    {
+        size_t index = 0;
+        for (; index < profiles.size(); ++index)
+            if (profiles[index].id == id) break;
+        if (index >= profiles.size()) return "profile_not_found";
+        const auto next = profiles[(index + 1) % profiles.size()].id;
+        if (next == id) return "last_profile";
+        if (const auto error = switchChainProfile(next); error.isNotEmpty()) return error;
+    }
+    if (const auto error = chainProfiles->remove(id); error.isNotEmpty()) return error;
+    ++profileVersion;
+    return {};
+}
+
+lightHostModern::TemplateSnapshot AudioEngine::captureTemplate()
+{
+    lightHostModern::TemplateSnapshot snapshot;
+    snapshot.session = instances.serialize();
+    auto captured = deviceController.captureAudioSetup();
+    snapshot.device = std::move(captured.device);
+    snapshot.channels = std::move(captured.channels);
+    snapshot.monoInputs = isMonoInputs();
+    snapshot.monoOutput = isMonoOutput();
+    snapshot.muted = isGlobalMuted();
+    snapshot.bypassed = isGlobalBypassed();
+    snapshot.persistence = deviceController.getAudioRecoveryConfiguration().mode;
+    return snapshot;
+}
+
+String AudioEngine::createTemplate(const String& name)
+{
+    if (!isSessionWritable() || !templates) return "session_read_only";
+    flushSession();
+    String id;
+    if (const auto error = templates->create(name, captureTemplate(), id); error.isNotEmpty()) return error;
+    getAppProperties().getUserSettings()->setValue("activeTemplate", id);
+    markSettingsDirty();
+    return {};
+}
+
+String AudioEngine::updateTemplate(const String& id)
+{
+    if (!isSessionWritable() || !templates) return "session_read_only";
+    flushSession();
+    if (const auto error = templates->update(id, captureTemplate()); error.isNotEmpty()) return error;
+    getAppProperties().getUserSettings()->setValue("activeTemplate", id);
+    markSettingsDirty();
+    return {};
+}
+
+String AudioEngine::recallTemplate(const String& id)
+{
+    if (!isSessionWritable() || !templates) return "session_read_only";
+    lightHostModern::TemplateSnapshot snapshot;
+    if (const auto error = templates->read(id, snapshot); error.isNotEmpty()) return error;
+    lightHostModern::PluginInstances loaded;
+    if (snapshot.session == nullptr || !loaded.deserialize(*snapshot.session)) return "template_session_invalid";
+    loaded.ensureStrips();
+    flushSession();
+    instances = std::move(loaded);
+    loadActivePlugins();
+    const auto audioError = deviceController.applyAudioSetup(snapshot.device.get(), snapshot.channels.get(), snapshot.persistence);
+    hostProcessor.setMonoInputs(snapshot.monoInputs);
+    hostProcessor.setMonoOutput(snapshot.monoOutput);
+    setMonoInputs(snapshot.monoInputs);
+    setMonoOutput(snapshot.monoOutput);
+    setGlobalMuted(snapshot.muted);
+    setGlobalBypassed(snapshot.bypassed);
+    loadActivePlugins();
+    saveActivePluginList();
+    if (sessionStore) sessionStore->flush();
+    chainHistory.clear();
+    getAppProperties().getUserSettings()->setValue("activeTemplate", id);
+    markSettingsDirty();
+    ++chainVersion;
+    return audioError;
+}
+
+String AudioEngine::renameTemplate(const String& id, const String& name)
+{
+    if (!isSessionWritable() || !templates) return "session_read_only";
+    return templates->rename(id, name);
+}
+
+String AudioEngine::deleteTemplate(const String& id)
+{
+    if (!isSessionWritable() || !templates) return "session_read_only";
+    if (const auto error = templates->remove(id); error.isNotEmpty()) return error;
+    if (activeTemplateId() == id)
+    {
+        getAppProperties().getUserSettings()->removeValue("activeTemplate");
+        markSettingsDirty();
+    }
+    return {};
 }
 
 bool AudioEngine::renamePlugin(int sortedIndex, const String& name)
@@ -873,6 +1163,7 @@ bool AudioEngine::renamePlugin(int sortedIndex, const String& name)
     auto& record = instances.records[static_cast<size_t>(sortedIndex)];
     if (normalized == record.description.name) normalized.clear();
     if (record.customName == normalized) return true;
+    chainHistory.record(instances);
     record.customName = normalized;
     ++chainVersion;
     saveActivePluginChain(false);
@@ -933,6 +1224,7 @@ void AudioEngine::saveActivePluginChain(bool saveProcessorStates)
 
 bool AudioEngine::flushSession()
 {
+    syncEditorWindows(true);
     savePluginStates();
     saveActivePluginList();
     if (!instances.writable) return false;
@@ -988,6 +1280,317 @@ void AudioEngine::removeMissingKnownPlugins()
 
 	if (!removeList.empty())
 		flushPendingSaves();
+}
+
+String AudioEngine::addKnownPluginAt(int sortedIndex, const String& stripId, const String& beforeInstanceId)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    instances.ensureStrips();
+    if (!instances.findStrip(stripId)) return "strip_not_found";
+    const auto known = getKnownPluginsSorted();
+    if (!isPositiveAndBelow(sortedIndex, (int) known.size())) return "known_plugin_not_found";
+    chainHistory.record(instances);
+    auto record = lightHostModern::newKnownPluginInstance(*getAppProperties().getUserSettings(), known[(size_t) sortedIndex]);
+    record.stripId = stripId;
+    const int before = beforeInstanceId.isEmpty() ? -1 : instances.indexOf(beforeInstanceId);
+    if (before >= 0) instances.records.insert(instances.records.begin() + before, std::move(record));
+    else instances.records.push_back(std::move(record));
+    loadActivePlugins();
+    saveActivePluginChain(false);
+    return {};
+}
+
+String AudioEngine::addStrip(const String& name)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    instances.ensureStrips();
+    if ((int) instances.strips.size() >= 16) return "strip_limit";
+    String normalized;
+    if (!lightHostModern::normalizeInstanceName(name, normalized) || normalized.isEmpty()) return "profile_name_invalid";
+    chainHistory.record(instances);
+    lightHostModern::ChainStrip strip;
+    strip.id = Uuid().toString().removeCharacters("-").toLowerCase();
+    strip.name = normalized;
+    strip.allInputs = false;
+    strip.allOutputs = false;
+    if (auto* device = deviceManager.getCurrentAudioDevice())
+    {
+        const int input = device->getActiveInputChannels().findNextSetBit(0);
+        if (input >= 0) strip.inputs.push_back(input);
+        if (device->getActiveOutputChannels()[0]) strip.outputs.push_back(0);
+        if (device->getActiveOutputChannels()[1]) strip.outputs.push_back(1);
+    }
+    if (strip.inputs.empty()) strip.allInputs = true;
+    if (strip.outputs.empty()) strip.allOutputs = true;
+    instances.strips.push_back(std::move(strip));
+    loadActivePlugins();
+    saveActivePluginChain(false);
+    return {};
+}
+
+String AudioEngine::removeStrip(const String& id)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    instances.ensureStrips();
+    if (instances.strips.size() <= 1) return "last_strip";
+    if (!instances.findStrip(id)) return "strip_not_found";
+    savePluginStates();
+    chainHistory.record(instances);
+    instances.records.erase(std::remove_if(instances.records.begin(), instances.records.end(), [&](const auto& record) { return record.stripId == id; }), instances.records.end());
+    instances.strips.erase(std::remove_if(instances.strips.begin(), instances.strips.end(), [&](const auto& strip) { return strip.id == id; }), instances.strips.end());
+    loadActivePlugins();
+    saveActivePluginChain(false);
+    return {};
+}
+
+String AudioEngine::renameStrip(const String& id, const String& name)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    auto* strip = const_cast<lightHostModern::ChainStrip*>(instances.findStrip(id));
+    if (!strip) return "strip_not_found";
+    String normalized;
+    if (!lightHostModern::normalizeInstanceName(name, normalized) || normalized.isEmpty()) return "profile_name_invalid";
+    if (strip->name == normalized) return {};
+    chainHistory.record(instances);
+    strip->name = normalized;
+    ++chainVersion;
+    saveActivePluginChain(false);
+    return {};
+}
+
+String AudioEngine::setStripRouting(const String& id, bool allInputs, bool allOutputs, const std::vector<int>& inputs, const std::vector<int>& outputs)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    auto* strip = const_cast<lightHostModern::ChainStrip*>(instances.findStrip(id));
+    if (!strip) return "strip_not_found";
+    if ((!allInputs && inputs.empty()) || (!allOutputs && outputs.empty())) return "invalid_arguments";
+    chainHistory.record(instances);
+    strip->allInputs = allInputs;
+    strip->allOutputs = allOutputs;
+    strip->inputs = inputs;
+    strip->outputs = outputs;
+    loadActivePlugins();
+    saveActivePluginChain(false);
+    return {};
+}
+
+String AudioEngine::setStripGain(const String& id, float gainDb)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    auto* strip = const_cast<lightHostModern::ChainStrip*>(instances.findStrip(id));
+    if (!strip) return "strip_not_found";
+    gainDb = lightHostModern::clampGainDb(gainDb);
+    if (strip->gainDb == gainDb) return {};
+    chainHistory.record(instances, "gain:" + id);
+    strip->gainDb = gainDb;
+    hostProcessor.setStripGain(id, lightHostModern::gainFromDb(gainDb));
+    ++chainVersion;
+    saveActivePluginChain(false);
+    return {};
+}
+
+String AudioEngine::setStripPan(const String& id, float pan)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    auto* strip = const_cast<lightHostModern::ChainStrip*>(instances.findStrip(id));
+    if (!strip) return "strip_not_found";
+    pan = lightHostModern::clampPan(pan);
+    if (strip->pan == pan) return {};
+    chainHistory.record(instances, "pan:" + id);
+    strip->pan = pan;
+    hostProcessor.setStripPan(id, pan);
+    ++chainVersion;
+    saveActivePluginChain(false);
+    return {};
+}
+
+String AudioEngine::setStripColor(const String& id, int color)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    auto* strip = const_cast<lightHostModern::ChainStrip*>(instances.findStrip(id));
+    if (!strip) return "strip_not_found";
+    color = jlimit(0, 8, color);
+    if (strip->color == color && strip->colour.isEmpty()) return {};
+    chainHistory.record(instances);
+    strip->color = color;
+    strip->colour.clear();
+    ++chainVersion;
+    saveActivePluginChain(false);
+    return {};
+}
+
+String AudioEngine::setStripColour(const String& id, const String& hex)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    auto* strip = const_cast<lightHostModern::ChainStrip*>(instances.findStrip(id));
+    if (!strip) return "strip_not_found";
+    auto value = hex.trim().toLowerCase().replace("#", "");
+    if (value.length() != 6 || !value.containsOnly("0123456789abcdef")) return "invalid_arguments";
+    if (strip->colour == value) return {};
+    chainHistory.record(instances);
+    strip->colour = value;
+    strip->color = 0;
+    ++chainVersion;
+    saveActivePluginChain(false);
+    return {};
+}
+
+String AudioEngine::setStripMuted(const String& id, bool muted)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    auto* strip = const_cast<lightHostModern::ChainStrip*>(instances.findStrip(id));
+    if (!strip) return "strip_not_found";
+    if (strip->muted == muted) return {};
+    chainHistory.record(instances);
+    strip->muted = muted;
+    hostProcessor.setStripMuted(id, muted);
+    ++chainVersion;
+    saveActivePluginChain(false);
+    return {};
+}
+
+String AudioEngine::setStripSolo(const String& id, bool solo)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    auto* strip = const_cast<lightHostModern::ChainStrip*>(instances.findStrip(id));
+    if (!strip) return "strip_not_found";
+    if (strip->solo == solo) return {};
+    chainHistory.record(instances);
+    strip->solo = solo;
+    hostProcessor.setStripSolo(id, solo);
+    hostProcessor.setAnySolo(std::any_of(instances.strips.begin(), instances.strips.end(), [](const auto& item) { return item.solo; }));
+    ++chainVersion;
+    saveActivePluginChain(false);
+    return {};
+}
+
+String AudioEngine::setStripGroup(const String& id, const String& group)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    auto* strip = const_cast<lightHostModern::ChainStrip*>(instances.findStrip(id));
+    if (!strip) return "strip_not_found";
+    auto name = group.trim();
+    if (name.length() > 64) name = name.substring(0, 64);
+    if (strip->group == name) return {};
+    chainHistory.record(instances);
+    strip->group = name;
+    ++chainVersion;
+    saveActivePluginChain(false);
+    return {};
+}
+
+String AudioEngine::orderStrips(const std::vector<std::pair<String, String>>& order)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    if (order.size() != instances.strips.size()) return "strip_not_found";
+    std::vector<lightHostModern::ChainStrip> next;
+    next.reserve(order.size());
+    std::set<String> seen;
+    for (const auto& item : order)
+    {
+        if (!seen.insert(item.first).second) return "strip_not_found";
+        auto found = std::find_if(instances.strips.begin(), instances.strips.end(), [&](const auto& strip) { return strip.id == item.first; });
+        if (found == instances.strips.end()) return "strip_not_found";
+        auto strip = *found;
+        auto group = item.second.trim();
+        if (group.length() > 64) group = group.substring(0, 64);
+        strip.group = group;
+        next.push_back(std::move(strip));
+    }
+    if (next.size() == instances.strips.size())
+    {
+        bool same = true;
+        for (size_t i = 0; i < next.size(); ++i)
+            same = same && next[i].id == instances.strips[i].id && next[i].group == instances.strips[i].group;
+        if (same) return {};
+    }
+    chainHistory.record(instances);
+    instances.strips = std::move(next);
+    ++chainVersion;
+    saveActivePluginChain(false);
+    return {};
+}
+
+String AudioEngine::setMasterGain(float gainDb)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    gainDb = lightHostModern::clampGainDb(gainDb);
+    if (instances.masterGainDb == gainDb) return {};
+    chainHistory.record(instances, "master-gain");
+    instances.masterGainDb = gainDb;
+    hostProcessor.setMasterGain(lightHostModern::gainFromDb(gainDb));
+    ++chainVersion;
+    saveActivePluginChain(false);
+    return {};
+}
+
+String AudioEngine::movePluginToStrip(const String& instanceId, const String& stripId, const String& beforeInstanceId)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    if (!instances.findStrip(stripId)) return "strip_not_found";
+    const int from = instances.indexOf(instanceId);
+    if (from < 0) return "instance_not_found";
+    chainHistory.record(instances);
+    auto record = std::move(instances.records[(size_t) from]);
+    instances.records.erase(instances.records.begin() + from);
+    record.stripId = stripId;
+    int before = beforeInstanceId.isEmpty() ? -1 : instances.indexOf(beforeInstanceId);
+    if (before >= 0) instances.records.insert(instances.records.begin() + before, std::move(record));
+    else instances.records.push_back(std::move(record));
+    loadActivePlugins();
+    saveActivePluginChain(false);
+    return {};
+}
+
+bool AudioEngine::undoChain()
+{
+    if (!isSessionWritable()) return false;
+    auto restored = chainHistory.undo(instances);
+    if (!restored) return false;
+    instances = std::move(*restored);
+    loadActivePlugins();
+    saveActivePluginChain(false);
+    return true;
+}
+
+bool AudioEngine::redoChain()
+{
+    if (!isSessionWritable()) return false;
+    auto restored = chainHistory.redo(instances);
+    if (!restored) return false;
+    instances = std::move(*restored);
+    loadActivePlugins();
+    saveActivePluginChain(false);
+    return true;
+}
+
+void AudioEngine::syncEditorWindows(bool saveNow)
+{
+    if (!isSessionWritable()) return;
+    bool changed = false;
+    for (auto& record : instances.records)
+    {
+        auto* slot = findActiveSlotFor(record.id);
+        if (!slot || !slot->processor) continue;
+        const bool open = PluginWindow::isOpenFor(*slot->processor);
+        const bool positioned = slot->windowProperties.contains("uiLastX_Normal");
+        const int x = positioned ? (int) slot->windowProperties["uiLastX_Normal"] : record.editorX;
+        const int y = positioned ? (int) slot->windowProperties["uiLastY_Normal"] : record.editorY;
+        const bool sized = slot->windowProperties.contains("uiLastW_Normal") && slot->windowProperties.contains("uiLastH_Normal");
+        const int width = sized ? (int) slot->windowProperties["uiLastW_Normal"] : record.editorW;
+        const int height = sized ? (int) slot->windowProperties["uiLastH_Normal"] : record.editorH;
+        const bool samePosition = !positioned || (record.hasEditorPosition && record.editorX == x && record.editorY == y);
+        const bool sameSize = !sized || (record.hasEditorSize && record.editorW == width && record.editorH == height);
+        if (record.editorOpen == open && samePosition && sameSize) continue;
+        record.editorOpen = open;
+        if (positioned) { record.hasEditorPosition = true; record.editorX = x; record.editorY = y; }
+        if (sized) { record.hasEditorSize = true; record.editorW = width; record.editorH = height; }
+        changed = true;
+    }
+    const double now = Time::getMillisecondCounterHiRes();
+    if (!changed) { editorStableSince = 0; return; }
+    if (saveNow || (editorStableSince != 0 && now - editorStableSince >= 1000.0)) { saveActivePluginList(); editorStableSince = 0; return; }
+    if (editorStableSince == 0) editorStableSince = now;
 }
 
 void AudioEngine::showPluginEditor(int sortedIndex)
@@ -1071,7 +1674,9 @@ void AudioEngine::timerCallback(int timerId)
         if (stateCaptureDue > 0 && now >= stateCaptureDue) savePluginStates();
         if (const auto status = getSessionSaveStatus(); status.changeSerial != lastSessionStatusSerial)
         { lastSessionStatusSerial = status.changeSerial; ++chainVersion; }
+        deviceController.observeCallbacks(player.callbackCount());
         deviceController.tick();
+        syncEditorWindows();
         startTimer(audioWatchdogTimerId, 250);
         return;
     }

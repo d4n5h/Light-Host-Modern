@@ -121,6 +121,31 @@ if(BUILD_TESTING)
     target_link_libraries(LightHostModernSessionTests PRIVATE juce::juce_audio_processors_headless juce::juce_cryptography)
     add_test(NAME session-atomic-persistence-and-recovery COMMAND LightHostModernSessionTests)
     set_tests_properties(session-atomic-persistence-and-recovery PROPERTIES TIMEOUT 30)
+    add_executable(LightHostModernChainProfileTests Tests/ChainProfileTests.cpp Source/SessionStore.cpp Source/ChainProfileStore.cpp)
+    target_include_directories(LightHostModernChainProfileTests PRIVATE Source)
+    target_compile_definitions(LightHostModernChainProfileTests PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0)
+    target_compile_options(LightHostModernChainProfileTests PRIVATE /utf-8)
+    target_link_libraries(LightHostModernChainProfileTests PRIVATE juce::juce_audio_processors_headless juce::juce_cryptography)
+    add_test(NAME chain-profile-store COMMAND LightHostModernChainProfileTests)
+    add_executable(LightHostModernTemplateStoreTests Tests/TemplateStoreTests.cpp Source/TemplateStore.cpp)
+    target_include_directories(LightHostModernTemplateStoreTests PRIVATE Source)
+    target_compile_definitions(LightHostModernTemplateStoreTests PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0)
+    target_compile_options(LightHostModernTemplateStoreTests PRIVATE /utf-8)
+    target_link_libraries(LightHostModernTemplateStoreTests PRIVATE juce::juce_audio_processors_headless juce::juce_cryptography)
+    add_test(NAME template-store COMMAND LightHostModernTemplateStoreTests)
+    add_executable(LightHostModernMixerLayoutTests Tests/MixerLayoutTests.cpp)
+    target_include_directories(LightHostModernMixerLayoutTests PRIVATE Source)
+    target_compile_definitions(LightHostModernMixerLayoutTests PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0)
+    target_compile_options(LightHostModernMixerLayoutTests PRIVATE /utf-8)
+    target_link_libraries(LightHostModernMixerLayoutTests PRIVATE juce::juce_gui_extra juce::juce_audio_utils)
+    add_test(NAME mixer-strip-fader-alignment COMMAND LightHostModernMixerLayoutTests)
+    add_executable(LightHostModernChainHistoryTests Tests/ChainHistoryTests.cpp)
+    target_include_directories(LightHostModernChainHistoryTests PRIVATE Source)
+    target_compile_definitions(LightHostModernChainHistoryTests PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0)
+    target_compile_options(LightHostModernChainHistoryTests PRIVATE /utf-8)
+    target_link_libraries(LightHostModernChainHistoryTests PRIVATE juce::juce_audio_processors_headless juce::juce_cryptography)
+    add_test(NAME chain-history COMMAND LightHostModernChainHistoryTests)
+    set_tests_properties(chain-profile-store PROPERTIES TIMEOUT 30)
     add_executable(LightHostModernProtocolTests Tests/ProtocolTests.cpp)
     target_include_directories(LightHostModernProtocolTests PRIVATE Source)
     target_compile_definitions(LightHostModernProtocolTests PRIVATE JUCE_USE_CURL=0)
@@ -251,6 +276,8 @@ target_sources(LightHostModernCore
     PRIVATE
         Source/AudioEngine.cpp
         Source/SessionStore.cpp
+        Source/ChainProfileStore.cpp
+        Source/TemplateStore.cpp
         Source/DeviceController.cpp
         Source/LightHostModernController.cpp
         Source/PluginWindow.cpp
@@ -396,7 +423,9 @@ target_sources(LightHostModern
         Source/DebugLog.cpp
         Source/HostIpcServer.cpp
         Source/HostStartup.cpp
-        Source/IconMenu.cpp)
+        Source/HostWindow.cpp
+        Source/IconMenu.cpp
+        Source/MixerView.cpp)
 
 if(LIGHTHOST_REALTIME_AUDIT)
     target_sources(LightHostModern PRIVATE Source/RealtimeAllocationAudit.cpp)

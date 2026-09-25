@@ -1,5 +1,6 @@
 #include <JuceHeader.h>
 #include "IconMenu.hpp"
+#include "HostWindow.h"
 #include "DebugLog.h"
 #include "RuntimeProfile.h"
 #include "LightHostModernLocales.h"
@@ -76,11 +77,23 @@ IconMenu::IconMenu(bool startInSafeMode, bool debugEnabled, bool restoreActivePl
 IconMenu::~IconMenu()
 {
 	stopTimer(menuTimerId);
+	hostWindow.reset();
 	uiLifetime.reset();
 	closeWinUIWindow();
 
 	if (engine != nullptr)
 		engine->flushPendingSaves();
+}
+
+void IconMenu::refreshTrayIcon() { setIcon(); }
+
+void IconMenu::showInterface()
+{
+    if (engine == nullptr) return;
+    if (hostWindow == nullptr)
+        hostWindow = std::make_unique<HostWindow>(*engine, [this] { setIcon(); });
+    hostWindow->setVisible(true);
+    hostWindow->toFront(true);
 }
 
 void IconMenu::setIcon()
@@ -116,7 +129,7 @@ void IconMenu::mouseDown(const MouseEvent& e)
     Process::makeForegroundProcess();
 	if (e.mods.isLeftButtonDown())
 	{
-		openWinUI();
+		showInterface();
 		return;
 	}
 
@@ -130,7 +143,7 @@ void IconMenu::menuInvocationCallback(int id, IconMenu* im)
 
     if (id == im->INDEX_OPEN_WINUI)
 	{
-        im->openWinUI();
+        im->showInterface();
 		return;
 	}
 	if (id == im->INDEX_QUIT)
@@ -161,6 +174,24 @@ void IconMenu::showNativeContextMenu()
 		label("audio.globalMute", "Mute output").toWideCharPointer());
 	AppendMenuW(nativeMenu, MF_STRING | (engine->isGlobalBypassed() ? MF_CHECKED : 0), INDEX_GLOBAL_BYPASS,
 		label("audio.globalBypass", "Bypass chain").toWideCharPointer());
+	HMENU profileMenu = CreatePopupMenu();
+	const auto chainCatalog = engine->chainProfileCatalog();
+	const bool profilesWritable = engine->isSessionWritable();
+	if (profileMenu != nullptr)
+	{
+		if (chainCatalog.profiles.empty())
+			AppendMenuW(profileMenu, MF_STRING | MF_GRAYED, INDEX_CHAIN_PROFILE, label("profiles.unsaved", "Unsaved").toWideCharPointer());
+		else
+			for (int index = 0; index < (int) chainCatalog.profiles.size() && index < 32; ++index)
+			{
+				const auto& profile = chainCatalog.profiles[(size_t) index];
+				UINT itemFlags = MF_STRING;
+				if (!profilesWritable) itemFlags |= MF_GRAYED;
+				if (profile.id == chainCatalog.activeId) itemFlags |= MF_CHECKED;
+				AppendMenuW(profileMenu, itemFlags, INDEX_CHAIN_PROFILE + index, profile.name.replace("&", "&&").toWideCharPointer());
+			}
+		AppendMenuW(nativeMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(profileMenu), label("profiles.menu", "Profiles").toWideCharPointer());
+	}
 	AppendMenuW(nativeMenu, MF_SEPARATOR, 0, nullptr);
 	AppendMenuW(nativeMenu, MF_STRING, INDEX_QUIT, label("tray.quit", "Quit").toWideCharPointer());
 
@@ -180,10 +211,26 @@ void IconMenu::showNativeContextMenu()
 	DestroyMenu(nativeMenu);
 	if (command == INDEX_GLOBAL_MUTE) { engine->setGlobalMuted(!engine->isGlobalMuted()); return; }
 	if (command == INDEX_GLOBAL_BYPASS) { engine->setGlobalBypassed(!engine->isGlobalBypassed()); return; }
+	if (command >= (UINT) INDEX_CHAIN_PROFILE && command < (UINT) INDEX_CHAIN_PROFILE + 32)
+	{
+		const auto profiles = engine->chainProfileCatalog().profiles;
+		const auto index = (int) command - INDEX_CHAIN_PROFILE;
+		if (index >= 0 && index < (int) profiles.size() && profilesWritable)
+		{
+			const auto error = engine->switchChainProfile(profiles[(size_t) index].id);
+			if (error.isNotEmpty())
+			{
+				auto message = locale[Identifier(String("ipc.error.") + error)].toString();
+				if (message.isEmpty()) message = error;
+				MessageBoxW(nullptr, message.toWideCharPointer(), L"LightHostModern", MB_OK | MB_ICONWARNING);
+			}
+		}
+		return;
+	}
 
 	if (command == (UINT) INDEX_OPEN_WINUI)
 	{
-		openWinUI();
+		showInterface();
 		return;
 	}
 

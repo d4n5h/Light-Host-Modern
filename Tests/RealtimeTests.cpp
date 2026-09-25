@@ -423,6 +423,85 @@ int main()
             diagnosticsHost->setDiagnosticsEnabled(true); process();
             require(diagnosticsHost->getStats().processedBlocks == before.processedBlocks + 1, "diagnostics did not resume");
         }
+        {
+            auto host = std::make_unique<RealtimeHostProcessor>();
+            host->setPlayConfigDetails(2, 2, 48000, 512);
+            host->prepareToPlay(48000, 512);
+            auto chain = std::make_shared<ChainSnapshot>();
+            auto left = std::make_shared<PluginSlot>(PluginDescription(), std::make_unique<GainPlugin>(1));
+            static_cast<GainPlugin*>(left->processor.get())->setLatencySamples(10);
+            StripSnapshot a, b, wide, missing;
+            a.id = "a"; a.allInputs = a.allOutputs = false; a.inputMap = {0}; a.outputMap = {0}; a.busChannels = 1; a.slots = {left};
+            b.id = "b"; b.allInputs = b.allOutputs = false; b.inputMap = {1}; b.outputMap = {1}; b.busChannels = 1;
+            chain->slots = {left}; chain->strips = {a, b};
+            host->publishSnapshot(chain);
+            AudioBuffer<float> audio(2, 512); MidiBuffer midi; host->prepareMidiBuffer(midi);
+            audio.clear();
+            host->processBlock(audio, midi);
+            audio.clear(); audio.setSample(0, 0, 0.25f); audio.setSample(1, 0, 0.5f);
+            host->processBlock(audio, midi);
+            require(std::abs(audio.getSample(0, 0) - 0.5f) < 0.0001f, "left strip latency or gain");
+            require(std::abs(audio.getSample(1, 10) - 0.5f) < 0.0001f, "right strip was not aligned");
+            require(audio.getSample(1, 0) == 0.0f, "strip leaked before its delay");
+            for (int i = 0; i < 512; ++i) { audio.setSample(0, i, 0.25f); audio.setSample(1, i, 0.5f); }
+            host->setStripGain("b", 0.0f);
+            host->processBlock(audio, midi);
+            require(audio.getMagnitude(1, 400, 112) < 0.0001f, "strip gain did not silence its output");
+            require(audio.getMagnitude(0, 400, 112) > 0.2f, "other strip was silenced");
+            host->setMasterGain(0.0f);
+            host->processBlock(audio, midi);
+            require(audio.getMagnitude(0, 400, 112) < 0.0001f, "master gain did not scale the sum");
+            host->setMasterGain(1.0f); host->setStripGain("b", 1.0f);
+            for (int i = 0; i < 4; ++i) host->processBlock(audio, midi);
+            wide.id = "wide"; wide.allInputs = wide.allOutputs = false; wide.inputMap = {0}; wide.outputMap = {0, 1}; wide.busChannels = 2;
+            missing.id = "missing"; missing.allInputs = missing.allOutputs = false; missing.inputMap = {-1}; missing.outputMap = {1}; missing.busChannels = 1;
+            chain = std::make_shared<ChainSnapshot>(); chain->strips = {wide};
+            host->publishSnapshot(chain);
+            for (int i = 0; i < 512; ++i) { audio.setSample(0, i, 0.2f); audio.setSample(1, i, 0.8f); }
+            for (int i = 0; i < 3; ++i) host->processBlock(audio, midi);
+            require(std::abs(audio.getSample(0, 511) - 0.2f) < 0.0001f && std::abs(audio.getSample(1, 511) - 0.2f) < 0.0001f, "one input did not feed both outputs");
+            chain = std::make_shared<ChainSnapshot>(); chain->strips = {missing};
+            host->publishSnapshot(chain);
+            for (int i = 0; i < 3; ++i) host->processBlock(audio, midi);
+            require(audio.getMagnitude(0, 512) == 0.0f, "missing input was not silent");
+            auto routed = std::make_shared<PluginSlot>(PluginDescription(), std::make_unique<GainPlugin>(1));
+            a.slots = {routed}; a.gainLinear = 1.0f;
+            chain = std::make_shared<ChainSnapshot>(); chain->slots = {routed}; chain->strips = {a};
+            host->publishSnapshot(chain);
+            host->setGlobalBypassed(true);
+            for (int i = 0; i < 512; ++i) { audio.setSample(0, i, 0.25f); audio.setSample(1, i, 0.9f); }
+            const auto allocationsBefore = lightHostModern::realtimeAudit::hostAllocations.load();
+            for (int i = 0; i < 8; ++i) host->processBlock(audio, midi);
+            require(std::abs(audio.getSample(0, 511) - 0.25f) < 0.02f, "global bypass dropped strip routing");
+            require(audio.getMagnitude(1, 400, 112) < 0.02f, "global bypass leaked into an unselected output");
+            require(lightHostModern::realtimeAudit::hostAllocations.load() == allocationsBefore, "strip path allocated on the callback");
+        }
+        {
+            auto host = std::make_unique<RealtimeHostProcessor>();
+            host->setPlayConfigDetails(2, 2, 48000, 512);
+            host->prepareToPlay(48000, 512);
+            StripSnapshot strip;
+            strip.id = "pan"; strip.allInputs = strip.allOutputs = false;
+            strip.inputMap = {0}; strip.outputMap = {0, 1}; strip.busChannels = 2;
+            auto chain = std::make_shared<ChainSnapshot>(); chain->strips = {strip};
+            host->publishSnapshot(chain);
+            AudioBuffer<float> audio(2, 512); MidiBuffer midi; host->prepareMidiBuffer(midi);
+            const auto fill = [&] { for (int i = 0; i < 512; ++i) { audio.setSample(0, i, 0.5f); audio.setSample(1, i, 0.25f); } };
+            fill(); host->processBlock(audio, midi); fill(); host->processBlock(audio, midi);
+            require(std::abs(audio.getSample(0, 511) - 0.5f) < 0.0001f && std::abs(audio.getSample(1, 511) - 0.5f) < 0.0001f, "center pan changed the strip");
+            host->setStripPan("pan", -1.0f); fill(); host->processBlock(audio, midi);
+            require(std::abs(audio.getSample(0, 511) - 0.5f) < 0.0001f, "full left dropped the first output");
+            require(audio.getMagnitude(1, 400, 112) < 0.0001f, "full left reached the second output");
+            host->setStripPan("pan", 1.0f);
+            for (int i = 0; i < 2; ++i) { fill(); host->processBlock(audio, midi); }
+            require(audio.getMagnitude(0, 400, 112) < 0.0001f, "full right reached the first output");
+            require(std::abs(audio.getSample(1, 511) - 0.5f) < 0.0001f, "full right dropped the second output");
+            strip.outputMap = {0}; strip.busChannels = 1;
+            chain = std::make_shared<ChainSnapshot>(); chain->strips = {strip};
+            host->publishSnapshot(chain); host->setStripPan("pan", 1.0f);
+            fill(); host->processBlock(audio, midi); fill(); host->processBlock(audio, midi);
+            require(std::abs(audio.getSample(0, 511) - 0.5f) < 0.0001f, "one output ignored pan");
+        }
         std::cout << "Channels, asymmetric buses, bounded MIDI, preserved delay history, lifecycle, diagnostics opt-out and Release allocation audit passed\n";
         return 0;
     }

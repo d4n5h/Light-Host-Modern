@@ -226,5 +226,97 @@ int main(int argc, char** argv)
         require(first.displayName() == alias.trim() && newKnownPluginInstance(reopened, original).displayName() == original.name,
                 "catalogue restore changed a running instance or affected new additions");
     });
+    runner.run("version 1 opens as Main and version 2 keeps strips and editors", [] {
+        PluginInstances instances;
+        PluginInstanceRecord record;
+        record.id = "11111111111111111111111111111111";
+        record.description = plugin();
+        record.originalIdentity = knownPluginId(record.description);
+        record.lastValidState = MemoryBlock("state", 5).toBase64Encoding();
+        instances.records.push_back(record);
+        auto legacy = instances.serialize();
+        legacy->setAttribute("version", 1);
+        Array<XmlElement*> strips;
+        for (auto* child : legacy->getChildIterator())
+            if (child->hasTagName("STRIP")) strips.add(child);
+        for (auto* child : strips) legacy->removeChildElement(child, true);
+        PluginInstances migrated;
+        migrated.records.push_back(record);
+        require(migrated.deserialize(*legacy), "v1 rejected");
+        require(migrated.strips.size() == 1 && migrated.strips[0].name == "Main" && migrated.strips[0].id == defaultStripId()
+            && migrated.strips[0].allInputs && migrated.strips[0].allOutputs && migrated.strips[0].gainDb == 0.0f, "v1 strip");
+        require(migrated.records[0].id == record.id && migrated.records[0].stripId == defaultStripId(), "v1 record");
+        instances.ensureStrips();
+        instances.strips[0].name = "Mic";
+        instances.strips[0].allInputs = false;
+        instances.strips[0].inputs = {1, 3};
+        instances.strips[0].gainDb = 100.0f;
+        instances.masterGainDb = -3.0f;
+        instances.records[0].stripId = instances.strips[0].id;
+        instances.records[0].editorOpen = true;
+        instances.records[0].hasEditorPosition = true;
+        instances.records[0].editorX = 40;
+        instances.records[0].editorY = -12;
+        instances.records[0].hasEditorSize = true;
+        instances.records[0].editorW = 640;
+        instances.records[0].editorH = 480;
+        ChainStrip extra;
+        extra.id = "abcdefabcdefabcdefabcdefabcdefab";
+        extra.name = "Guitar";
+        extra.allOutputs = false;
+        extra.outputs = {0, 1};
+        instances.strips.push_back(extra);
+        PluginInstances round;
+        require(round.deserialize(*instances.serialize()) && round.strips.size() == 2, "v2 round trip");
+        require(round.strips[0].name == "Mic" && round.strips[0].gainDb == 12.0f && round.strips[0].inputs.size() == 2, "routing and clamp");
+        require(round.masterGainDb == -3.0f && round.records[0].editorOpen && round.records[0].editorX == 40 && round.records[0].editorY == -12
+            && round.records[0].hasEditorSize && round.records[0].editorW == 640 && round.records[0].editorH == 480, "master and editor");
+        require(round.records[0].stripId == round.strips[0].id, "strip link");
+        auto missingSize = instances.serialize();
+        missingSize->getChildByName("INSTANCE")->removeAttribute("editorW");
+        missingSize->getChildByName("INSTANCE")->removeAttribute("editorH");
+        PluginInstances unsized;
+        require(unsized.deserialize(*missingSize) && !unsized.records[0].hasEditorSize, "missing editor size");
+        instances.strips[0].pan = -0.5f;
+        instances.strips[1].pan = 2.0f;
+        PluginInstances panned;
+        require(panned.deserialize(*instances.serialize()), "pan round trip");
+        require(std::abs(panned.strips[0].pan + 0.5f) < 0.0001f && panned.strips[1].pan == 1.0f, "pan restored and clamped");
+        instances.strips[0].color = 4;
+        instances.strips[0].group = "Drums";
+        instances.strips[1].color = 99;
+        instances.strips[0].colour = "ff9f43";
+        PluginInstances colored;
+        require(colored.deserialize(*instances.serialize()), "color round trip");
+        require(colored.strips[0].color == 4 && colored.strips[0].colour == "ff9f43" && colored.strips[0].group == "Drums" && colored.strips[1].color == 8, "color clamped and group kept");
+        auto legacyColour = instances.serialize();
+        legacyColour->getChildByName("STRIP")->removeAttribute("colour");
+        PluginInstances indexed;
+        require(indexed.deserialize(*legacyColour) && indexed.strips[0].color == 4 && indexed.strips[0].colour.isEmpty(), "old swatch");
+        auto missingColor = instances.serialize();
+        missingColor->getChildByName("STRIP")->removeAttribute("color");
+        missingColor->getChildByName("STRIP")->removeAttribute("group");
+        require(colored.deserialize(*missingColor) && colored.strips[0].color == 0 && colored.strips[0].group.isEmpty(), "missing color and group");
+        auto missingPan = instances.serialize();
+        missingPan->getChildByName("STRIP")->removeAttribute("pan");
+        require(panned.deserialize(*missingPan) && panned.strips[0].pan == 0.0f, "missing pan stays centered");
+        auto broken = instances.serialize();
+        broken->getChildByName("INSTANCE")->setAttribute("strip", "0123456789abcdef0123456789abcdef");
+        require(!round.deserialize(*broken) && round.records[0].stripId == instances.strips[0].id, "unknown strip");
+        broken = instances.serialize();
+        broken->getChildByName("STRIP")->setAttribute("id", extra.id);
+        require(!round.deserialize(*broken) && round.strips.size() == 2, "duplicate strip id");
+        broken = instances.serialize();
+        for (int index = 0; index < 15; ++index)
+        {
+            auto* strip = broken->createNewChildElement("STRIP");
+            strip->setAttribute("id", String::toHexString(index + 3).paddedLeft('0', 32));
+            strip->setAttribute("name", "S" + String(index));
+        }
+        require(!round.deserialize(*broken) && round.strips.size() == 2, "17 strips");
+        broken = instances.serialize();
+        broken->setAttribute("version", 3);
+        require(!round.deserialize(*broken) && round.records[0].id == record.id, "version 3");
+    });
     return runner.result();
 }

@@ -674,12 +674,108 @@ String HostIpcServer::dispatchRequest(const lightHostModern::ipc::Request& reque
         result->setProperty("status", "ok"); result->setProperty("audioSelection", engine.getAudioSelectionState());
         return JSON::toString(var(result), true);
     }
+    if (command == "chain-profiles")
+    {
+        const auto catalog = engine.chainProfileCatalog();
+        auto* result = new DynamicObject();
+        result->setProperty("status", "ok");
+        result->setProperty("activeId", catalog.activeId);
+        Array<var> items;
+        for (const auto& profile : catalog.profiles)
+        {
+            auto* item = new DynamicObject();
+            item->setProperty("id", profile.id);
+            item->setProperty("name", profile.name);
+            items.add(var(item));
+        }
+        result->setProperty("profiles", items);
+        return JSON::toString(var(result), true);
+    }
+    const auto profileMessage = [](const String& code) {
+        if (code == "profile_not_found") return "That profile no longer exists.";
+        if (code == "profile_name_invalid") return "Enter a profile name up to 128 characters.";
+        if (code == "profile_name_taken") return "A profile with that name already exists.";
+        if (code == "profile_limit") return "You can save up to 32 profiles.";
+        if (code == "last_profile") return "The last profile cannot be deleted.";
+        if (code == "profile_invalid") return "That profile file is damaged and was not loaded.";
+        if (code == "profile_write_failed") return "The profile could not be saved. Existing files have been kept.";
+        if (code == "profile_catalog_invalid") return "The profile list is damaged and was not changed.";
+        if (code == "profile_active") return "Switch to another profile before deleting this one.";
+        if (code == "strip_not_found") return "That strip no longer exists.";
+        if (code == "strip_limit") return "You can add up to 16 strips.";
+        if (code == "last_strip") return "The last strip cannot be removed.";
+        if (code == "nothing_to_undo") return "Nothing to undo.";
+        if (code == "nothing_to_redo") return "Nothing to redo.";
+        if (code == "session_save_failed") return "The session could not be saved. Existing files have been kept.";
+        if (code == "session_read_only") return "Session changes are disabled while loading is suppressed or recovery is incomplete.";
+        return "Profile change failed.";
+    };
+    const auto profileCommand = [&](const String& error) {
+        return error.isEmpty() ? commandOk() : fail(error, profileMessage(error));
+    };
     if (!engine.isSessionWritable() && (command == "add-known-plugin" || command == "remove-plugin"
         || command == "duplicate-plugin" || command == "rename-plugin" || command == "toggle-bypass"
         || command == "move-plugin-up" || command == "move-plugin-down" || command == "move-plugin-to"
         || command == "swap-plugin-with" || command == "remove-known-plugin" || command == "clear-known-plugins"
-        || command == "delete-plugin-states"))
+        || command == "delete-plugin-states" || command == "create-chain-profile" || command == "switch-chain-profile"
+        || command == "rename-chain-profile" || command == "duplicate-chain-profile" || command == "delete-chain-profile"
+        || command == "add-strip" || command == "remove-strip" || command == "rename-strip"
+        || command == "set-strip-routing" || command == "set-strip-gain" || command == "set-strip-pan" || command == "set-master-gain"
+        || command == "add-known-plugin-at" || command == "move-plugin-to-strip"
+        || command == "undo-chain" || command == "redo-chain"))
         return fail("session_read_only", "Session changes are disabled while loading is suppressed or recovery is incomplete");
+    if (command == "create-chain-profile") return profileCommand(engine.createChainProfile(args[0].toString()));
+    if (command == "switch-chain-profile") return profileCommand(engine.switchChainProfile(args[0].toString()));
+    if (command == "rename-chain-profile") return profileCommand(engine.renameChainProfile(args[0].toString(), args[1].toString()));
+    if (command == "duplicate-chain-profile") return profileCommand(engine.duplicateChainProfile(args[0].toString()));
+    if (command == "delete-chain-profile") return profileCommand(engine.deleteChainProfile(args[0].toString()));
+    if (command == "add-strip") return profileCommand(engine.addStrip(args[0].toString()));
+    if (command == "remove-strip") return profileCommand(engine.removeStrip(args[0].toString()));
+    if (command == "rename-strip") return profileCommand(engine.renameStrip(args[0].toString(), args[1].toString()));
+    if (command == "set-master-gain") return profileCommand(engine.setMasterGain((float) args[0]));
+    if (command == "undo-chain") return profileCommand(engine.undoChain() ? String() : String("nothing_to_undo"));
+    if (command == "redo-chain") return profileCommand(engine.redoChain() ? String() : String("nothing_to_redo"));
+    if (command == "set-strip-gain" || command == "set-strip-pan" || command == "set-strip-routing" || command == "add-known-plugin-at" || command == "move-plugin-to-strip")
+    {
+        const auto& options = args[0];
+        if (!options.isObject() || !options["stripId"].isString()) return fail("invalid_arguments", "A strip id is required");
+        const auto stripId = options["stripId"].toString();
+        if (command == "set-strip-gain")
+        {
+            if (!(options["gainDb"].isDouble() || options["gainDb"].isInt() || options["gainDb"].isInt64())) return fail("invalid_arguments", "A gain in dB is required");
+            return profileCommand(engine.setStripGain(stripId, (float) options["gainDb"]));
+        }
+        if (command == "set-strip-pan")
+        {
+            if (!(options["pan"].isDouble() || options["pan"].isInt() || options["pan"].isInt64())) return fail("invalid_arguments", "A pan position is required");
+            return profileCommand(engine.setStripPan(stripId, (float) options["pan"]));
+        }
+        if (command == "set-strip-routing")
+        {
+            if (!options["allInputs"].isBool() || !options["allOutputs"].isBool()) return fail("invalid_arguments", "Input and output routing flags are required");
+            const auto list = [](const var& value, std::vector<int>& channels) {
+                const auto* items = value.getArray();
+                if (!items) return false;
+                for (const auto& item : *items)
+                {
+                    if (!(item.isInt() || item.isInt64()) || (int) item < 0 || (int) item > 255) return false;
+                    channels.push_back((int) item);
+                }
+                return true;
+            };
+            std::vector<int> inputs, outputs;
+            if (!list(options["inputs"], inputs) || !list(options["outputs"], outputs)) return fail("invalid_arguments", "Channel lists are required");
+            return profileCommand(engine.setStripRouting(stripId, (bool) options["allInputs"], (bool) options["allOutputs"], inputs, outputs));
+        }
+        const auto before = options["beforeInstanceId"].isString() ? options["beforeInstanceId"].toString() : String();
+        if (command == "move-plugin-to-strip")
+        {
+            if (!options["instanceId"].isString()) return fail("invalid_arguments", "An instance id is required");
+            return profileCommand(engine.movePluginToStrip(options["instanceId"].toString(), stripId, before));
+        }
+        if (!options["knownId"].isString()) return fail("invalid_arguments", "An installed plugin id is required");
+        return profileCommand(engine.addKnownPluginAt(engine.findKnownPluginIndexById(options["knownId"].toString()), stripId, before));
+    }
     if (command == "snapshot-manifest")
     {
         timerCallback();
@@ -888,16 +984,8 @@ String HostIpcServer::dispatchRequest(const lightHostModern::ipc::Request& reque
 		const int toIndex = engine.findPluginIndexById(args[1].toString());
 		if (fromIndex >= 0 && toIndex >= 0 && fromIndex != toIndex)
 		{
-			if (fromIndex < toIndex)
-			{
-				engine.movePluginToIndex(fromIndex, toIndex);
-				engine.movePluginToIndex(toIndex - 1, fromIndex);
-			}
-			else
-			{
-				engine.movePluginToIndex(fromIndex, toIndex);
-				engine.movePluginToIndex(toIndex + 1, fromIndex);
-			}
+			engine.movePluginToIndex(fromIndex, toIndex, true, false);
+			engine.movePluginToIndex(fromIndex < toIndex ? toIndex - 1 : toIndex + 1, fromIndex, false, false);
 		}
 		return commandOk();
 	}
@@ -1377,6 +1465,7 @@ String HostIpcServer::buildTelemetry()
         "\"globalMuted\":" + String(engine.isGlobalMuted() ? "true" : "false") + ","
         "\"globalBypassed\":" + String(engine.isGlobalBypassed() ? "true" : "false") + ","
         "\"chainVersion\":" + String((int64) engine.getChainVersion()) + ","
+        "\"profileVersion\":" + String((int64) engine.getProfileVersion()) + ","
 		"\"pluginDbVersion\":" + String((int64) engine.getPluginDatabaseVersion()) + ","
 		"\"audioConfigVersion\":" + String((int64) engine.getAudioConfigVersion()) + ","
 		"\"diagnostics\":" + buildDiagnostics(diagnostics) + ""
@@ -1393,6 +1482,11 @@ String HostIpcServer::buildSnapshot()
 	const auto blocklistConfig = engine.getAudioBlocklistConfiguration();
 	const auto knownPlugins = (int) knownPluginList.size();
 
+	const auto chainCatalog = engine.chainProfileCatalog();
+	StringArray chainProfileItems;
+	for (const auto& profile : chainCatalog.profiles)
+		chainProfileItems.add("{\"id\":" + quote(profile.id) + ",\"name\":" + quote(profile.name) + "}");
+
 	StringArray plugins;
 	for (int i = 0; i < (int) activePlugins.size(); ++i)
 	{
@@ -1408,6 +1502,7 @@ String HostIpcServer::buildSnapshot()
 			+ ",\"manufacturer\":" + quote(plugin.manufacturerName)
 			+ ",\"format\":" + quote(plugin.pluginFormatName)
 			+ ",\"bypassed\":" + String(engine.isPluginBypassed(i) ? "true" : "false")
+			+ ",\"stripId\":" + quote(record.stripId)
 			+ ",\"path\":" + quote(plugin.fileOrIdentifier)
 			+ ",\"order\":" + String(i + 1) + "}");
 	}
@@ -1450,6 +1545,7 @@ String HostIpcServer::buildSnapshot()
         "\"globalMuted\":" + String(engine.isGlobalMuted() ? "true" : "false") + ","
         "\"globalBypassed\":" + String(engine.isGlobalBypassed() ? "true" : "false") + ","
         "\"chainVersion\":" + String((int64) engine.getChainVersion()) + ","
+		"\"profileVersion\":" + String((int64) engine.getProfileVersion()) + ","
 		"\"pluginDbVersion\":" + String((int64) engine.getPluginDatabaseVersion()) + ","
 		"\"audioConfigVersion\":" + String((int64) engine.getAudioConfigVersion()) + ","
 		"\"diagnostics\":" + buildDiagnostics(diagnostics) + ","
@@ -1493,7 +1589,11 @@ String HostIpcServer::buildSnapshot()
 			"\"maxInputChannels\":" + String(audioConfig.maxInputChannels) + ","
 			"\"maxOutputChannels\":" + String(audioConfig.maxOutputChannels) +
 		"},"
+		"\"chainProfiles\":{\"activeId\":" + quote(chainCatalog.activeId) + ",\"profiles\":[" + chainProfileItems.joinIntoString(",") + "]},"
 		"\"activePlugins\":[" + plugins.joinIntoString(",") + "],"
+		"\"strips\":" + engine.stripsJson() + ","
+		"\"masterGainDb\":" + String(engine.masterGainDb(), 2) + ","
+		"\"chainHistory\":{\"canUndo\":" + String(engine.canUndoChain() ? "true" : "false") + ",\"canRedo\":" + String(engine.canRedoChain() ? "true" : "false") + "},"
 		"\"knownPluginList\":[" + knownPluginItems.joinIntoString(",") + "]"
 	"}";
 }

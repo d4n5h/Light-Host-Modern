@@ -137,6 +137,36 @@ void PluginsPageView::RunningPluginsListView_DragItemsStarting(winrt::Windows::F
         winrt::get_self<MainWindow>(target.as<winrt::LightHostModernWinUI::MainWindow>())->RunningPluginsListView_DragItemsStarting(arg0, arg1);
 }
 
+void PluginsPageView::InstalledPluginsListView_DragItemsStarting(winrt::Windows::Foundation::IInspectable const& arg0, Microsoft::UI::Xaml::Controls::DragItemsStartingEventArgs const& arg1)
+{
+    if (auto target = owner.get())
+        winrt::get_self<MainWindow>(target.as<winrt::LightHostModernWinUI::MainWindow>())->InstalledPluginsListView_DragItemsStarting(arg0, arg1);
+}
+
+void PluginsPageView::StripMixer_DragOver(winrt::Windows::Foundation::IInspectable const& arg0, Microsoft::UI::Xaml::DragEventArgs const& arg1)
+{
+    if (auto target = owner.get())
+        winrt::get_self<MainWindow>(target.as<winrt::LightHostModernWinUI::MainWindow>())->StripMixer_DragOver(arg0, arg1);
+}
+
+void PluginsPageView::StripMixer_Drop(winrt::Windows::Foundation::IInspectable const& arg0, Microsoft::UI::Xaml::DragEventArgs const& arg1)
+{
+    if (auto target = owner.get())
+        winrt::get_self<MainWindow>(target.as<winrt::LightHostModernWinUI::MainWindow>())->StripMixer_Drop(arg0, arg1);
+}
+
+void PluginsPageView::RunningPluginsListView_DragOver(winrt::Windows::Foundation::IInspectable const& arg0, Microsoft::UI::Xaml::DragEventArgs const& arg1)
+{
+    if (auto target = owner.get())
+        winrt::get_self<MainWindow>(target.as<winrt::LightHostModernWinUI::MainWindow>())->RunningPluginsListView_DragOver(arg0, arg1);
+}
+
+void PluginsPageView::RunningPluginsListView_Drop(winrt::Windows::Foundation::IInspectable const& arg0, Microsoft::UI::Xaml::DragEventArgs const& arg1)
+{
+    if (auto target = owner.get())
+        winrt::get_self<MainWindow>(target.as<winrt::LightHostModernWinUI::MainWindow>())->RunningPluginsListView_Drop(arg0, arg1);
+}
+
 
 
 }

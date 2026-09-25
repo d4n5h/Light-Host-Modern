@@ -12,6 +12,7 @@ public:
         std::function<void()> dirty = {}, std::function<void()> reconfigure = {},
         std::function<Clock::time_point()> clock = [] { return std::chrono::steady_clock::now(); });
     void start(bool safeMode, bool suspended);
+    void observeCallbacks(uint64 count);
     void tick();
     void devicesChanged();
     void invalidateConfiguration();
@@ -77,9 +78,18 @@ public:
                                                  const String& inputDeviceName,
                                                  const String& outputDeviceName);
     void saveAudioDeviceState();
+    struct CapturedAudioSetup
+    {
+        std::unique_ptr<XmlElement> device;
+        std::unique_ptr<XmlElement> channels;
+    };
+    CapturedAudioSetup captureAudioSetup();
+    String applyAudioSetup(const XmlElement* device, const XmlElement* channels, const String& persistence);
 private:
     AudioIODeviceType* customBackendType() const;
     void markSettingsDirty() { if (dirty) dirty(); }
+    bool recoverStalledStream();
+    static bool isStallMessage(const String& message);
     void loadActivePlugins() { if (reconfigure) reconfigure(); }
     PropertySet* preferencesPtr() const { return &preferences; }
     std::unique_ptr<XmlElement> getXmlValueOrClear(const String& key) { return preferences.getXmlValue(key); }
@@ -90,6 +100,10 @@ private:
     Clock::time_point nextRetry{};
     uint64 generation = 1, scheduledGeneration = 1, audioConfigVersion = 0;
     int failedAudioRecoveryAttempts = 0;
+    int stallAttempts = 0;
+    bool callbacksObserved = false, stallPrimed = false;
+    uint64 latestCallbacks = 0, lastCallbacks = 0;
+    Clock::time_point stallSince{}, stallNextRetry{};
     bool manualAudioSelectionInProgress = false, audioStartSuspended = false, applicationsSuspended = false;
     String audioRecoveryState = "running", audioRecoveryMessage, lastAudioConfigurationError;
     String configuredBackend;

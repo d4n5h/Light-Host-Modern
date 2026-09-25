@@ -27,7 +27,7 @@
                 <NavigationViewItem x:Name="PreferencesButton" AutomationProperties.AutomationId="NavAudio" Content="Audio" Icon="Audio" Tag="Audio" />
                 <NavigationViewItem x:Name="PluginsButton" AutomationProperties.AutomationId="NavPlugins" Content="Plugins" Tag="Plugins">
                     <NavigationViewItem.Icon>
-                        <FontIcon FontFamily="Segoe Fluent Icons" Glyph="" />
+                        <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xF4C3;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem x:Name="DiagnosticsButton" AutomationProperties.AutomationId="NavDiagnostics" Content="Diagnostics" Tag="Diagnostics">

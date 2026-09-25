@@ -1,6 +1,7 @@
 #include "RealtimeHostProcessor.h"
 
 #include <algorithm>
+#include <cmath>
 #include <thread>
 #include <stdexcept>
 
@@ -134,12 +135,15 @@ void RealtimeHostProcessor::prepareBuffers()
     preparedOutputChannels = jlimit(0, maxScratchChannels, getTotalNumOutputChannels());
     monoGains.resize(static_cast<size_t>(currentBlockSize));
     scratchBuffer.setSize(maxScratchChannels, currentBlockSize, false, false, true);
+    stripBus.setSize(maxScratchChannels, currentBlockSize, false, false, true);
+    mixBus.setSize(maxScratchChannels, currentBlockSize, false, false, true);
     // JUCE reallocates channel-pointer storage when a view grows beyond its current
     // channel count. Keep one fixed-count view per layout, including 32+ channels.
     for (int channels = 1; channels <= maxScratchChannels; ++channels)
     {
         segmentViews[(size_t) channels].setDataToReferTo(scratchBuffer.getArrayOfWritePointers(), channels, currentBlockSize);
         expandedViews[(size_t) channels].setDataToReferTo(scratchBuffer.getArrayOfWritePointers(), channels, currentBlockSize);
+        stripViews[(size_t) channels].setDataToReferTo(stripBus.getArrayOfWritePointers(), channels, currentBlockSize);
     }
     segmentMidi.ensureSize(midiCapacity);
     filteredMidi.ensureSize(midiCapacity);
@@ -160,11 +164,28 @@ void RealtimeHostProcessor::refreshLatencies()
     if (!changed) return;
     ScopedSuspension suspension(*this, false);
     bool compatible = true;
-    snapshot->totalLatencySamples = 0;
-    for (const auto& slot : snapshot->slots)
-        if (slot) { compatible = slot->refreshLatency() && compatible; snapshot->totalLatencySamples += slot->getLatencySamples(); }
+    if (snapshot->strips.empty())
+    {
+        snapshot->totalLatencySamples = 0;
+        for (const auto& slot : snapshot->slots)
+            if (slot) { compatible = slot->refreshLatency() && compatible; snapshot->totalLatencySamples += slot->getLatencySamples(); }
+    }
+    else
+    {
+        int maximum = 0;
+        for (auto& strip : snapshot->strips)
+        {
+            strip.latencySamples = 0;
+            for (const auto& slot : strip.slots)
+                if (slot) { compatible = slot->refreshLatency() && compatible; strip.latencySamples += slot->getLatencySamples(); }
+            maximum = jmax(maximum, strip.latencySamples);
+        }
+        for (auto& strip : snapshot->strips)
+            if (strip.runtime) compatible = strip.runtime->align.prepare(strip.busChannels, currentBlockSize, maximum - strip.latencySamples, currentSampleRate) && compatible;
+        snapshot->totalLatencySamples = maximum;
+    }
     setLatencySamples(snapshot->totalLatencySamples);
-    compatible = globalControls.prepare(preparedHostChannels, currentBlockSize, snapshot->totalLatencySamples, currentSampleRate) && compatible;
+    compatible = globalControls.prepare(preparedHostChannels, currentBlockSize, 0, currentSampleRate) && compatible;
     if (!compatible) resumeFade.store(true);
 }
 
@@ -323,21 +344,24 @@ void RealtimeHostProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&
                 value += (sum - value) * monoMix;
             }
         }
-        globalControls.capture(segment);
         segmentMidi.clear();
         dropped += lightHostModern::copyBoundedMidi(segmentMidi, midiMessages, offset, count, -offset, midiCapacity);
-        if (snapshot) for (auto& slot : snapshot->slots)
+        if (snapshot) processStrips(*snapshot, segment, segmentMidi, dropped);
+        const float masterStep = static_cast<float>(1.0 / (currentSampleRate * 0.005));
+        const float masterWanted = masterTarget.load(std::memory_order_relaxed);
+        for (int i = 0; i < count; ++i)
         {
-            if (!slot || !slot->processor || !slot->prepared) continue;
-            slot->captureDry(segment);
-            processSlot(*slot, segment, segmentMidi);
-            if (segmentMidi.data.getAllocatedCapacity() < midiCapacity) midiStorageNeedsRepair.store(true);
-            filteredMidi.clear();
-            dropped += lightHostModern::copyBoundedMidi(filteredMidi, segmentMidi, 0, count, 0, midiCapacity);
-            segmentMidi.swapWith(filteredMidi);
-            slot->mixDry(segment, slot->bypassed.load(std::memory_order_relaxed));
+            masterGain += jlimit(-masterStep, masterStep, masterWanted - masterGain);
+            if (masterGain == 1.0f) continue;
+            for (int ch = 0; ch < channels; ++ch) segment.getWritePointer(ch)[i] *= masterGain;
         }
-        globalControls.mix(segment);
+        {
+            const float peak = segment.getMagnitude(0, count);
+            const float previous = masterLevel.load(std::memory_order_relaxed);
+            const float decay = std::exp(-static_cast<float>(count) / static_cast<float>(currentSampleRate) / 0.3f);
+            masterLevel.store(jmax(peak, previous * decay), std::memory_order_relaxed);
+        }
+        globalControls.applyMute(segment);
         // Physical outputs 1/2 remain the principal pair even when JUCE packs
         // a sparse output mask. Never mix an auxiliary output into this pair.
         const bool hasPair = mainOutputLeft >= 0 && mainOutputRight >= 0
@@ -402,53 +426,163 @@ void RealtimeHostProcessor::prepareMidiBuffer(MidiBuffer& buffer)
     preparedMidiDestination = &buffer;
 }
 
+std::shared_ptr<StripRuntime> RealtimeHostProcessor::runtimeFor(const juce::String& id)
+{
+    auto& runtime = stripRuntimes[id];
+    if (!runtime) runtime = std::make_shared<StripRuntime>();
+    return runtime;
+}
+
 void RealtimeHostProcessor::prepareSnapshot(ChainSnapshot& snapshot)
 {
 	lightHostModernLog("RealtimeHostProcessor prepareSnapshot begin slots=" + String((int) snapshot.slots.size()));
 	snapshot.sampleRate = currentSampleRate;
 	snapshot.blockSize = currentBlockSize;
 	snapshot.maxPluginChannels = jmax(snapshot.inputChannels, snapshot.outputChannels);
-	snapshot.totalLatencySamples = 0;
-
-	for (auto& slot : snapshot.slots)
+	if (snapshot.strips.empty())
 	{
-		if (slot == nullptr)
-			continue;
-
-		snapshot.maxPluginChannels = jmax(snapshot.maxPluginChannels, jmax(slot->inputChannels, slot->outputChannels));
-
+		StripSnapshot strip;
+		strip.allInputs = strip.allOutputs = true;
+		strip.slots = snapshot.slots;
+		snapshot.strips.push_back(std::move(strip));
+	}
+	const auto prepareSlot = [&](PluginSlot& slot, int busChannels) {
+		snapshot.maxPluginChannels = jmax(snapshot.maxPluginChannels, jmax(slot.inputChannels, slot.outputChannels));
 		try
 		{
-			setLightHostModernCrashContext("RealtimeHostProcessor::prepareSnapshot prepare '" + slot->description.name
-				+ "' sampleRate=" + String(currentSampleRate)
-				+ " blockSize=" + String(currentBlockSize)
-				+ " inputs=" + String(slot->inputChannels)
-				+ " outputs=" + String(slot->outputChannels));
-			lightHostModernLog("RealtimeHostProcessor prepare slot begin '" + slot->description.name + "'");
-			slot->prepare(currentSampleRate, currentBlockSize, preparedHostChannels);
-			lightHostModernLog("RealtimeHostProcessor prepare slot completed '" + slot->description.name + "'");
-		}
-		catch (const std::exception& e)
-		{
-			lightHostModernLog("RealtimeHostProcessor prepare slot C++ exception '" + slot->description.name + "': " + String(e.what()));
-			slot->processDisabled.store(true, std::memory_order_release);
-			slot->processFailed.store(true, std::memory_order_release);
-			if (lightHostModern::diagnosticsCollectionEnabled.load(std::memory_order_relaxed)) processFailureCount.fetch_add(1, std::memory_order_relaxed);
+			slot.prepare(currentSampleRate, currentBlockSize, busChannels);
 		}
 		catch (...)
 		{
-			lightHostModernLog("RealtimeHostProcessor prepare slot unknown exception '" + slot->description.name + "'");
-			slot->processDisabled.store(true, std::memory_order_release);
-			slot->processFailed.store(true, std::memory_order_release);
+			slot.processDisabled.store(true, std::memory_order_release);
+			slot.processFailed.store(true, std::memory_order_release);
 			if (lightHostModern::diagnosticsCollectionEnabled.load(std::memory_order_relaxed)) processFailureCount.fetch_add(1, std::memory_order_relaxed);
 		}
-
-		snapshot.totalLatencySamples += slot->getLatencySamples();
+	};
+	int maximum = 0;
+	for (auto& strip : snapshot.strips)
+	{
+		if (strip.allInputs || strip.allOutputs)
+			strip.busChannels = jmax(1, preparedHostChannels);
+		else if (strip.busChannels <= 0)
+			strip.busChannels = jmax(1, jmax((int) strip.inputMap.size(), (int) strip.outputMap.size()));
+		strip.busChannels = jlimit(1, maxScratchChannels, strip.busChannels);
+		if (strip.inputMap.empty() && strip.allInputs)
+			for (int channel = 0; channel < preparedHostChannels; ++channel) strip.inputMap.push_back(channel);
+		if (strip.outputMap.empty() && strip.allOutputs)
+			for (int channel = 0; channel < preparedHostChannels; ++channel) strip.outputMap.push_back(channel);
+		strip.latencySamples = 0;
+		for (const auto& slot : strip.slots)
+			if (slot) { prepareSlot(*slot, strip.busChannels); strip.latencySamples += slot->getLatencySamples(); }
+		maximum = jmax(maximum, strip.latencySamples);
+		strip.runtime = runtimeFor(strip.id);
+		strip.runtime->targetGain.store(strip.gainLinear, std::memory_order_relaxed);
+		strip.runtime->targetPan.store(juce::jlimit(-1.0f, 1.0f, strip.pan), std::memory_order_relaxed);
+		strip.runtime->muted.store(strip.muted, std::memory_order_relaxed);
+		strip.runtime->solo.store(strip.solo, std::memory_order_relaxed);
 	}
-
+	anySolo.store(std::any_of(snapshot.strips.begin(), snapshot.strips.end(), [](const auto& strip) { return strip.solo; }), std::memory_order_relaxed);
+	for (auto& strip : snapshot.strips)
+		if (strip.runtime) strip.runtime->align.prepare(strip.busChannels, currentBlockSize, maximum - strip.latencySamples, currentSampleRate);
+	snapshot.totalLatencySamples = maximum;
+	masterTarget.store(snapshot.masterGainLinear, std::memory_order_relaxed);
 	setLatencySamples(snapshot.totalLatencySamples);
-    globalControls.prepare(preparedHostChannels, currentBlockSize, snapshot.totalLatencySamples, currentSampleRate);
+    globalControls.prepare(preparedHostChannels, currentBlockSize, 0, currentSampleRate);
 	lightHostModernLog("RealtimeHostProcessor prepareSnapshot completed latencySamples=" + String(snapshot.totalLatencySamples));
+}
+
+void RealtimeHostProcessor::processStrips(ChainSnapshot& snapshot, AudioBuffer<float>& segment, MidiBuffer& midi, uint64& dropped)
+{
+    const int count = segment.getNumSamples();
+    const int channels = segment.getNumChannels();
+    const bool forceDry = globalControls.isBypassed();
+    const float step = static_cast<float>(1.0 / (currentSampleRate * 0.005));
+    mixBus.clear(0, count);
+    for (auto& strip : snapshot.strips)
+    {
+        const int busChannels = jlimit(1, maxScratchChannels, strip.busChannels);
+        auto& bus = stripViews[static_cast<size_t>(busChannels)];
+        bus.setDataToReferTo(stripBus.getArrayOfWritePointers(), busChannels, count);
+        bus.clear(0, count);
+        int connected = 0;
+        for (int index = 0; index < (int) strip.inputMap.size(); ++index)
+        {
+            const int source = strip.inputMap[static_cast<size_t>(index)];
+            if (source < 0 || source >= channels || index >= busChannels) continue;
+            bus.copyFrom(index, 0, segment, source, 0, count);
+            ++connected;
+        }
+        if (connected == 1 && busChannels >= 2 && strip.inputMap.size() == 1)
+            bus.copyFrom(1, 0, bus, 0, 0, count);
+        for (const auto& slot : strip.slots)
+        {
+            if (!slot || !slot->processor || !slot->prepared) continue;
+            slot->captureDry(bus);
+            processSlot(*slot, bus, midi);
+            if (midi.data.getAllocatedCapacity() < midiCapacity) midiStorageNeedsRepair.store(true);
+            filteredMidi.clear();
+            dropped += lightHostModern::copyBoundedMidi(filteredMidi, midi, 0, count, 0, midiCapacity);
+            midi.swapWith(filteredMidi);
+            slot->mixDry(bus, forceDry || slot->bypassed.load(std::memory_order_relaxed));
+        }
+        if (strip.runtime)
+        {
+            const float target = strip.runtime->targetGain.load(std::memory_order_relaxed);
+            for (int i = 0; i < count; ++i)
+            {
+                strip.runtime->gain += jlimit(-step, step, target - strip.runtime->gain);
+                if (strip.runtime->gain == 1.0f) continue;
+                for (int ch = 0; ch < busChannels; ++ch) bus.getWritePointer(ch)[i] *= strip.runtime->gain;
+            }
+            const float peak = bus.getMagnitude(0, count);
+            const float previous = strip.runtime->level.load(std::memory_order_relaxed);
+            const float decay = std::exp(-static_cast<float>(count) / static_cast<float>(currentSampleRate) / 0.3f);
+            strip.runtime->level.store(jmax(peak, previous * decay), std::memory_order_relaxed);
+            strip.runtime->align.capture(bus);
+        }
+        const auto& delayed = strip.runtime ? strip.runtime->align.output() : bus;
+        const bool monoBus = busChannels == 1 && strip.outputMap.size() > 1;
+        const float targetPan = strip.runtime ? strip.runtime->targetPan.load(std::memory_order_relaxed) : 0.0f;
+        const bool panLive = strip.runtime && strip.outputMap.size() >= 2
+            && (strip.runtime->pan != 0.0f || targetPan != 0.0f);
+        const auto scatter = [&](int sampleCount, int sampleOffset, float leftGain, float rightGain) {
+            for (int index = 0; index < (int) strip.outputMap.size(); ++index)
+            {
+                const int destination = strip.outputMap[static_cast<size_t>(index)];
+                const int source = monoBus ? 0 : index;
+                if (destination < 0 || destination >= channels || source >= delayed.getNumChannels()) continue;
+                const float gain = index == 0 ? leftGain : index == 1 ? rightGain : 1.0f;
+                mixBus.addFrom(destination, sampleOffset, delayed, source, sampleOffset, sampleCount, gain);
+            }
+        };
+        const bool muted = strip.runtime && strip.runtime->muted.load(std::memory_order_relaxed);
+        const bool soloed = strip.runtime && strip.runtime->solo.load(std::memory_order_relaxed);
+        const bool silent = muted || (anySolo.load(std::memory_order_relaxed) && !soloed);
+        if (silent) continue;
+        if (!panLive) scatter(count, 0, 1.0f, 1.0f);
+        else for (int i = 0; i < count; ++i)
+        {
+            strip.runtime->pan += jlimit(-step, step, targetPan - strip.runtime->pan);
+            const float position = strip.runtime->pan;
+            float leftGain = 1.0f, rightGain = 1.0f;
+            if (position != 0.0f)
+            {
+                if (busChannels == 1)
+                {
+                    const float angle = (position + 1.0f) * 0.25f * juce::MathConstants<float>::pi;
+                    leftGain = std::cos(angle);
+                    rightGain = std::sin(angle);
+                }
+                else
+                {
+                    leftGain = position <= 0.0f ? 1.0f : 1.0f - position;
+                    rightGain = position >= 0.0f ? 1.0f : 1.0f + position;
+                }
+            }
+            scatter(1, i, leftGain, rightGain);
+        }
+    }
+    for (int ch = 0; ch < channels; ++ch) segment.copyFrom(ch, 0, mixBus, ch, 0, count);
 }
 
 void RealtimeHostProcessor::processSlot(PluginSlot& slot, AudioBuffer<float>& buffer, MidiBuffer& midiMessages)

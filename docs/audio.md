@@ -43,7 +43,7 @@ This switch sits in **Input settings**, is off by default and is saved for the e
 
 A 5 ms input-matrix transition avoids a forced fade to silence. Both global and plugin dry paths receive the same transformed input. A plugin with a mono main output is centered in the main stereo route while mixing is enabled; real stereo output is preserved. Auxiliary plugin buses remain isolated.
 
-Dashboard and Audio show a notice when processing is unavailable. Explicit None/safe mode and an unconfigured first start are distinguished from a missing selected device. Retry bounds remain 1–60 seconds and 1–100 attempts.
+Dashboard and Audio show a notice when processing is unavailable. Explicit None/safe mode and an unconfigured first start are distinguished from a missing selected device. Retry bounds remain 1–60 seconds and 1–100 attempts. If the open device stops delivering callbacks for 2 seconds, the same notice says the host is reopening that device. A plugin that stays inside the audio callback is reported instead, and the device is not closed.
 
 ## Main output to mono
 

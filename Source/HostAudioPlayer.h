@@ -1,6 +1,7 @@
 #pragma once
 #include "RealtimeHostProcessor.h"
 #include "CallbackMeasurement.h"
+#include <atomic>
 
 // The JUCE convenience player constructs channel views and collects MIDI in its
 // callback. This adapter prepares storage at device start and segments unexpected
@@ -11,6 +12,7 @@ public:
     void setProcessor(RealtimeHostProcessor* value) noexcept { processor = value; }
     lightHostModern::CallbackMeasurement& callbackMeasurement() noexcept { return measurement; }
     const lightHostModern::CallbackMeasurement& callbackMeasurement() const noexcept { return measurement; }
+    juce::uint64 callbackCount() const noexcept { return callbacks.load(std::memory_order_relaxed); }
 
     void audioDeviceAboutToStart(juce::AudioIODevice* device) override
     {
@@ -38,6 +40,7 @@ public:
     void audioDeviceIOCallbackWithContext(const float* const* input, int inputChannels,
         float* const* output, int outputChannels, int samples, const juce::AudioIODeviceCallbackContext&) override
     {
+        callbacks.fetch_add(1, std::memory_order_relaxed);
         lightHostModern::realtimeAudit::Scope audit(lightHostModern::realtimeAudit::Origin::host);
         struct TimedCallback
         {
@@ -77,4 +80,5 @@ private:
     juce::AudioBuffer<float> storage, view;
     juce::MidiBuffer midi;
     lightHostModern::CallbackMeasurement measurement;
+    std::atomic<juce::uint64> callbacks { 0 };
 };

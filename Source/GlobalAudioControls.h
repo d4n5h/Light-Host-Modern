@@ -24,6 +24,18 @@ public:
         dryDelay.capture(input);
     }
 
+    void applyMute(juce::AudioBuffer<float>& wet) noexcept
+    {
+        const bool silence = isMuted();
+        for (int i = 0; i < wet.getNumSamples(); ++i)
+        {
+            muteGain = silence ? juce::jmax(0.0f, muteGain - step) : juce::jmin(1.0f, muteGain + step);
+            if (muteGain == 1.0f) continue;
+            for (int ch = 0; ch < wet.getNumChannels(); ++ch)
+                wet.getWritePointer(ch)[i] *= muteGain;
+        }
+    }
+
     void mix(juce::AudioBuffer<float>& wet) noexcept
     {
         const bool useDry = isBypassed(), silence = isMuted();

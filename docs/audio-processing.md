@@ -1,6 +1,6 @@
 # Audio processing
 
-LightHostModern uses JUCE's `AudioDeviceManager` and `AudioProcessorPlayer` with a custom `RealtimeHostProcessor`. The processor runs installed plugin instances in one serial chain.
+LightHostModern uses JUCE's `AudioDeviceManager` and `AudioProcessorPlayer` with a custom `RealtimeHostProcessor`. Each mixer strip has its own plugin chain. Strips sum into the selected outputs, then the master volume and mute are applied.
 
 ## Chain snapshots
 
@@ -22,10 +22,10 @@ For every audio block:
 
 1. The input peak is calculated.
 2. Enabled inputs are packed by JUCE. If mono mixing is enabled for the current device pair, their unity-gain sum is faded into the main stereo pair over 5 ms, before dry/bypass capture and plugins.
-3. Each slot is processed in list order.
-4. Bypassed slots pass audio through their compensation path.
+3. Each strip gathers its inputs, runs its slots, applies its fader, and is delayed to the slowest strip. A pan value other than center then balances the first two outputs. A one-channel strip uses constant-power pan. A wider strip keeps center at unity and turns one side down.
+4. Bypassed slots pass audio through their compensation path. Global bypass does the same for every slot, so strip routing and faders stay active.
 5. Failed slots are disabled for later blocks.
-6. Global latency-compensated bypass and mute are applied.
+6. The strips are summed, the master volume is applied, then global mute.
 7. If enabled and both physical principal outputs are active, output mono blends their signals toward their average over 5 ms. Auxiliary outputs and lone principal outputs retain their signal.
 8. The stream-resume gain is applied, and output meters measure only actual output channels before JUCE sends them to the device.
 

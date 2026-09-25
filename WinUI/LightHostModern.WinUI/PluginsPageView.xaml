@@ -71,16 +71,28 @@
             <Border x:Name="RunningToolbarCard" Style="{StaticResource AppCardStyle}" Padding="4" MinHeight="0">
                 <CommandBar x:Name="RunningToolbar" SizeChanged="Toolbar_SizeChanged" AutomationProperties.AutomationId="RunningPluginToolbar" DefaultLabelPosition="Right" Background="Transparent" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center">
                     <CommandBar.Content>
-                        <AutoSuggestBox x:Name="RunningPluginSearchBox" AutomationProperties.AutomationId="RunningPluginSearch" AutomationProperties.Name="Search running plugins" PlaceholderText="Search running plugins" QueryIcon="Find" Width="320" MinWidth="160" Margin="4,0,12,0" VerticalAlignment="Center" />
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <DropDownButton x:Name="RunningProfileButton" AutomationProperties.AutomationId="RunningProfile" Content="" VerticalAlignment="Center" Margin="4,0,8,0" MinWidth="120" MaxWidth="220">
+                                <DropDownButton.Flyout>
+                                    <MenuFlyout x:Name="RunningProfileMenu" />
+                                </DropDownButton.Flyout>
+                            </DropDownButton>
+                            <AutoSuggestBox x:Name="RunningPluginSearchBox" AutomationProperties.AutomationId="RunningPluginSearch" AutomationProperties.Name="Search running plugins" PlaceholderText="Search running plugins" QueryIcon="Find" Width="320" MinWidth="160" Margin="4,0,12,0" VerticalAlignment="Center" />
+                        </StackPanel>
                     </CommandBar.Content>
                     <AppBarToggleButton x:Name="RunningGlobalMuteButton" Label="Mute output" Icon="Mute" Tag="mute" IsEnabled="False" AutomationProperties.AutomationId="RunningGlobalMute" Click="GlobalAudioControl_Click" />
                     <AppBarToggleButton x:Name="RunningGlobalBypassButton" Label="Bypass chain" Tag="bypass" IsEnabled="False" AutomationProperties.AutomationId="RunningGlobalBypass" Click="GlobalAudioControl_Click"><AppBarToggleButton.Icon><FontIcon Glyph="&#xE8AB;" /></AppBarToggleButton.Icon></AppBarToggleButton>
                     <AppBarSeparator />
+                    <AppBarButton x:Name="RunningUndoButton" Label="Undo" Icon="Undo" AutomationProperties.AutomationId="RunningUndo" />
+                    <AppBarButton x:Name="RunningRedoButton" Label="Redo" Icon="Redo" AutomationProperties.AutomationId="RunningRedo" />
                     <AppBarButton x:Name="RunningPluginSortButton" Label="Sort" Icon="Sort" AutomationProperties.AutomationId="RunningPluginSort" />
                 </CommandBar>
             </Border>
-            <Grid x:Name="RunningPluginsListCard" Grid.Row="1">
-                <ListView x:Name="RunningPluginsListView" AutomationProperties.AutomationId="RunningPluginsList" AutomationProperties.Name="Running plugins" SelectionMode="Single" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollMode="Disabled" ItemTemplate="{StaticResource PluginItemTemplate}" ItemContainerStyle="{StaticResource PluginCardContainerStyle}" IsItemClickEnabled="False" DragItemsStarting="RunningPluginsListView_DragItemsStarting" DragItemsCompleted="RunningPluginsListView_DragItemsCompleted" />
+            <ScrollViewer x:Name="StripMixerScroller" Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled">
+                <StackPanel x:Name="StripMixerPanel" Orientation="Horizontal" Spacing="8" AllowDrop="True" DragOver="StripMixer_DragOver" Drop="StripMixer_Drop" />
+            </ScrollViewer>
+            <Grid x:Name="RunningPluginsListCard" Visibility="Collapsed">
+                <ListView x:Name="RunningPluginsListView" AutomationProperties.AutomationId="RunningPluginsList" AutomationProperties.Name="Running plugins" SelectionMode="Single" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollMode="Disabled" ItemTemplate="{StaticResource PluginItemTemplate}" ItemContainerStyle="{StaticResource PluginCardContainerStyle}" IsItemClickEnabled="False" DragItemsStarting="RunningPluginsListView_DragItemsStarting" DragItemsCompleted="RunningPluginsListView_DragItemsCompleted" AllowDrop="True" DragOver="RunningPluginsListView_DragOver" Drop="RunningPluginsListView_Drop" />
                 <TextBlock x:Name="RunningPluginsEmptyText" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" Text="No plugins running" Visibility="Collapsed" TextWrapping="Wrap" />
             </Grid>
         </Grid>
@@ -97,7 +109,7 @@
                 </CommandBar>
             </Border>
             <Grid x:Name="InstalledPluginsListCard" Grid.Row="1">
-                <ListView x:Name="InstalledPluginsListView" AutomationProperties.AutomationId="InstalledPluginsList" AutomationProperties.Name="Installed plugins" SelectionMode="Single" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollMode="Disabled" ItemTemplate="{StaticResource PluginItemTemplate}" ItemContainerStyle="{StaticResource PluginCardContainerStyle}" IsItemClickEnabled="False" />
+                <ListView x:Name="InstalledPluginsListView" AutomationProperties.AutomationId="InstalledPluginsList" AutomationProperties.Name="Installed plugins" SelectionMode="Single" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollMode="Disabled" ItemTemplate="{StaticResource PluginItemTemplate}" ItemContainerStyle="{StaticResource PluginCardContainerStyle}" IsItemClickEnabled="False" CanDragItems="True" DragItemsStarting="InstalledPluginsListView_DragItemsStarting" DragItemsCompleted="RunningPluginsListView_DragItemsCompleted" />
                 <TextBlock x:Name="InstalledPluginsEmptyText" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" Text="No plugins installed" Visibility="Collapsed" TextWrapping="Wrap" />
             </Grid>
         </Grid>

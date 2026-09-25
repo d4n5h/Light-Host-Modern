@@ -14,7 +14,7 @@ JUCE application properties retain host-owned data such as:
 - device persistence and blocklist configuration;
 - startup, tray, VST2, and icon preferences.
 
-Running order, instance IDs, custom instance names, bypass state, and processor state are stored in a versioned session file beside the host preferences. Atomic replacement and recoverable backups protect session writes; existing settings are migrated without merging distinct duplicate instances. See the [session contract](session-contract.md).
+Running order, instance IDs, custom instance names, bypass state, and processor state are stored in a versioned session file beside the host preferences. Atomic replacement and recoverable backups protect session writes; existing settings are migrated without merging distinct duplicate instances. Named copies of that chain are stored in `<preferences filename>.profiles` and can be switched from Running or the notification area. See the [session contract](session-contract.md).
 
 The WinUI shell stores interface-only options in `%LOCALAPPDATA%\LightHostModern\ui-settings.ini`, including language, layout, material, support visibility, and custom scan paths.
 
@@ -42,7 +42,7 @@ Disabled backends and devices are excluded from both manual selection and automa
 
 Before changing a device, the engine retains the previous setup. If a new configuration fails to open, especially during ASIO switching, the previous working setup is restored when possible. The UI receives the host's last configuration error.
 
-The audio watchdog can retry stopped or failed devices after sleep, driver restart, or Windows Audio lifecycle changes.
+The audio watchdog can retry stopped or failed devices after sleep, driver restart, or Windows Audio lifecycle changes. A device that still reports itself as playing, but has produced no audio callback for 2 seconds, is treated as stalled. The host reopens that same backend and device, up to the retry attempt limit and no sooner than the retry interval. It does not select a different device. If the audio callback is still inside the driver or a plugin, the device is left open and the Dashboard says a plugin is blocking audio.
 
 ## Plugin state and quarantine
 
