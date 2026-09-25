@@ -225,8 +225,10 @@ public:
     ChannelStripComponent(AudioEngine&, bool master);
     ~ChannelStripComponent() override;
     void setStrip(const lightHostModern::ChainStrip&, const std::vector<lightHostModern::PluginInstanceRecord>&);
-    void setMaster(float gainDb);
+    void setMaster(float gainDb, const std::vector<lightHostModern::PluginInstanceRecord>& plugins);
     void setMeter(float peak);
+    void applyLive(float gainDb, float panValue, bool muted, bool soloed);
+    void applyMasterLive(float gainDb);
     const juce::String& group() const { return groupName; }
     const juce::String& id() const { return stripId; }
     bool isMaster() const { return master; }
@@ -302,9 +304,12 @@ private:
     void timerCallback() override;
     void toggleGroup(const juce::String& name);
     void layoutStrips();
+    void startSavedRecording();
+    void startSavedStream();
     void moveStripTo(const juce::String& draggedId, ChannelStripComponent& target, bool after);
     AudioEngine& engine;
     juce::TextButton addButton, undoButton, redoButton, muteButton, bypassButton, newProfile;
+    juce::TextButton recordButton, recordPause, recordStop, streamButton, streamPause, streamStop;
     juce::ComboBox profiles;
     juce::Viewport viewport;
     juce::Component row;
@@ -312,5 +317,6 @@ private:
     juce::OwnedArray<juce::TextButton> groupHeaders;
     juce::StringArray collapsed;
     juce::String layoutKey;
+    uint64 seenSurface = 0;
     bool applying = false;
 };

@@ -32,6 +32,7 @@ inline juce::String knownPluginId(const juce::PluginDescription& description)
 }
 
 inline constexpr int maximumStrips = 192;
+inline constexpr const char* masterStripId = "00000000000000000000000000000000";
 
 struct ChainStrip
 {
@@ -116,7 +117,7 @@ public:
         if (strips.empty()) strips.push_back(defaultStrip());
         if (strips.size() > (size_t) maximumStrips) strips.resize((size_t) maximumStrips);
         for (auto& record : records)
-            if (record.stripId.isEmpty() || std::none_of(strips.begin(), strips.end(), [&](const auto& strip) { return strip.id == record.stripId; }))
+            if (record.stripId != masterStripId && (record.stripId.isEmpty() || std::none_of(strips.begin(), strips.end(), [&](const auto& strip) { return strip.id == record.stripId; })))
                 record.stripId = strips.front().id;
     }
 
@@ -375,7 +376,7 @@ public:
         for (auto& record : loaded)
         {
             if (version == 1) record.stripId = loadedStrips.front().id;
-            if (std::none_of(loadedStrips.begin(), loadedStrips.end(), [&](const auto& strip) { return strip.id == record.stripId; })) return false;
+            if (record.stripId != masterStripId && std::none_of(loadedStrips.begin(), loadedStrips.end(), [&](const auto& strip) { return strip.id == record.stripId; })) return false;
         }
         strips = std::move(loadedStrips);
         records = std::move(loaded);

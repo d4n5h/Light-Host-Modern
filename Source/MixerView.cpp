@@ -249,17 +249,17 @@ ChannelStripComponent::ChannelStripComponent(AudioEngine& engineIn, bool masterI
         if (master) engine.setGlobalMuted(muteStrip.getToggleState());
         else engine.setStripMuted(stripId, muteStrip.getToggleState());
     };
+    addAndMakeVisible(plusButton);
+    plusButton.setButtonText("+");
+    plusButton.onClick = [this] { PluginBrowser::open(engine, master ? juce::String(lightHostModern::masterStripId) : stripId); };
     if (!master)
     {
         addAndMakeVisible(inputBox);
         addAndMakeVisible(outputBox);
         addAndMakeVisible(outputBox2);
-        addAndMakeVisible(plusButton);
         addAndMakeVisible(soloStrip);
         addAndMakeVisible(pan);
         addAndMakeVisible(panReadout);
-        plusButton.setButtonText("+");
-        plusButton.onClick = [this] { PluginBrowser::open(engine, stripId); };
         soloStrip.setClickingTogglesState(true);
         soloStrip.onClick = [this] { if (!applying) engine.setStripSolo(stripId, soloStrip.getToggleState()); };
         inputBox.setTextWhenNothingSelected("Inputs");
@@ -297,6 +297,26 @@ ChannelStripComponent::ChannelStripComponent(AudioEngine& engineIn, bool masterI
 
 ChannelStripComponent::~ChannelStripComponent() = default;
 
+void ChannelStripComponent::applyLive(float gainDb, float panValue, bool muted, bool soloed)
+{
+    applying = true;
+    if (!fader.isMouseButtonDown()) fader.setValue(gainDb, juce::dontSendNotification);
+    if (!pan.isMouseButtonDown()) pan.setValue(panValue, juce::dontSendNotification);
+    muteStrip.setToggleState(muted, juce::dontSendNotification);
+    soloStrip.setToggleState(soloed, juce::dontSendNotification);
+    applying = false;
+    gainLabel.setText(juce::String(gainDb, 1) + " dB", juce::dontSendNotification);
+    panReadout.setText(panText(panValue), juce::dontSendNotification);
+}
+
+void ChannelStripComponent::applyMasterLive(float gainDb)
+{
+    applying = true;
+    if (!fader.isMouseButtonDown()) fader.setValue(gainDb, juce::dontSendNotification);
+    applying = false;
+    gainLabel.setText(juce::String(gainDb, 1) + " dB", juce::dontSendNotification);
+}
+
 void ChannelStripComponent::setMeter(float peak)
 {
     if (std::abs(peak - meterPeak) < 0.001f) return;
@@ -304,9 +324,9 @@ void ChannelStripComponent::setMeter(float peak)
     repaint(meterBounds);
 }
 
-void ChannelStripComponent::setMaster(float gainDb)
+void ChannelStripComponent::setMaster(float gainDb, const std::vector<lightHostModern::PluginInstanceRecord>& plugins)
 {
-    stripId.clear();
+    stripId = lightHostModern::masterStripId;
     groupName.clear();
     color = 0;
     colourHex.clear();
@@ -316,7 +336,29 @@ void ChannelStripComponent::setMaster(float gainDb)
     if (!fader.isMouseButtonDown()) fader.setValue(gainDb, juce::dontSendNotification);
     applying = false;
     gainLabel.setText(juce::String(gainDb, 1) + " dB", juce::dontSendNotification);
+    std::vector<juce::String> ids;
+    for (const auto& plugin : plugins) ids.push_back(plugin.id);
+    if (ids == insertIds)
+    {
+        for (int i = 0; i < inserts.size(); ++i)
+            inserts[i]->setPlugin(plugins[(size_t) i].displayName(), !plugins[(size_t) i].bypassed);
+        return;
+    }
+    insertIds = ids;
     inserts.clear();
+    for (const auto& plugin : plugins)
+    {
+        auto* button = inserts.add(new InsertButton(plugin.id, "instance:" + plugin.id));
+        button->setPlugin(plugin.displayName(), !plugin.bypassed);
+        button->onOpen = [this, id = plugin.id] {
+            const int index = engine.findPluginIndexById(id);
+            if (index >= 0) engine.showPluginEditor(index);
+        };
+        button->onMenu = [this, id = plugin.id] { showPluginMenu(id); };
+        button->onHover = [this](int y) { if (y < 0) clearDrag(); else showPluginGap(y); };
+        button->onDrop = [this](const juce::String& source) { dropPlugin(source); };
+        addAndMakeVisible(button);
+    }
     resized();
 }
 
@@ -584,21 +626,20 @@ void ChannelStripComponent::resized()
     }
     const int rowHeight = 26;
     auto list = insertsArea;
-    if (!master) list.setHeight(juce::jmax(0, list.getHeight() - rowHeight));
+    list.setHeight(juce::jmax(0, list.getHeight() - rowHeight));
     for (auto* button : inserts)
     {
         if (list.getHeight() < rowHeight) break;
         button->setBounds(list.removeFromTop(rowHeight).reduced(0, 1));
     }
-    if (!master)
-        plusButton.setBounds((list.getHeight() >= rowHeight ? list.removeFromTop(rowHeight) : insertsArea.removeFromBottom(rowHeight)).reduced(0, 1));
+    plusButton.setBounds((list.getHeight() >= rowHeight ? list.removeFromTop(rowHeight) : insertsArea.removeFromBottom(rowHeight)).reduced(0, 1));
 }
 
 bool ChannelStripComponent::isInterestedInDragSource(const SourceDetails& details)
 {
     const auto source = details.description.toString();
-    if (source.startsWith("strip:")) return true;
-    return !master && (source.startsWith("known:") || source.startsWith("instance:"));
+    if (source.startsWith("strip:")) return !master;
+    return source.startsWith("known:") || source.startsWith("instance:");
 }
 
 void ChannelStripComponent::itemDragEnter(const SourceDetails& details) { updateDrag(details); }
@@ -843,8 +884,20 @@ MixerView::MixerView(AudioEngine& engineIn)
     muteButton.setButtonText("Mute");
     bypassButton.setButtonText("Bypass");
     newProfile.setButtonText("New");
-    for (auto* button : { &addButton, &undoButton, &redoButton, &muteButton, &bypassButton, &newProfile })
+    recordButton.setButtonText("Record");
+    recordPause.setButtonText("Pause");
+    recordStop.setButtonText("Stop");
+    streamButton.setButtonText("Stream");
+    streamPause.setButtonText("Pause");
+    streamStop.setButtonText("Stop");
+    for (auto* button : { &addButton, &undoButton, &redoButton, &muteButton, &bypassButton, &newProfile, &recordButton, &recordPause, &recordStop, &streamButton, &streamPause, &streamStop })
         addAndMakeVisible(button);
+    recordButton.onClick = [this] { startSavedRecording(); };
+    recordPause.onClick = [this] { if (engine.isRecordingPaused()) engine.resumeRecording(); else engine.pauseRecording(); };
+    recordStop.onClick = [this] { engine.stopRecording(); };
+    streamButton.onClick = [this] { startSavedStream(); };
+    streamPause.onClick = [this] { if (engine.isStreamPaused()) engine.resumeStream(); else engine.pauseStream(); };
+    streamStop.onClick = [this] { engine.stopStream(); };
     addAndMakeVisible(profiles);
     addAndMakeVisible(viewport);
     viewport.setViewedComponent(&row, false);
@@ -875,6 +928,30 @@ MixerView::MixerView(AudioEngine& engineIn)
             engine.switchChainProfile(catalog.profiles[(size_t) index].id);
     };
     startTimerHz(30);
+}
+
+void MixerView::startSavedRecording()
+{
+    if (engine.isRecording()) return;
+    auto* settings = getAppProperties().getUserSettings();
+    const auto folder = juce::File(settings->getValue("recordFolder", juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile("LightHostModern").getChildFile("Recordings").getFullPathName()));
+    const auto error = engine.startRecording(folder, settings->getBoolValue("recordMp3", false), settings->getIntValue("recordBitrate", 192) * 1000,
+        settings->getBoolValue("recordMixdown", true), settings->getBoolValue("recordMulti", false), settings->getBoolValue("recordInterleaved", false), settings->getBoolValue("recordRaw", false),
+        settings->getValue("icecastHost"), settings->getIntValue("icecastPort", 8000), settings->getValue("icecastMount", "/live"), settings->getValue("icecastUser", "source"), settings->getValue("icecastPassword"), settings->getValue("icecastName", "LightHostModern"));
+    if (error.isNotEmpty()) juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Record", error);
+}
+
+void MixerView::startSavedStream()
+{
+    if (engine.isStreaming()) return;
+    const auto device = getAppProperties().getUserSettings()->getValue("streamDevice");
+    if (device.isEmpty())
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Stream", "Choose a stream device on the Record page. Install a virtual cable so other apps can select it.");
+        return;
+    }
+    if (const auto error = engine.startStream(device); error.isNotEmpty())
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Stream", error);
 }
 
 void MixerView::paint(juce::Graphics& graphics)
@@ -917,7 +994,13 @@ void MixerView::refresh()
             if (record.stripId == chain[(size_t) i].id) plugins.push_back(record);
         strips[i]->setStrip(chain[(size_t) i], plugins);
     }
-    if (auto* masterStrip = strips.getLast()) masterStrip->setMaster(engine.masterGainDb());
+    if (auto* masterStrip = strips.getLast())
+    {
+        std::vector<lightHostModern::PluginInstanceRecord> masterPlugins;
+        for (const auto& record : records)
+            if (record.stripId == lightHostModern::masterStripId) masterPlugins.push_back(record);
+        masterStrip->setMaster(engine.masterGainDb(), masterPlugins);
+    }
     for (auto* strip : strips)
         strip->onStripDrop = [this, strip](const juce::String& dragged, bool after) { moveStripTo(dragged, *strip, after); };
     layoutStrips();
@@ -932,6 +1015,20 @@ void MixerView::timerCallback()
         strips[i]->setMeter(engine.getStripLevel(chain[(size_t) i].id));
     if (strips.size() == (int) chain.size() + 1)
         if (auto* master = strips.getLast()) master->setMeter(engine.getMasterLevel());
+    if (engine.surfaceGeneration() != seenSurface)
+    {
+        seenSurface = engine.surfaceGeneration();
+        for (int i = 0; i < count; ++i)
+            strips[i]->applyLive(chain[(size_t) i].gainDb, chain[(size_t) i].pan, chain[(size_t) i].muted, chain[(size_t) i].solo);
+        if (strips.size() == (int) chain.size() + 1)
+            if (auto* master = strips.getLast()) master->applyMasterLive(engine.masterGainDb());
+    }
+    recordPause.setVisible(engine.isRecording());
+    recordStop.setVisible(engine.isRecording());
+    recordPause.setButtonText(engine.isRecordingPaused() ? "Resume" : "Pause");
+    streamPause.setVisible(engine.isStreaming());
+    streamStop.setVisible(engine.isStreaming());
+    streamPause.setButtonText(engine.isStreamPaused() ? "Resume" : "Pause");
 }
 
 void MixerView::moveStripTo(const juce::String& draggedId, ChannelStripComponent& target, bool after)
@@ -1031,6 +1128,11 @@ void MixerView::layoutStrips()
 void MixerView::resized()
 {
     auto area = getLocalBounds().reduced(8);
+    auto transport = area.removeFromTop(32);
+    for (auto* button : { &recordButton, &recordPause, &recordStop, &streamButton, &streamPause, &streamStop })
+    {
+        button->setBounds(transport.removeFromLeft(78).reduced(2, 0));
+    }
     auto bar = area.removeFromTop(36);
     profiles.setBounds(bar.removeFromLeft(160));
     bar.removeFromLeft(6);

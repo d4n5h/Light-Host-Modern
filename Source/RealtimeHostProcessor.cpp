@@ -137,6 +137,7 @@ void RealtimeHostProcessor::prepareBuffers()
     scratchBuffer.setSize(maxScratchChannels, currentBlockSize, false, false, true);
     stripBus.setSize(maxScratchChannels, currentBlockSize, false, false, true);
     mixBus.setSize(maxScratchChannels, currentBlockSize, false, false, true);
+    masterInsert.setSize(2, currentBlockSize, false, false, true);
     // JUCE reallocates channel-pointer storage when a view grows beyond its current
     // channel count. Keep one fixed-count view per layout, including 32+ channels.
     for (int channels = 1; channels <= maxScratchChannels; ++channels)
@@ -347,6 +348,20 @@ void RealtimeHostProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&
         segmentMidi.clear();
         dropped += lightHostModern::copyBoundedMidi(segmentMidi, midiMessages, offset, count, -offset, midiCapacity);
         if (snapshot) processStrips(*snapshot, segment, segmentMidi, dropped);
+        if (snapshot && !snapshot->masterSlots.empty() && channels > 0 && masterInsert.getNumSamples() >= count)
+        {
+            const int left = mainOutputLeft >= 0 ? mainOutputLeft : 0;
+            const int right = mainOutputRight >= 0 && mainOutputRight < channels ? mainOutputRight : jmin(1, channels - 1);
+            masterInsert.clear(0, count);
+            if (left < channels) masterInsert.copyFrom(0, 0, segment, left, 0, count);
+            if (right != left && right < channels) masterInsert.copyFrom(1, 0, segment, right, 0, count);
+            else masterInsert.copyFrom(1, 0, masterInsert, 0, 0, count);
+            masterView.setDataToReferTo(masterInsert.getArrayOfWritePointers(), 2, count);
+            for (const auto& slot : snapshot->masterSlots)
+                if (slot && slot->processor && slot->prepared) processSlot(*slot, masterView, segmentMidi);
+            if (left < channels) segment.copyFrom(left, 0, masterInsert, 0, 0, count);
+            if (right != left && right < channels) segment.copyFrom(right, 0, masterInsert, 1, 0, count);
+        }
         const float masterStep = static_cast<float>(1.0 / (currentSampleRate * 0.005));
         const float masterWanted = masterTarget.load(std::memory_order_relaxed);
         for (int i = 0; i < count; ++i)
@@ -362,6 +377,20 @@ void RealtimeHostProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&
             masterLevel.store(jmax(peak, previous * decay), std::memory_order_relaxed);
         }
         globalControls.applyMute(segment);
+        if (mixCapture)
+        {
+            const int left = mainOutputLeft >= 0 ? mainOutputLeft : 0;
+            const int right = mainOutputRight >= 0 ? mainOutputRight : jmin(1, channels - 1);
+            if (left < channels && right < channels)
+            {
+                if (mixCapture->streamOn())
+                    mixCapture->pushStream(segment.getReadPointer(left), segment.getReadPointer(right), count);
+                if (mixCapture->armed() && mixCapture->recordMaster() && !mixCapture->raw())
+                    mixCapture->pushMaster(segment.getReadPointer(left), segment.getReadPointer(right), count);
+            }
+            if (mixCapture->armed() && mixCapture->raw() && mixCapture->recordMaster())
+                mixCapture->commitRawMaster(masterGain, count);
+        }
         // Physical outputs 1/2 remain the principal pair even when JUCE packs
         // a sparse output mask. Never mix an auxiliary output into this pair.
         const bool hasPair = mainOutputLeft >= 0 && mainOutputRight >= 0
@@ -481,6 +510,8 @@ void RealtimeHostProcessor::prepareSnapshot(ChainSnapshot& snapshot)
 		strip.runtime->muted.store(strip.muted, std::memory_order_relaxed);
 		strip.runtime->solo.store(strip.solo, std::memory_order_relaxed);
 	}
+	for (const auto& slot : snapshot.masterSlots)
+		if (slot) { prepareSlot(*slot, 2); maximum = jmax(maximum, slot->getLatencySamples()); }
 	anySolo.store(std::any_of(snapshot.strips.begin(), snapshot.strips.end(), [](const auto& strip) { return strip.solo; }), std::memory_order_relaxed);
 	for (auto& strip : snapshot.strips)
 		if (strip.runtime) strip.runtime->align.prepare(strip.busChannels, currentBlockSize, maximum - strip.latencySamples, currentSampleRate);
@@ -498,8 +529,12 @@ void RealtimeHostProcessor::processStrips(ChainSnapshot& snapshot, AudioBuffer<f
     const bool forceDry = globalControls.isBypassed();
     const float step = static_cast<float>(1.0 / (currentSampleRate * 0.005));
     mixBus.clear(0, count);
-    for (auto& strip : snapshot.strips)
+    const bool take = mixCapture && mixCapture->armed();
+    const bool rawTake = take && mixCapture->raw();
+    if (rawTake && mixCapture->recordMaster()) mixCapture->clearRawMaster(count);
+    for (int stripIndex = 0; stripIndex < (int) snapshot.strips.size(); ++stripIndex)
     {
+        auto& strip = snapshot.strips[(size_t) stripIndex];
         const int busChannels = jlimit(1, maxScratchChannels, strip.busChannels);
         auto& bus = stripViews[static_cast<size_t>(busChannels)];
         bus.setDataToReferTo(stripBus.getArrayOfWritePointers(), busChannels, count);
@@ -514,6 +549,7 @@ void RealtimeHostProcessor::processStrips(ChainSnapshot& snapshot, AudioBuffer<f
         }
         if (connected == 1 && busChannels >= 2 && strip.inputMap.size() == 1)
             bus.copyFrom(1, 0, bus, 0, 0, count);
+        if (rawTake) mixCapture->copyDry(bus, count);
         for (const auto& slot : strip.slots)
         {
             if (!slot || !slot->processor || !slot->prepared) continue;
@@ -560,7 +596,39 @@ void RealtimeHostProcessor::processStrips(ChainSnapshot& snapshot, AudioBuffer<f
         const bool muted = strip.runtime && strip.runtime->muted.load(std::memory_order_relaxed);
         const bool soloed = strip.runtime && strip.runtime->solo.load(std::memory_order_relaxed);
         const bool silent = muted || (anySolo.load(std::memory_order_relaxed) && !soloed);
-        if (silent) continue;
+        auto storeStem = [&](const float* inL, const float* inR, float gain, float pan) {
+            if (!take || (!mixCapture->recordMulti() && !(rawTake && mixCapture->recordMaster()))) return;
+            auto* left = mixCapture->stem(0);
+            auto* right = mixCapture->stem(1);
+            const float angle = (pan + 1.0f) * 0.25f * juce::MathConstants<float>::pi;
+            for (int i = 0; i < count; ++i)
+            {
+                if (silent)
+                {
+                    left[i] = right[i] = 0.0f;
+                    continue;
+                }
+                if (monoSource)
+                {
+                    const float sample = inL ? inL[i] * gain : 0.0f;
+                    if (pan == 0.0f) left[i] = right[i] = sample;
+                    else { left[i] = sample * std::cos(angle); right[i] = sample * std::sin(angle); }
+                }
+                else
+                {
+                    const float mix = ((inL ? inL[i] : 0.0f) + (inR ? inR[i] : 0.0f)) * std::sqrt(2.0f);
+                    left[i] = mix * std::cos(angle) * gain;
+                    right[i] = mix * std::sin(angle) * gain;
+                }
+            }
+            if (mixCapture->recordMulti()) mixCapture->pushStereo(stripIndex, left, right, count);
+            if (rawTake && mixCapture->recordMaster()) mixCapture->addRawMaster(left, right, count);
+        };
+        if (silent)
+        {
+            storeStem(nullptr, nullptr, 1.0f, 0.0f);
+            continue;
+        }
         if (!panLive) scatter(count, 0, 1.0f, 1.0f);
         else for (int i = 0; i < count; ++i)
         {
@@ -594,6 +662,19 @@ void RealtimeHostProcessor::processStrips(ChainSnapshot& snapshot, AudioBuffer<f
                 }
             }
             scatter(1, i, leftGain, rightGain);
+        }
+        if (rawTake)
+        {
+            const float gain = strip.runtime ? strip.runtime->targetGain.load(std::memory_order_relaxed) : 1.0f;
+            const float pan = strip.runtime ? strip.runtime->targetPan.load(std::memory_order_relaxed) : 0.0f;
+            storeStem(mixCapture->dry(0), mixCapture->dry(1), gain, pan);
+        }
+        else if (take && mixCapture->recordMulti())
+        {
+            const float* inL = delayed.getNumChannels() > 0 ? delayed.getReadPointer(0) : nullptr;
+            const float* inR = delayed.getNumChannels() > 1 ? delayed.getReadPointer(1) : inL;
+            const float pan = strip.runtime ? strip.runtime->pan : 0.0f;
+            storeStem(inL, inR, 1.0f, pan);
         }
     }
     for (int ch = 0; ch < channels; ++ch) segment.copyFrom(ch, 0, mixBus, ch, 0, count);

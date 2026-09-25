@@ -789,20 +789,218 @@ void paintTemplatesIcon(juce::Graphics& graphics, juce::Rectangle<float> bounds)
     graphics.fillRect(front.getX() + 3.0f, front.getCentreY() - 1.0f, front.getWidth() - 6.0f, 1.4f);
 }
 
+void paintRecordIcon(juce::Graphics& graphics, juce::Rectangle<float> bounds)
+{
+    graphics.fillEllipse(bounds.reduced(2.0f));
+}
+
+class RecordPage : public juce::Component, private juce::Timer
+{
+public:
+    explicit RecordPage(AudioEngine& engineIn) : engine(engineIn)
+    {
+        for (auto* label : { &folderLabel, &formatLabel, &rateLabel, &iceHostLabel, &icePortLabel, &iceMountLabel, &iceUserLabel, &icePassLabel, &iceNameLabel, &deviceLabel, &midiLabel })
+            addAndMakeVisible(label);
+        folderLabel.setText("Folder", juce::dontSendNotification);
+        formatLabel.setText("Format", juce::dontSendNotification);
+        rateLabel.setText("MP3", juce::dontSendNotification);
+        iceHostLabel.setText("Icecast host", juce::dontSendNotification);
+        icePortLabel.setText("Port", juce::dontSendNotification);
+        iceMountLabel.setText("Mount", juce::dontSendNotification);
+        iceUserLabel.setText("User", juce::dontSendNotification);
+        icePassLabel.setText("Password", juce::dontSendNotification);
+        iceNameLabel.setText("Name", juce::dontSendNotification);
+        deviceLabel.setText("Stream device", juce::dontSendNotification);
+        midiLabel.setText("Mackie MIDI", juce::dontSendNotification);
+        addAndMakeVisible(folder);
+        addAndMakeVisible(browse);
+        addAndMakeVisible(format);
+        addAndMakeVisible(bitrate);
+        addAndMakeVisible(mixdown);
+        addAndMakeVisible(multi);
+        addAndMakeVisible(interleaved);
+        addAndMakeVisible(raw);
+        addAndMakeVisible(record);
+        addAndMakeVisible(iceHost);
+        addAndMakeVisible(icePort);
+        addAndMakeVisible(iceMount);
+        addAndMakeVisible(iceUser);
+        addAndMakeVisible(icePass);
+        addAndMakeVisible(iceName);
+        addAndMakeVisible(devices);
+        addAndMakeVisible(stream);
+        addAndMakeVisible(midi);
+        addAndMakeVisible(status);
+        browse.setButtonText("Browse");
+        record.setButtonText("Record");
+        stream.setButtonText("Stream");
+        mixdown.setButtonText("Master mixdown");
+        multi.setButtonText("Multitrack");
+        interleaved.setButtonText("One multichannel WAV");
+        raw.setButtonText("Raw (no effects)");
+        format.addItem("WAV", 1);
+        format.addItem("MP3", 2);
+        bitrate.addItem("128 kbps", 128);
+        bitrate.addItem("192 kbps", 192);
+        bitrate.addItem("320 kbps", 320);
+        icePass.setPasswordCharacter(0x2022);
+        auto* settings = getAppProperties().getUserSettings();
+        folder.setText(settings->getValue("recordFolder", juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile("LightHostModern").getChildFile("Recordings").getFullPathName()), juce::dontSendNotification);
+        format.setSelectedId(settings->getBoolValue("recordMp3", false) ? 2 : 1, juce::dontSendNotification);
+        bitrate.setSelectedId(settings->getIntValue("recordBitrate", 192), juce::dontSendNotification);
+        if (bitrate.getSelectedId() == 0) bitrate.setSelectedId(192, juce::dontSendNotification);
+        mixdown.setToggleState(settings->getBoolValue("recordMixdown", true), juce::dontSendNotification);
+        multi.setToggleState(settings->getBoolValue("recordMulti", false), juce::dontSendNotification);
+        interleaved.setToggleState(settings->getBoolValue("recordInterleaved", false), juce::dontSendNotification);
+        raw.setToggleState(settings->getBoolValue("recordRaw", false), juce::dontSendNotification);
+        iceHost.setText(settings->getValue("icecastHost"), juce::dontSendNotification);
+        icePort.setText(settings->getValue("icecastPort", "8000"), juce::dontSendNotification);
+        iceMount.setText(settings->getValue("icecastMount", "/live"), juce::dontSendNotification);
+        iceUser.setText(settings->getValue("icecastUser", "source"), juce::dontSendNotification);
+        iceName.setText(settings->getValue("icecastName", "LightHostModern"), juce::dontSendNotification);
+        browse.onClick = [this] {
+            chooser = std::make_unique<juce::FileChooser>("Recordings", juce::File(folder.getText()), "*", true);
+            chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories, [this](const juce::FileChooser& box) {
+                if (box.getResult() != juce::File()) folder.setText(box.getResult().getFullPathName(), juce::dontSendNotification);
+            });
+        };
+        format.onChange = [this] { interleaved.setEnabled(format.getSelectedId() != 2 && !engine.isRecording()); };
+        record.onClick = [this] { toggleRecord(); };
+        stream.onClick = [this] { toggleStream(); };
+        devices.onChange = [this] {
+            if (applying) return;
+            getAppProperties().getUserSettings()->setValue("streamDevice", devices.getSelectedId() > 1 ? devices.getText() : juce::String());
+            getAppProperties().getUserSettings()->saveIfNeeded();
+        };
+        midi.onChange = [this] {
+            if (applying) return;
+            if (midi.getSelectedId() <= 1) engine.closeMackie();
+            else if (const auto error = engine.openMackie(midi.getSelectedId() - 2); error.isNotEmpty()) status.setText(error, juce::dontSendNotification);
+        };
+        status.setText("Password is not encrypted on the network.", juce::dontSendNotification);
+        startTimerHz(4);
+    }
+
+    void refresh()
+    {
+        applying = true;
+        devices.clear(juce::dontSendNotification);
+        devices.addItem("Off", 1);
+        const auto names = engine.streamDeviceNames();
+        for (int i = 0; i < names.size(); ++i) devices.addItem(names[i], i + 2);
+        const auto savedDevice = getAppProperties().getUserSettings()->getValue("streamDevice");
+        int deviceId = 1;
+        for (int i = 0; i < names.size(); ++i) if (names[i] == savedDevice) deviceId = i + 2;
+        devices.setSelectedId(deviceId, juce::dontSendNotification);
+        midi.clear(juce::dontSendNotification);
+        midi.addItem("Off", 1);
+        const auto inputs = engine.midiInputNames();
+        for (int i = 0; i < inputs.size(); ++i) midi.addItem(inputs[i], i + 2);
+        if (midi.getSelectedId() == 0) midi.setSelectedId(1, juce::dontSendNotification);
+        applying = false;
+        interleaved.setEnabled(format.getSelectedId() != 2 && !engine.isRecording());
+        raw.setEnabled(!engine.isRecording());
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced(16);
+        auto row = [&](juce::Component& label, juce::Component& field) {
+            auto line = area.removeFromTop(28);
+            label.setBounds(line.removeFromLeft(120));
+            field.setBounds(line);
+            area.removeFromTop(6);
+        };
+        row(folderLabel, folder);
+        browse.setBounds(area.removeFromTop(28).removeFromLeft(120));
+        area.removeFromTop(6);
+        row(formatLabel, format);
+        row(rateLabel, bitrate);
+        auto checks = area.removeFromTop(28);
+        mixdown.setBounds(checks.removeFromLeft(150));
+        multi.setBounds(checks.removeFromLeft(140));
+        interleaved.setBounds(checks.removeFromLeft(190));
+        raw.setBounds(checks.removeFromLeft(160));
+        area.removeFromTop(6);
+        record.setBounds(area.removeFromTop(32).removeFromLeft(140));
+        area.removeFromTop(12);
+        row(iceHostLabel, iceHost);
+        row(icePortLabel, icePort);
+        row(iceMountLabel, iceMount);
+        row(iceUserLabel, iceUser);
+        row(icePassLabel, icePass);
+        row(iceNameLabel, iceName);
+        row(deviceLabel, devices);
+        stream.setBounds(area.removeFromTop(32).removeFromLeft(140));
+        area.removeFromTop(8);
+        row(midiLabel, midi);
+        status.setBounds(area.removeFromTop(48));
+    }
+
+private:
+    void timerCallback() override { if (isShowing()) status.setText(engine.recordingStatus().isEmpty() ? status.getText() : engine.recordingStatus(), juce::dontSendNotification); }
+    void save()
+    {
+        auto* settings = getAppProperties().getUserSettings();
+        settings->setValue("recordFolder", folder.getText());
+        settings->setValue("recordMp3", format.getSelectedId() == 2);
+        settings->setValue("recordBitrate", bitrate.getSelectedId());
+        settings->setValue("recordMixdown", mixdown.getToggleState());
+        settings->setValue("recordMulti", multi.getToggleState());
+        settings->setValue("recordInterleaved", interleaved.getToggleState());
+        settings->setValue("recordRaw", raw.getToggleState());
+        settings->setValue("icecastHost", iceHost.getText());
+        settings->setValue("icecastPort", icePort.getText());
+        settings->setValue("icecastMount", iceMount.getText());
+        settings->setValue("icecastUser", iceUser.getText());
+        settings->setValue("icecastName", iceName.getText());
+        settings->setValue("icecastPassword", icePass.getText());
+        settings->saveIfNeeded();
+    }
+    void toggleRecord()
+    {
+        if (engine.isRecording()) { engine.stopRecording(); record.setButtonText("Record"); raw.setEnabled(true); return; }
+        save();
+        const auto error = engine.startRecording(juce::File(folder.getText()), format.getSelectedId() == 2, bitrate.getSelectedId() * 1000,
+                                                  mixdown.getToggleState(), multi.getToggleState(), interleaved.getToggleState(), raw.getToggleState(),
+                                                  iceHost.getText().trim(), icePort.getText().getIntValue(), iceMount.getText().trim(), iceUser.getText().trim(), icePass.getText(), iceName.getText().trim());
+        if (error.isNotEmpty()) { status.setText(error, juce::dontSendNotification); return; }
+        record.setButtonText("Stop");
+        raw.setEnabled(false);
+    }
+    void toggleStream()
+    {
+        if (engine.isStreaming()) { engine.stopStream(); stream.setButtonText("Stream"); return; }
+        const int id = devices.getSelectedId();
+        if (id <= 1) { status.setText("Choose a stream device. Install a virtual cable so other apps can select it.", juce::dontSendNotification); return; }
+        if (const auto error = engine.startStream(devices.getText()); error.isNotEmpty()) status.setText(error, juce::dontSendNotification);
+        else { stream.setButtonText("Stop stream"); status.setText("Streaming. Other apps select the cable input.", juce::dontSendNotification); }
+    }
+
+    AudioEngine& engine;
+    juce::Label folderLabel, formatLabel, rateLabel, iceHostLabel, icePortLabel, iceMountLabel, iceUserLabel, icePassLabel, iceNameLabel, deviceLabel, midiLabel, status;
+    juce::TextEditor folder, iceHost, icePort, iceMount, iceUser, icePass, iceName;
+    juce::ComboBox format, bitrate, devices, midi;
+    juce::ToggleButton mixdown, multi, interleaved, raw;
+    juce::TextButton browse, record, stream;
+    std::unique_ptr<juce::FileChooser> chooser;
+    bool applying = false;
+};
+
 class Shell : public juce::Component, public juce::DragAndDropContainer, private juce::Timer
 {
 public:
     Shell(AudioEngine& engineIn, std::function<void()> refreshTray)
         : engine(engineIn), mixer(engineIn), templates(engineIn), installed(engineIn), audio(engineIn), dashboard(engineIn),
-          settings(engineIn, std::move(refreshTray)), diagnostics(engineIn)
+          settings(engineIn, std::move(refreshTray)), diagnostics(engineIn), record(engineIn)
     {
         setLookAndFeel(&shellLook());
         juce::LookAndFeel::setDefaultLookAndFeel(&shellLook());
-        const char* names[] = { "Mixer", "Templates", "VST Plugins", "Audio", "Dashboard", "Settings", "Diagnostics", "Support" };
+        const char* names[] = { "Mixer", "Templates", "VST Plugins", "Audio", "Dashboard", "Settings", "Diagnostics", "Support", "Record" };
         const std::function<void(juce::Graphics&, juce::Rectangle<float>)> icons[] = {
-            paintMixerIcon, paintTemplatesIcon, paintPluginIcon, paintAudioIcon, paintDashboardIcon, paintSettingsIcon, paintDiagnosticsIcon, paintSupportIcon
+            paintMixerIcon, paintTemplatesIcon, paintPluginIcon, paintAudioIcon, paintDashboardIcon, paintSettingsIcon, paintDiagnosticsIcon, paintSupportIcon, paintRecordIcon
         };
-        for (int i = 0; i < 8; ++i)
+        for (int i = 0; i < 9; ++i)
         {
             titles[i] = names[i];
             rail[i].setTooltip(titles[i]);
@@ -839,11 +1037,11 @@ public:
     }
 
 private:
-    std::array<juce::Component*, 8> pages() { return { &mixer, &templates, &installed, &audio, &dashboard, &settings, &diagnostics, &support }; }
+    std::array<juce::Component*, 9> pages() { return { &mixer, &templates, &installed, &audio, &dashboard, &settings, &diagnostics, &support, &record }; }
     void applyRail()
     {
         collapse.setButtonText(collapsed ? ">" : "<");
-        for (int i = 0; i < 8; ++i)
+        for (int i = 0; i < 9; ++i)
         {
             rail[i].showIcon = collapsed;
             rail[i].setButtonText(collapsed ? juce::String() : titles[i]);
@@ -853,7 +1051,7 @@ private:
     {
         current = index;
         auto shown = pages();
-        for (int i = 0; i < 8; ++i)
+        for (int i = 0; i < 9; ++i)
         {
             shown[i]->setVisible(i == index);
             rail[i].setToggleState(i == index, juce::dontSendNotification);
@@ -869,6 +1067,7 @@ private:
         else if (current == 4) dashboard.refresh();
         else if (current == 5) settings.refresh();
         else if (current == 6) diagnostics.refresh();
+        else if (current == 8) record.refresh();
     }
     void timerCallback() override
     {
@@ -892,9 +1091,10 @@ private:
     SettingsPage settings;
     DiagnosticsPage diagnostics;
     SupportPage support;
-    RailButton rail[8];
+    RecordPage record;
+    RailButton rail[9];
     juce::TextButton collapse;
-    juce::String titles[8];
+    juce::String titles[9];
     bool collapsed = false;
     juce::TooltipWindow tooltips { this, 500 };
     int current = 0;

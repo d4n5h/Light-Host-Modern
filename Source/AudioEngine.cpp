@@ -1,5 +1,8 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "AudioEngine.h"
+#include "MixWriter.h"
+#include "StreamOutput.h"
+#include "MackieSurface.h"
 #include "PluginStateCapture.h"
 #include "PluginWindow.h"
 #include "RuntimeProfile.h"
@@ -231,6 +234,11 @@ AudioEngine::AudioEngine(bool startInSafeMode, bool shouldRestoreActivePluginsOn
             lightHostModernLog("Chain profile catalog: " + error);
     }
     deviceController.start(safeMode, lightHostModern::RuntimeProfile::current().noAudio);
+    mixCapture = std::make_unique<MixCapture>();
+    mixWriter = std::make_unique<MixWriter>(*mixCapture);
+    streamOutput = std::make_unique<StreamOutput>();
+    mackie = std::make_unique<MackieSurface>(*this);
+    hostProcessor.setMixCapture(mixCapture.get());
     player.setProcessor(&hostProcessor);
     deviceManager.addAudioCallback(&player);
     deviceManager.addChangeListener(this);
@@ -242,6 +250,9 @@ AudioEngine::AudioEngine(bool startInSafeMode, bool shouldRestoreActivePluginsOn
 
 AudioEngine::~AudioEngine()
 {
+	stopRecording();
+	stopStream();
+	closeMackie();
 	cancelPluginScan();
 	stopTimer(audioWatchdogTimerId);
 	stopTimer(diagnosticsTimerId);
@@ -753,6 +764,8 @@ void AudioEngine::loadActivePlugins()
             if (slotStrips[index] == strip.id) item.slots.push_back(snapshot->slots[index]);
         snapshot->strips.push_back(std::move(item));
     }
+    for (size_t index = 0; index < snapshot->slots.size() && index < slotStrips.size(); ++index)
+        if (slotStrips[index] == lightHostModern::masterStripId) snapshot->masterSlots.push_back(snapshot->slots[index]);
     {
         RealtimeHostProcessor::ScopedSuspension suspension(hostProcessor);
         if (previous)
@@ -1296,7 +1309,7 @@ String AudioEngine::addKnownPluginAt(int sortedIndex, const String& stripId, con
 {
     if (!isSessionWritable()) return "session_read_only";
     instances.ensureStrips();
-    if (!instances.findStrip(stripId)) return "strip_not_found";
+    if (stripId != lightHostModern::masterStripId && !instances.findStrip(stripId)) return "strip_not_found";
     const auto known = getKnownPluginsSorted();
     if (!isPositiveAndBelow(sortedIndex, (int) known.size())) return "known_plugin_not_found";
     chainHistory.record(instances);
@@ -1599,6 +1612,107 @@ String AudioEngine::orderStrips(const std::vector<std::pair<String, String>>& or
     return {};
 }
 
+void AudioEngine::setStripGainLive(const String& id, float gainDb)
+{
+    gainDb = lightHostModern::clampGainDb(gainDb);
+    if (auto* strip = const_cast<lightHostModern::ChainStrip*>(instances.findStrip(id))) strip->gainDb = gainDb;
+    hostProcessor.setStripGain(id, lightHostModern::gainFromDb(gainDb));
+    surfaceGenerationValue.fetch_add(1);
+}
+
+void AudioEngine::setStripPanLive(const String& id, float pan)
+{
+    pan = lightHostModern::clampPan(pan);
+    if (auto* strip = const_cast<lightHostModern::ChainStrip*>(instances.findStrip(id))) strip->pan = pan;
+    hostProcessor.setStripPan(id, pan);
+    surfaceGenerationValue.fetch_add(1);
+}
+
+void AudioEngine::setMasterGainLive(float gainDb)
+{
+    instances.masterGainDb = lightHostModern::clampGainDb(gainDb);
+    hostProcessor.setMasterGain(lightHostModern::gainFromDb(instances.masterGainDb));
+    surfaceGenerationValue.fetch_add(1);
+}
+
+String AudioEngine::startRecording(const File& folder, bool mp3, int bitrate, bool mixdown, bool multi, bool interleaved, bool raw,
+                                    const String& icecastHost, int icecastPort, const String& mount, const String& user, const String& password, const String& streamName)
+{
+    stopRecording();
+    if (!mixdown && !multi && icecastHost.isEmpty()) return "Nothing to record";
+    auto* device = deviceManager.getCurrentAudioDevice();
+    const double rate = device ? device->getCurrentSampleRate() : 48000.0;
+    const int block = device ? device->getCurrentBufferSizeSamples() : 512;
+    {
+        RealtimeHostProcessor::ScopedSuspension suspension(hostProcessor);
+        mixCapture->prepare(juce::jmax(block, 512), (int) instances.strips.size());
+        mixCapture->arm(mixdown || icecastHost.isNotEmpty(), multi, raw);
+    }
+    TakeRequest request;
+    request.folder = folder;
+    request.mp3 = mp3;
+    request.bitrate = bitrate;
+    request.mixdown = mixdown;
+    request.multitrack = multi;
+    request.interleaved = interleaved && !mp3;
+    request.raw = raw;
+    request.sampleRate = rate > 0 ? rate : 48000.0;
+    for (const auto& strip : instances.strips) request.names.push_back(strip.name);
+    request.icecastHost = icecastHost;
+    request.icecastPort = icecastPort;
+    request.icecastMount = mount;
+    request.icecastUser = user;
+    request.icecastPassword = password;
+    request.icecastName = streamName.isEmpty() ? "LightHostModern" : streamName;
+    if (const auto error = mixWriter->start(request); error.isNotEmpty())
+    {
+        mixCapture->disarm();
+        return error;
+    }
+    return {};
+}
+
+void AudioEngine::stopRecording()
+{
+    if (mixWriter) mixWriter->stop();
+    if (mixCapture) mixCapture->disarm();
+}
+
+void AudioEngine::pauseRecording() { if (mixCapture) mixCapture->setRecordPaused(true); }
+void AudioEngine::resumeRecording() { if (mixCapture) mixCapture->setRecordPaused(false); }
+bool AudioEngine::isRecordingPaused() const { return mixCapture && mixCapture->isRecordPaused(); }
+
+bool AudioEngine::isRecording() const { return mixWriter && mixWriter->running(); }
+String AudioEngine::recordingStatus() const { return mixWriter ? mixWriter->status() : String(); }
+
+StringArray AudioEngine::streamDeviceNames() { return streamOutput ? streamOutput->deviceNames() : StringArray(); }
+String AudioEngine::liveOutputName()
+{
+    if (auto* device = deviceManager.getCurrentAudioDevice()) return device->getName();
+    return {};
+}
+
+String AudioEngine::startStream(const String& deviceName)
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+    const double rate = device ? device->getCurrentSampleRate() : 48000.0;
+    if (!mixCapture->armed())
+    {
+        RealtimeHostProcessor::ScopedSuspension suspension(hostProcessor);
+        mixCapture->prepare(device ? device->getCurrentBufferSizeSamples() : 512, (int) instances.strips.size());
+    }
+    return streamOutput->start(*mixCapture, deviceName, liveOutputName(), rate > 0 ? rate : 48000.0);
+}
+
+void AudioEngine::stopStream() { if (streamOutput) streamOutput->stop(); }
+void AudioEngine::pauseStream() { if (mixCapture) mixCapture->setStreamPaused(true); }
+void AudioEngine::resumeStream() { if (mixCapture) mixCapture->setStreamPaused(false); }
+bool AudioEngine::isStreaming() const { return streamOutput && streamOutput->running(); }
+bool AudioEngine::isStreamPaused() const { return mixCapture && mixCapture->isStreamPaused(); }
+StringArray AudioEngine::midiInputNames() const { return mackie ? mackie->inputNames() : StringArray(); }
+String AudioEngine::openMackie(int deviceIndex) { return mackie ? mackie->open(deviceIndex) : "MIDI unavailable"; }
+void AudioEngine::closeMackie() { if (mackie) mackie->close(); }
+
 String AudioEngine::setMasterGain(float gainDb)
 {
     if (!isSessionWritable()) return "session_read_only";
@@ -1615,7 +1729,7 @@ String AudioEngine::setMasterGain(float gainDb)
 String AudioEngine::movePluginToStrip(const String& instanceId, const String& stripId, const String& beforeInstanceId)
 {
     if (!isSessionWritable()) return "session_read_only";
-    if (!instances.findStrip(stripId)) return "strip_not_found";
+    if (stripId != lightHostModern::masterStripId && !instances.findStrip(stripId)) return "strip_not_found";
     const int from = instances.indexOf(instanceId);
     if (from < 0) return "instance_not_found";
     chainHistory.record(instances);

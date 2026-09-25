@@ -13,6 +13,11 @@
 #include "ChainProfileStore.h"
 #include "TemplateStore.h"
 #include "ChainHistory.h"
+#include "MixCapture.h"
+
+class MixWriter;
+class StreamOutput;
+class MackieSurface;
 
 ApplicationProperties& getAppProperties();
 
@@ -151,6 +156,29 @@ public:
 	float getStripLevel(const String& id) const { return hostProcessor.getStripLevel(id); }
 	float getMasterLevel() const { return hostProcessor.getMasterLevel(); }
 	String setMasterGain(float gainDb);
+	void setStripGainLive(const String& id, float gainDb);
+	void setStripPanLive(const String& id, float pan);
+	void setMasterGainLive(float gainDb);
+	uint64 surfaceGeneration() const noexcept { return surfaceGenerationValue.load(); }
+	juce::String startRecording(const juce::File& folder, bool mp3, int bitrate, bool mixdown, bool multi, bool interleaved, bool raw,
+	                            const juce::String& icecastHost, int icecastPort, const juce::String& mount, const juce::String& user, const juce::String& password, const juce::String& streamName);
+	void stopRecording();
+	void pauseRecording();
+	void resumeRecording();
+	bool isRecording() const;
+	bool isRecordingPaused() const;
+	juce::String recordingStatus() const;
+	juce::StringArray streamDeviceNames();
+	juce::String liveOutputName();
+	juce::String startStream(const juce::String& deviceName);
+	void stopStream();
+	void pauseStream();
+	void resumeStream();
+	bool isStreaming() const;
+	bool isStreamPaused() const;
+	juce::StringArray midiInputNames() const;
+	juce::String openMackie(int deviceIndex);
+	void closeMackie();
 	String movePluginToStrip(const String& instanceId, const String& stripId, const String& beforeInstanceId);
 	bool undoChain();
 	bool redoChain();
@@ -261,6 +289,7 @@ private:
 	uint64 settingsFlushCount = 0;
 	uint64 pluginStateSaveCount = 0;
 	uint64 chainVersion = 0;
+	std::atomic<uint64> surfaceGenerationValue { 0 };
 	uint64 profileVersion = 0;
 	uint64 pluginDatabaseVersion = 0;
 
@@ -282,6 +311,10 @@ private:
 	double stateCaptureDue = 0;
 	bool sessionLoadSuppressed = false;
 	KnownPluginList::SortMethod pluginSortMethod = KnownPluginList::sortByManufacturer;
+	std::unique_ptr<MixCapture> mixCapture;
+	std::unique_ptr<MixWriter> mixWriter;
+	std::unique_ptr<StreamOutput> streamOutput;
+	std::unique_ptr<MackieSurface> mackie;
 	RealtimeHostProcessor hostProcessor;
 	HostAudioPlayer player;
 	mutable lightHostModern::ProcessMemory cachedMemory;

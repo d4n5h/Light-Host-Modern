@@ -13,6 +13,7 @@
 #include "BoundedMidi.h"
 #include "RealtimeAudit.h"
 #include "AudioMeters.h"
+#include "MixCapture.h"
 
 using namespace juce;
 
@@ -112,6 +113,7 @@ struct ChainSnapshot
 	uint64 reusedSlots = 0;
 	uint64 rebuiltSlots = 0;
 	std::vector<std::shared_ptr<PluginSlot>> slots;
+	std::vector<std::shared_ptr<PluginSlot>> masterSlots;
 	std::vector<StripSnapshot> strips;
 };
 
@@ -169,6 +171,7 @@ public:
 		return found != stripRuntimes.end() && found->second ? found->second->level.load(std::memory_order_relaxed) : 0.0f;
 	}
 	float getMasterLevel() const noexcept { return masterLevel.load(std::memory_order_relaxed); }
+	void setMixCapture(MixCapture* capture) noexcept { mixCapture = capture; }
 	void setMonoInputs(bool value) noexcept { monoInputs.store(value, std::memory_order_relaxed); }
     bool isMonoInputs() const noexcept { return monoInputs.load(std::memory_order_relaxed); }
     void setMonoOutput(bool value) noexcept { monoOutput.store(value, std::memory_order_relaxed); }
@@ -243,7 +246,7 @@ private:
 	std::atomic<float> lastOutputLevel { 0.0f };
 	double currentSampleRate = 44100.0;
 	int currentBlockSize = 512;
-	AudioBuffer<float> scratchBuffer, stripBus, mixBus;
+	AudioBuffer<float> scratchBuffer, stripBus, mixBus, masterInsert, masterView;
 	std::atomic<float> masterTarget { 1.0f };
 	std::atomic<float> masterLevel { 0.0f };
 	std::atomic<bool> anySolo { false };
@@ -258,7 +261,8 @@ private:
     int preparedOutputChannels = 2, mainOutputLeft = 0, mainOutputRight = 1;
     std::atomic<bool> monoOutput{false};
     float outputMonoMix = 0.0f;
-    std::atomic<bool> monoInputs{false};
+	std::atomic<bool> monoInputs{false};
+	MixCapture* mixCapture = nullptr;
     float monoMix = 0.0f;
     std::vector<float> monoGains;
     lightHostModern::PresentationPeak inputPresentation, outputPresentation;

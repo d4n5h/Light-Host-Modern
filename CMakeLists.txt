@@ -139,6 +139,12 @@ if(BUILD_TESTING)
     target_compile_options(LightHostModernMixerLayoutTests PRIVATE /utf-8)
     target_link_libraries(LightHostModernMixerLayoutTests PRIVATE juce::juce_gui_extra juce::juce_audio_utils)
     add_test(NAME mixer-strip-fader-alignment COMMAND LightHostModernMixerLayoutTests)
+    add_executable(LightHostModernRecordTests Tests/RecordStreamTests.cpp Source/MixCapture.cpp)
+    target_include_directories(LightHostModernRecordTests PRIVATE Source)
+    target_compile_definitions(LightHostModernRecordTests PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0)
+    target_compile_options(LightHostModernRecordTests PRIVATE /utf-8)
+    target_link_libraries(LightHostModernRecordTests PRIVATE juce::juce_audio_utils)
+    add_test(NAME record-stream-mackie COMMAND LightHostModernRecordTests)
     add_executable(LightHostModernChainHistoryTests Tests/ChainHistoryTests.cpp)
     target_include_directories(LightHostModernChainHistoryTests PRIVATE Source)
     target_compile_definitions(LightHostModernChainHistoryTests PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0)
@@ -275,6 +281,12 @@ add_library(LightHostModernCore STATIC)
 target_sources(LightHostModernCore
     PRIVATE
         Source/AudioEngine.cpp
+        Source/MixCapture.cpp
+        Source/MixWriter.cpp
+        Source/Mp3Sink.cpp
+        Source/IcecastSource.cpp
+        Source/StreamOutput.cpp
+        Source/MackieSurface.cpp
         Source/SessionStore.cpp
         Source/ChainProfileStore.cpp
         Source/TemplateStore.cpp
@@ -318,7 +330,10 @@ target_link_libraries(LightHostModernCore
         juce::juce_gui_extra
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
-        juce::juce_recommended_warning_flags)
+        juce::juce_recommended_warning_flags
+        mfplat
+        mfreadwrite
+        mfuuid)
 
 juce_add_gui_app(LightHostModern
     BUNDLE_ID "com.lighthost.app"
