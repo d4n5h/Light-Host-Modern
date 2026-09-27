@@ -11,12 +11,21 @@ inline StripLayout layoutChannelStrip(juce::Rectangle<int> area, bool showPan)
     area = area.reduced(8);
     StripLayout layout;
     layout.name = area.removeFromTop(28);
-    layout.route = area.removeFromTop(32);
+    if (showPan)
+    {
+        area.removeFromTop(10);
+        layout.route = area.removeFromTop(32);
+        area.removeFromTop(8);
+    }
     auto faderArea = area.removeFromBottom(220);
     layout.gain = faderArea.removeFromBottom(20);
     layout.fader = faderArea;
+    area.removeFromBottom(10);
     if (showPan)
+    {
         layout.pan = area.removeFromBottom(72);
+        area.removeFromBottom(8);
+    }
     layout.inserts = area;
     return layout;
 }
@@ -143,6 +152,12 @@ class StripNameButton : public juce::TextButton
 {
 public:
     std::function<juce::String()> dragDescription;
+    void paintButton(juce::Graphics& graphics, bool over, bool down) override
+    {
+        graphics.setColour(down ? studio::text.darker(0.15f) : over ? juce::Colours::white : studio::text);
+        graphics.setFont(juce::Font(juce::FontOptions(13.0f)));
+        graphics.drawFittedText(getButtonText(), getLocalBounds().reduced(6, 0), juce::Justification::centred, 1);
+    }
     void mouseDrag(const juce::MouseEvent& event) override
     {
         if (!dragDescription || event.getDistanceFromDragStart() <= 8) return;
@@ -520,6 +535,7 @@ private:
     juce::OwnedArray<juce::TextButton> groupHeaders;
     juce::StringArray collapsed;
     juce::String layoutKey;
+    int toolbarBottom = 0;
     uint64 seenSurface = 0;
     bool applying = false;
 };

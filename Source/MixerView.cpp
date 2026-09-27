@@ -579,6 +579,14 @@ void ChannelStripComponent::paint(juce::Graphics& graphics)
     auto card = getLocalBounds().toFloat().reduced(2);
     graphics.setColour(stripFill(color, master ? juce::String() : colourHex));
     graphics.fillRoundedRectangle(card, 8.0f);
+    const auto tint = !master && colourHex.length() == 6 ? juce::Colour::fromString("ff" + colourHex)
+        : !master && color > 0 ? stripPalette(color) : studio::accent;
+    juce::Path header;
+    header.addRoundedRectangle(card.getX(), card.getY(), card.getWidth(), 36.0f, 8.0f, 8.0f, true, true, false, false);
+    graphics.setColour(studio::background.interpolatedWith(tint, 0.72f));
+    graphics.fillPath(header);
+    graphics.setColour(tint);
+    graphics.fillRect(card.getX(), card.getY() + 8.0f, 3.0f, 20.0f);
     graphics.setColour(studio::line);
     graphics.drawRoundedRectangle(card, 8.0f, 1.0f);
     if (!meterBounds.isEmpty())
@@ -648,12 +656,13 @@ void ChannelStripComponent::resized()
     auto insertsArea = layout.inserts;
     if (!master)
     {
-        outputBox.setBounds(insertsArea.removeFromTop(26).reduced(0, 1));
-        if (outputBox2.isVisible()) outputBox2.setBounds(insertsArea.removeFromTop(26).reduced(0, 1));
+        outputBox.setBounds(insertsArea.removeFromTop(28).reduced(0, 3));
+        if (outputBox2.isVisible()) outputBox2.setBounds(insertsArea.removeFromTop(28).reduced(0, 3));
+        insertsArea.removeFromTop(6);
     }
-    const int rowHeight = 26;
-    if (master) insertsArea.removeFromBottom(16);
-    plusButton.setBounds(insertsArea.removeFromBottom(rowHeight).reduced(0, 1));
+    const int rowHeight = 30;
+    insertsArea.removeFromBottom(master ? 16 : 6);
+    plusButton.setBounds(insertsArea.removeFromBottom(rowHeight).reduced(0, 2));
     insertViewport.setBounds(insertsArea);
     const int contentHeight = inserts.size() * rowHeight;
     const bool scroll = contentHeight > insertsArea.getHeight();
@@ -1056,6 +1065,8 @@ void MixerView::startSavedStream()
 void MixerView::paint(juce::Graphics& graphics)
 {
     graphics.fillAll(studio::background);
+    graphics.setColour(studio::line);
+    graphics.fillRect(8, toolbarBottom, getWidth() - 16, 1);
 }
 
 void MixerView::refresh()
@@ -1232,6 +1243,8 @@ void MixerView::resized()
 {
     auto area = getLocalBounds().reduced(8);
     auto transport = area.removeFromTop(36);
+    toolbarBottom = transport.getBottom() + 4;
+    area.removeFromTop(8);
     profileLabel.setBounds(transport.removeFromLeft(52));
     profiles.setBounds(transport.removeFromLeft(200).reduced(0, 4));
     transport.removeFromLeft(6);
