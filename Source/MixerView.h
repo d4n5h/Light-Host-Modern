@@ -276,6 +276,8 @@ private:
     juce::ComboBox outputBox, outputBox2;
     MarkButton muteStrip { "M", juce::Colour(0xffc44545) }, soloStrip { "S", juce::Colour(0xffd4a017) };
     juce::TextButton plusButton;
+    juce::Component insertList;
+    juce::Viewport insertViewport;
     juce::Slider pan, fader;
     juce::OwnedArray<InsertButton> inserts;
     std::vector<juce::String> insertIds;

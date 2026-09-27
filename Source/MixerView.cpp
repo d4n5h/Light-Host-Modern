@@ -249,6 +249,10 @@ ChannelStripComponent::ChannelStripComponent(AudioEngine& engineIn, bool masterI
         if (master) engine.setGlobalMuted(muteStrip.getToggleState());
         else engine.setStripMuted(stripId, muteStrip.getToggleState());
     };
+    insertViewport.setViewedComponent(&insertList, false);
+    insertViewport.setScrollBarsShown(true, false);
+    insertViewport.setScrollOnDragMode(juce::Viewport::ScrollOnDragMode::never);
+    addAndMakeVisible(insertViewport);
     addAndMakeVisible(plusButton);
     plusButton.setButtonText("+");
     plusButton.onClick = [this] { PluginBrowser::open(engine, master ? juce::String(lightHostModern::masterStripId) : stripId); };
@@ -357,7 +361,7 @@ void ChannelStripComponent::setMaster(float gainDb, const std::vector<lightHostM
         button->onMenu = [this, id = plugin.id] { showPluginMenu(id); };
         button->onHover = [this](int y) { if (y < 0) clearDrag(); else showPluginGap(y); };
         button->onDrop = [this](const juce::String& source) { dropPlugin(source); };
-        addAndMakeVisible(button);
+        insertList.addAndMakeVisible(button);
     }
     resized();
 }
@@ -472,7 +476,7 @@ void ChannelStripComponent::setStrip(const lightHostModern::ChainStrip& strip, c
         button->onMenu = [this, id = plugin.id] { showPluginMenu(id); };
         button->onHover = [this](int y) { if (y < 0) clearDrag(); else showPluginGap(y); };
         button->onDrop = [this](const juce::String& source) { dropPlugin(source); };
-        addAndMakeVisible(button);
+        insertList.addAndMakeVisible(button);
     }
     resized();
 }
@@ -625,14 +629,15 @@ void ChannelStripComponent::resized()
         if (outputBox2.isVisible()) outputBox2.setBounds(insertsArea.removeFromTop(26).reduced(0, 1));
     }
     const int rowHeight = 26;
-    auto list = insertsArea;
-    list.setHeight(juce::jmax(0, list.getHeight() - rowHeight));
+    plusButton.setBounds(insertsArea.removeFromBottom(rowHeight).reduced(0, 1));
+    insertViewport.setBounds(insertsArea);
+    const int contentHeight = inserts.size() * rowHeight;
+    const bool scroll = contentHeight > insertsArea.getHeight();
+    const int width = juce::jmax(1, insertsArea.getWidth() - (scroll ? insertViewport.getScrollBarThickness() : 0));
+    insertList.setSize(width, juce::jmax(insertsArea.getHeight(), contentHeight));
+    auto list = insertList.getLocalBounds();
     for (auto* button : inserts)
-    {
-        if (list.getHeight() < rowHeight) break;
         button->setBounds(list.removeFromTop(rowHeight).reduced(0, 1));
-    }
-    plusButton.setBounds((list.getHeight() >= rowHeight ? list.removeFromTop(rowHeight) : insertsArea.removeFromBottom(rowHeight)).reduced(0, 1));
 }
 
 bool ChannelStripComponent::isInterestedInDragSource(const SourceDetails& details)
@@ -658,7 +663,7 @@ void ChannelStripComponent::updateDrag(const SourceDetails& details)
         return;
     }
     stripEdge = -1;
-    showPluginGap(details.localPosition.y);
+    showPluginGap(details.localPosition.y - insertViewport.getY() + insertViewport.getViewPositionY());
 }
 
 void ChannelStripComponent::showPluginGap(int y)

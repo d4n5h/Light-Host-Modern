@@ -967,7 +967,6 @@ void AudioEngine::savePluginStates()
     syncEditorWindows(true);
     if (!instances.writable || sessionLoadSuppressed) return;
     jassert(MessageManager::getInstance()->isThisTheMessageThread());
-    RealtimeHostProcessor::ScopedSuspension suspension(hostProcessor);
     const auto snapshot = hostProcessor.getActiveSnapshot();
     if (!snapshot) return;
     bool captured = false;

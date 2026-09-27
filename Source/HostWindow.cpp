@@ -1108,6 +1108,7 @@ HostWindow::HostWindow(AudioEngine& engine, std::function<void()> refreshTray)
     setUsingNativeTitleBar(true);
     setContentOwned(new Shell(engine, std::move(refreshTray)), true);
     setResizable(true, true);
+    setResizeLimits(728, 679, 8192, 8192);
     centreWithSize(1180, 760);
     setVisible(true);
 }

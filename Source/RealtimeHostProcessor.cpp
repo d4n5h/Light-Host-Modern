@@ -371,6 +371,21 @@ void RealtimeHostProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&
             for (int ch = 0; ch < channels; ++ch) segment.getWritePointer(ch)[i] *= masterGain;
         }
         {
+            const int left = mainOutputLeft >= 0 ? mainOutputLeft : 0;
+            const int right = mainOutputRight >= 0 && mainOutputRight < channels ? mainOutputRight : jmin(1, channels - 1);
+            auto pin = [](float sample) { return std::abs(sample) <= 1.0f ? sample : std::copysign(1.0f, sample); };
+            if (left < channels)
+            {
+                auto* samples = segment.getWritePointer(left);
+                for (int i = 0; i < count; ++i) samples[i] = pin(samples[i]);
+            }
+            if (right != left && right < channels)
+            {
+                auto* samples = segment.getWritePointer(right);
+                for (int i = 0; i < count; ++i) samples[i] = pin(samples[i]);
+            }
+        }
+        {
             const float peak = segment.getMagnitude(0, count);
             const float previous = masterLevel.load(std::memory_order_relaxed);
             const float decay = std::exp(-static_cast<float>(count) / static_cast<float>(currentSampleRate) / 0.3f);
