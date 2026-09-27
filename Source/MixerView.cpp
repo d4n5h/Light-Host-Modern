@@ -6,14 +6,7 @@ namespace
 juce::String panText(double value)
 {
     const int amount = (int) std::lround(std::abs(value) * 100.0);
-    if (amount == 0) return "pan 0";
-    return value < 0 ? "pan < " + juce::String(amount) : "pan > " + juce::String(amount);
-}
-
-juce::String panEdit(double value)
-{
-    const int amount = (int) std::lround(std::abs(value) * 100.0);
-    if (amount == 0) return "C";
+    if (amount == 0) return "Center";
     return juce::String(amount) + (value < 0 ? "L" : "R");
 }
 
@@ -26,7 +19,7 @@ public:
         juce::DialogWindow::LaunchOptions options;
         options.content.setOwned(browser);
         options.dialogTitle = "Add plugin";
-        options.dialogBackgroundColour = juce::Colour(0xff1e1e1e);
+        options.dialogBackgroundColour = studio::background;
         options.escapeKeyTriggersCloseButton = true;
         options.useNativeTitleBar = true;
         options.resizable = true;
@@ -43,7 +36,7 @@ public:
         addAndMakeVisible(manufacturer);
         addAndMakeVisible(list);
         addAndMakeVisible(add);
-        search.setTextToShowWhenEmpty("Search", juce::Colour(0xffb8b8b8));
+        search.setTextToShowWhenEmpty("Search", studio::muted);
         add.setButtonText("Add");
         format.addItem("All formats", 1);
         format.addItem("VST3", 2);
@@ -89,7 +82,7 @@ public:
         list.setBounds(area);
     }
 
-    void paint(juce::Graphics& graphics) override { graphics.fillAll(juce::Colour(0xff1e1e1e)); }
+    void paint(juce::Graphics& graphics) override { graphics.fillAll(studio::background); }
 
 private:
     void applyFilter()
@@ -180,7 +173,7 @@ private:
         InsertButton* row = nullptr;
         void paintButton(juce::Graphics& graphics, bool over, bool down) override
         {
-            auto colour = row != nullptr && row->engaged ? juce::Colour(0xff2a62c9) : juce::Colour(0xff5a5a5a);
+            auto colour = row != nullptr && row->engaged ? studio::accent : studio::line;
             if (down) colour = colour.darker(0.15f);
             else if (over) colour = colour.brighter(0.12f);
             graphics.setColour(colour);
@@ -204,11 +197,28 @@ private:
     };
     struct NameButton : RowButton
     {
+        bool dragged = false;
+        void mouseDown(const juce::MouseEvent& event) override
+        {
+            dragged = false;
+            juce::TextButton::mouseDown(event);
+        }
         void mouseDrag(const juce::MouseEvent& event) override
         {
-            if (row->dragId.isNotEmpty() && event.getDistanceFromDragStart() > 8)
-                if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor(this))
-                    container->startDragging(row->dragId, row);
+            if (row->dragId.isEmpty() || event.getDistanceFromDragStart() <= 8) return;
+            dragged = true;
+            if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor(this))
+                container->startDragging(row->dragId, row);
+        }
+        void mouseUp(const juce::MouseEvent& event) override
+        {
+            if (dragged)
+            {
+                dragged = false;
+                setState(buttonNormal);
+                return;
+            }
+            RowButton::mouseUp(event);
         }
     };
     struct DotsButton : RowButton
@@ -501,9 +511,9 @@ void ChannelStripComponent::showInputMenu()
         void getIdealSize(int& width, int& height) override { width = 220; height = 24; }
         void paint(juce::Graphics& graphics) override
         {
-            if (isItemHighlighted()) graphics.fillAll(juce::Colour(0xff3d5a80));
+            if (isItemHighlighted()) graphics.fillAll(studio::selectedFill());
             auto box = juce::Rectangle<float>(8.0f, (getHeight() - 12.0f) / 2.0f, 12.0f, 12.0f);
-            graphics.setColour(juce::Colour(0xfff2f2f2));
+            graphics.setColour(studio::text);
             graphics.drawRoundedRectangle(box, 2.0f, 1.0f);
             if (tick) graphics.fillRoundedRectangle(box.reduced(3.0f), 1.0f);
             graphics.drawText(text, getLocalBounds().withTrimmedLeft(28), juce::Justification::centredLeft);
@@ -560,19 +570,22 @@ void ChannelStripComponent::showInputMenu()
 
 void ChannelStripComponent::paint(juce::Graphics& graphics)
 {
+    auto card = getLocalBounds().toFloat().reduced(2);
     graphics.setColour(stripFill(color, master ? juce::String() : colourHex));
-    graphics.fillRoundedRectangle(getLocalBounds().toFloat().reduced(2), 6.0f);
+    graphics.fillRoundedRectangle(card, 8.0f);
+    graphics.setColour(studio::line);
+    graphics.drawRoundedRectangle(card, 8.0f, 1.0f);
     if (!meterBounds.isEmpty())
     {
-        graphics.setColour(juce::Colour(0xff1a1a1a));
-        graphics.fillRect(meterBounds);
+        graphics.setColour(studio::background);
+        graphics.fillRoundedRectangle(meterBounds.toFloat(), 2.0f);
         const float db = juce::Decibels::gainToDecibels(meterPeak, -60.0f);
         const float amount = juce::jlimit(0.0f, 1.0f, (db + 60.0f) / 60.0f);
         auto filled = meterBounds;
         filled.setTop(meterBounds.getBottom() - juce::roundToInt(meterBounds.getHeight() * amount));
         graphics.setColour(db > -3.0f ? juce::Colour(0xffff5d5d) : db > -12.0f ? juce::Colour(0xffffd166) : juce::Colour(0xff3dcc7a));
-        graphics.fillRect(filled);
-        graphics.setColour(juce::Colour(0xffb8b8b8));
+        graphics.fillRoundedRectangle(filled.toFloat(), 2.0f);
+        graphics.setColour(studio::muted);
         graphics.setFont(10.0f);
         for (float mark : { 0.0f, -6.0f, -12.0f, -24.0f, -48.0f })
         {
@@ -583,12 +596,12 @@ void ChannelStripComponent::paint(juce::Graphics& graphics)
     }
     if (pluginDropY >= 0)
     {
-        graphics.setColour(juce::Colour(0xff4da3ff));
+        graphics.setColour(studio::accent);
         graphics.fillRect(8, pluginDropY - 1, getWidth() - 16, 3);
     }
     if (stripEdge >= 0)
     {
-        graphics.setColour(juce::Colour(0xff4da3ff));
+        graphics.setColour(studio::accent);
         graphics.fillRect(stripEdge == 0 ? 2 : getWidth() - 5, 6, 3, getHeight() - 12);
     }
 }
@@ -605,6 +618,8 @@ void ChannelStripComponent::resized()
     auto layout = layoutChannelStrip(getLocalBounds(), !master);
     nameButton.setBounds(layout.name);
     auto faderArea = layout.fader;
+    meterBounds = faderArea.removeFromRight(8).reduced(1, 0);
+    tickBounds = faderArea.removeFromRight(22);
     auto marks = faderArea.removeFromTop(26);
     if (master) muteStrip.setBounds(marks.reduced(1, 1));
     else
@@ -612,8 +627,6 @@ void ChannelStripComponent::resized()
         muteStrip.setBounds(marks.removeFromLeft(marks.getWidth() / 2).reduced(1, 1));
         soloStrip.setBounds(marks.reduced(1, 1));
     }
-    meterBounds = faderArea.removeFromRight(8).reduced(1, 0);
-    tickBounds = faderArea.removeFromRight(22);
     fader.setBounds(faderArea);
     gainLabel.setBounds(layout.gain);
     if (!master)
@@ -824,7 +837,7 @@ void ChannelStripComponent::editValue(juce::Label& label, bool gain)
 {
     auto* editor = new juce::TextEditor();
     editor->setBounds(label.getBounds());
-    editor->setText(gain ? juce::String(fader.getValue(), 1) : panEdit(pan.getValue()), false);
+    editor->setText(gain ? juce::String(fader.getValue(), 1) : panText(pan.getValue()), false);
     editor->setSelectAllWhenFocused(true);
     addAndMakeVisible(editor);
     editor->grabKeyboardFocus();
@@ -863,7 +876,7 @@ void ChannelStripComponent::pickColour()
         juce::String stripId, start;
         juce::ColourSelector selector { juce::ColourSelector::showColourAtTop | juce::ColourSelector::showSliders | juce::ColourSelector::showColourspace };
     };
-    const auto current = colourHex.length() == 6 ? juce::Colour::fromString("ff" + colourHex) : color > 0 ? stripPalette(color) : juce::Colour(0xff4da3ff);
+    const auto current = colourHex.length() == 6 ? juce::Colour::fromString("ff" + colourHex) : color > 0 ? stripPalette(color) : studio::accent;
     juce::CallOutBox::launchAsynchronously(std::make_unique<Picker>(engine, stripId, current), nameButton.getScreenBounds(), nullptr);
 }
 
@@ -884,18 +897,19 @@ MixerView::MixerView(AudioEngine& engineIn)
     : engine(engineIn)
 {
     addButton.setButtonText("+ Add channel");
-    undoButton.setButtonText("Undo");
-    redoButton.setButtonText("Redo");
-    muteButton.setButtonText("Mute");
-    bypassButton.setButtonText("Bypass");
     newProfile.setButtonText("New");
     recordButton.setButtonText("Record");
+    recordButton.live = juce::Colour(0xffff5d5d);
     recordPause.setButtonText("Pause");
     recordStop.setButtonText("Stop");
     streamButton.setButtonText("Stream");
     streamPause.setButtonText("Pause");
     streamStop.setButtonText("Stop");
-    for (auto* button : { &addButton, &undoButton, &redoButton, &muteButton, &bypassButton, &newProfile, &recordButton, &recordPause, &recordStop, &streamButton, &streamPause, &streamStop })
+    recordPause.setVisible(false);
+    recordStop.setVisible(false);
+    streamPause.setVisible(false);
+    streamStop.setVisible(false);
+    for (juce::Component* button : { (juce::Component*) &addButton, (juce::Component*) &newProfile, (juce::Component*) &recordButton, (juce::Component*) &recordPause, (juce::Component*) &recordStop, (juce::Component*) &streamButton, (juce::Component*) &streamPause, (juce::Component*) &streamStop })
         addAndMakeVisible(button);
     recordButton.onClick = [this] { startSavedRecording(); };
     recordPause.onClick = [this] { if (engine.isRecordingPaused()) engine.resumeRecording(); else engine.pauseRecording(); };
@@ -903,17 +917,15 @@ MixerView::MixerView(AudioEngine& engineIn)
     streamButton.onClick = [this] { startSavedStream(); };
     streamPause.onClick = [this] { if (engine.isStreamPaused()) engine.resumeStream(); else engine.pauseStream(); };
     streamStop.onClick = [this] { engine.stopStream(); };
+    profileLabel.setText("Profile", juce::dontSendNotification);
+    profileLabel.setColour(juce::Label::textColourId, studio::muted);
+    profileLabel.setFont(juce::Font(juce::FontOptions(12.0f)));
+    addAndMakeVisible(profileLabel);
     addAndMakeVisible(profiles);
     addAndMakeVisible(viewport);
     viewport.setViewedComponent(&row, false);
     viewport.setScrollBarsShown(false, true);
     addButton.onClick = [this] { engine.addStrip("Strip"); };
-    undoButton.onClick = [this] { engine.undoChain(); };
-    redoButton.onClick = [this] { engine.redoChain(); };
-    muteButton.setClickingTogglesState(true);
-    bypassButton.setClickingTogglesState(true);
-    muteButton.onClick = [this] { engine.setGlobalMuted(muteButton.getToggleState()); };
-    bypassButton.onClick = [this] { engine.setGlobalBypassed(bypassButton.getToggleState()); };
     newProfile.onClick = [this] {
         auto editor = std::make_shared<juce::AlertWindow>("New profile", "Profile name", juce::AlertWindow::NoIcon);
         editor->addTextEditor("name", {});
@@ -933,6 +945,31 @@ MixerView::MixerView(AudioEngine& engineIn)
             engine.switchChainProfile(catalog.profiles[(size_t) index].id);
     };
     startTimerHz(30);
+}
+
+MixerView::~MixerView()
+{
+    if (keyHost != nullptr) keyHost->removeKeyListener(this);
+}
+
+void MixerView::parentHierarchyChanged()
+{
+    if (keyHost != nullptr) keyHost->removeKeyListener(this);
+    keyHost = getTopLevelComponent();
+    if (keyHost != nullptr && keyHost != this) keyHost->addKeyListener(this);
+}
+
+bool MixerView::keyPressed(const juce::KeyPress& key, juce::Component* originating)
+{
+    if (dynamic_cast<juce::TextEditor*>(originating) != nullptr) return false;
+    const auto mods = key.getModifiers();
+    if (!mods.isCommandDown() || mods.isPopupMenu()) return false;
+    const auto code = key.getKeyCode();
+    const bool undo = code == 'Z' && !mods.isShiftDown();
+    const bool redo = code == 'Y' || (code == 'Z' && mods.isShiftDown());
+    if (undo) { engine.undoChain(); return true; }
+    if (redo) { engine.redoChain(); return true; }
+    return false;
 }
 
 void MixerView::startSavedRecording()
@@ -961,7 +998,7 @@ void MixerView::startSavedStream()
 
 void MixerView::paint(juce::Graphics& graphics)
 {
-    graphics.fillAll(juce::Colour(0xff1e1e1e));
+    graphics.fillAll(studio::background);
 }
 
 void MixerView::refresh()
@@ -976,10 +1013,6 @@ void MixerView::refresh()
     }
     if (profiles.getSelectedId() == 0) profiles.setText("Unsaved", juce::dontSendNotification);
     applying = false;
-    undoButton.setEnabled(engine.canUndoChain());
-    redoButton.setEnabled(engine.canRedoChain());
-    muteButton.setToggleState(engine.isGlobalMuted(), juce::dontSendNotification);
-    bypassButton.setToggleState(engine.isGlobalBypassed(), juce::dontSendNotification);
     const auto& chain = engine.chainStrips();
     const auto& records = engine.getPluginInstances();
     if (strips.size() != (int) chain.size() + 1)
@@ -1031,9 +1064,17 @@ void MixerView::timerCallback()
     recordPause.setVisible(engine.isRecording());
     recordStop.setVisible(engine.isRecording());
     recordPause.setButtonText(engine.isRecordingPaused() ? "Resume" : "Pause");
+    recordButton.armed = engine.isRecording() && !engine.isRecordingPaused();
     streamPause.setVisible(engine.isStreaming());
     streamStop.setVisible(engine.isStreaming());
     streamPause.setButtonText(engine.isStreamPaused() ? "Resume" : "Pause");
+    streamButton.armed = engine.isStreaming() && !engine.isStreamPaused();
+    const auto state = juce::String((int) engine.isRecording()) + juce::String((int) engine.isRecordingPaused()) + juce::String((int) engine.isStreaming()) + juce::String((int) engine.isStreamPaused());
+    if (state != transportState)
+    {
+        transportState = state;
+        resized();
+    }
 }
 
 void MixerView::moveStripTo(const juce::String& draggedId, ChannelStripComponent& target, bool after)
@@ -1133,21 +1174,24 @@ void MixerView::layoutStrips()
 void MixerView::resized()
 {
     auto area = getLocalBounds().reduced(8);
-    auto transport = area.removeFromTop(32);
-    for (auto* button : { &recordButton, &recordPause, &recordStop, &streamButton, &streamPause, &streamStop })
-    {
-        button->setBounds(transport.removeFromLeft(78).reduced(2, 0));
-    }
-    auto bar = area.removeFromTop(36);
-    profiles.setBounds(bar.removeFromLeft(160));
-    bar.removeFromLeft(6);
-    newProfile.setBounds(bar.removeFromLeft(64));
-    bar.removeFromLeft(6);
-    undoButton.setBounds(bar.removeFromLeft(72));
-    redoButton.setBounds(bar.removeFromLeft(72));
-    muteButton.setBounds(bar.removeFromLeft(72));
-    bypassButton.setBounds(bar.removeFromLeft(80));
-    addButton.setBounds(bar.removeFromRight(130));
+    auto transport = area.removeFromTop(36);
+    profileLabel.setBounds(transport.removeFromLeft(52));
+    profiles.setBounds(transport.removeFromLeft(200).reduced(0, 4));
+    transport.removeFromLeft(6);
+    newProfile.setBounds(transport.removeFromLeft(64).reduced(0, 4));
+    auto place = [&](juce::Button& button, int width) {
+        if (!button.isVisible()) return;
+        button.setBounds(transport.removeFromRight(width).reduced(3, 4));
+    };
+    place(streamStop, 68);
+    place(streamPause, 76);
+    place(streamButton, 86);
+    if (streamButton.isVisible()) transport.removeFromRight(10);
+    place(recordStop, 68);
+    place(recordPause, 76);
+    place(recordButton, 86);
+    transport.removeFromRight(10);
+    addButton.setBounds(transport.removeFromRight(140).reduced(0, 4));
     auto masterSlot = area.removeFromRight(136);
     viewport.setBounds(area);
     layoutStrips();

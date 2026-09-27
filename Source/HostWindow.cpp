@@ -70,7 +70,7 @@ public:
         removeMissing.setButtonText("Remove missing");
         clear.setButtonText("Clear database");
         remove.setButtonText("Remove");
-        search.setTextToShowWhenEmpty("Search", juce::Colour(0xffb8b8b8));
+        search.setTextToShowWhenEmpty("Search", studio::muted);
         format.addItem("All formats", 1);
         format.addItem("VST3", 2);
         format.addItem("VST", 3);
@@ -153,8 +153,8 @@ private:
         void paintListBoxItem(int row, juce::Graphics& graphics, int width, int height, bool selected) override
         {
             if (row < 0 || row >= folders.size()) return;
-            graphics.fillAll(selected ? juce::Colour(0xff3d5a80) : juce::Colour(0xff2c2c2c));
-            graphics.setColour(juce::Colour(0xfff2f2f2));
+            graphics.fillAll(selected ? studio::selectedFill() : studio::control);
+            graphics.setColour(studio::text);
             graphics.drawText(folders[row], 8, 0, width - 8, height, juce::Justification::centredLeft, true);
         }
     };
@@ -633,8 +633,8 @@ public:
     {
         if (!valid(row)) return;
         const bool current = entries[(size_t) row].id == active;
-        graphics.fillAll(selected || current ? juce::Colour(0xff3d5a80) : juce::Colour(0xff2c2c2c));
-        graphics.setColour(juce::Colours::white);
+        graphics.fillAll(selected || current ? studio::selectedFill() : studio::control);
+        graphics.setColour(studio::text);
         graphics.drawText(entries[(size_t) row].name, 8, 0, width - 16, height, juce::Justification::centredLeft, true);
     }
     void listBoxItemDoubleClicked(int row, const juce::MouseEvent&) override { recallRow(row); }
@@ -694,13 +694,33 @@ public:
     void paintButton(juce::Graphics& graphics, bool over, bool down) override
     {
         getLookAndFeel().drawButtonBackground(graphics, *this, juce::Colours::transparentBlack, over, down);
-        if (showIcon && icon)
-        {
-            graphics.setColour(findColour(juce::TextButton::textColourOffId));
-            icon(graphics, getLocalBounds().toFloat().reduced(11.0f, 8.0f));
-            return;
-        }
-        getLookAndFeel().drawButtonText(graphics, *this, over, down);
+        auto area = getLocalBounds().toFloat();
+        auto iconBox = showIcon ? area.reduced(10.0f, 8.0f) : area.removeFromLeft(28.0f).reduced(6.0f, 8.0f);
+        graphics.setColour(getToggleState() ? studio::accent : over ? studio::text : studio::muted);
+        if (icon) icon(graphics, iconBox);
+        if (showIcon) return;
+        graphics.setColour(getToggleState() ? studio::accent : over ? studio::text : studio::muted);
+        graphics.setFont(juce::Font(juce::FontOptions(13.0f)));
+        graphics.drawText(getButtonText(), 32, 0, getWidth() - 36, getHeight(), juce::Justification::centredLeft, true);
+    }
+};
+
+class ChevronButton : public juce::Button
+{
+public:
+    ChevronButton() : juce::Button({}) {}
+    bool collapsed = false;
+    void paintButton(juce::Graphics& graphics, bool over, bool down) override
+    {
+        getLookAndFeel().drawButtonBackground(graphics, *this, juce::Colours::transparentBlack, over, down);
+        graphics.setColour(over ? studio::text : studio::muted);
+        juce::Path chevron;
+        const auto centre = getLocalBounds().getCentre().toFloat();
+        const float direction = collapsed ? 4.0f : -4.0f;
+        chevron.startNewSubPath(centre.x + direction, centre.y - 5.0f);
+        chevron.lineTo(centre.x - direction, centre.y);
+        chevron.lineTo(centre.x + direction, centre.y + 5.0f);
+        graphics.strokePath(chevron, juce::PathStrokeType(1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 };
 
@@ -785,7 +805,7 @@ void paintTemplatesIcon(juce::Graphics& graphics, juce::Rectangle<float> bounds)
     graphics.drawRoundedRectangle(back, 1.5f, 1.4f);
     graphics.setColour(juce::Colours::white);
     graphics.fillRoundedRectangle(front, 1.5f);
-    graphics.setColour(juce::Colour(0xff1e1e1e));
+    graphics.setColour(studio::background);
     graphics.fillRect(front.getX() + 3.0f, front.getCentreY() - 1.0f, front.getWidth() - 6.0f, 1.4f);
 }
 
@@ -1025,7 +1045,12 @@ public:
 
     ~Shell() override { setLookAndFeel(nullptr); }
 
-    void paint(juce::Graphics& graphics) override { graphics.fillAll(juce::Colour(0xff1e1e1e)); }
+    void paint(juce::Graphics& graphics) override
+    {
+        graphics.fillAll(studio::background);
+        graphics.setColour(studio::panel);
+        graphics.fillRect(getLocalBounds().removeFromLeft(collapsed ? 52 : 168));
+    }
 
     void resized() override
     {
@@ -1040,11 +1065,12 @@ private:
     std::array<juce::Component*, 9> pages() { return { &mixer, &templates, &installed, &audio, &dashboard, &settings, &diagnostics, &support, &record }; }
     void applyRail()
     {
-        collapse.setButtonText(collapsed ? ">" : "<");
+        collapse.collapsed = collapsed;
+        collapse.repaint();
         for (int i = 0; i < 9; ++i)
         {
             rail[i].showIcon = collapsed;
-            rail[i].setButtonText(collapsed ? juce::String() : titles[i]);
+            rail[i].setButtonText(titles[i]);
         }
     }
     void show(int index)
@@ -1093,7 +1119,7 @@ private:
     SupportPage support;
     RecordPage record;
     RailButton rail[9];
-    juce::TextButton collapse;
+    ChevronButton collapse;
     juce::String titles[9];
     bool collapsed = false;
     juce::TooltipWindow tooltips { this, 500 };
@@ -1103,14 +1129,23 @@ private:
 }
 
 HostWindow::HostWindow(AudioEngine& engine, std::function<void()> refreshTray)
-    : juce::DocumentWindow("LightHostModern", juce::Colour(0xff1e1e1e), juce::DocumentWindow::allButtons)
+    : juce::DocumentWindow("LightHostModern", studio::background, juce::DocumentWindow::allButtons)
 {
-    setUsingNativeTitleBar(true);
+    setLookAndFeel(&shellLook());
+    setUsingNativeTitleBar(false);
+    setTitleBarHeight(36);
+    setTitleBarTextCentred(false);
+    setColour(juce::DocumentWindow::textColourId, studio::text);
     setContentOwned(new Shell(engine, std::move(refreshTray)), true);
     setResizable(true, true);
     setResizeLimits(728, 679, 8192, 8192);
     centreWithSize(1180, 760);
     setVisible(true);
+}
+
+HostWindow::~HostWindow()
+{
+    setLookAndFeel(nullptr);
 }
 
 void HostWindow::closeButtonPressed()

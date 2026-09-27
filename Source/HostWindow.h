@@ -6,6 +6,7 @@ class HostWindow : public juce::DocumentWindow
 {
 public:
     HostWindow(AudioEngine&, std::function<void()> refreshTray);
+    ~HostWindow() override;
     void closeButtonPressed() override;
 
 private:

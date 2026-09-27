@@ -78,18 +78,37 @@ public:
     }
 };
 
+namespace studio
+{
+    const juce::Colour background { 0xff12141a };
+    const juce::Colour panel      { 0xff1a1d24 };
+    const juce::Colour control    { 0xff262a33 };
+    const juce::Colour line       { 0xff3a3f4b };
+    const juce::Colour text       { 0xffe7e9ee };
+    const juce::Colour muted      { 0xff9aa0ab };
+    const juce::Colour accent     { 0xff4da3ff };
+    inline juce::Colour selectedFill() { return control.interpolatedWith(accent, 0.45f); }
+}
+
 class MarkButton : public juce::Button
 {
 public:
     MarkButton(const juce::String& text, juce::Colour active) : juce::Button(text), onColour(active) {}
     void paintButton(juce::Graphics& graphics, bool over, bool down) override
     {
-        auto colour = getToggleState() ? onColour : juce::Colour(0xff2c2c2c);
-        if (down) colour = colour.darker(0.2f);
-        else if (over) colour = colour.brighter(0.12f);
+        auto bounds = getLocalBounds().toFloat().reduced(1.0f);
+        auto colour = getToggleState() ? onColour : studio::control;
+        if (down) colour = colour.darker(0.15f);
+        else if (over) colour = colour.brighter(0.1f);
         graphics.setColour(colour);
-        graphics.fillRoundedRectangle(getLocalBounds().toFloat().reduced(0.5f), 3.0f);
-        graphics.setColour(juce::Colours::white);
+        graphics.fillRoundedRectangle(bounds, 6.0f);
+        if (!getToggleState())
+        {
+            graphics.setColour(studio::line);
+            graphics.drawRoundedRectangle(bounds, 6.0f, 1.0f);
+        }
+        graphics.setColour(getToggleState() ? juce::Colours::white : studio::muted);
+        graphics.setFont(juce::Font(juce::FontOptions(12.0f)));
         graphics.drawText(getButtonText(), getLocalBounds(), juce::Justification::centred, false);
     }
 private:
@@ -114,10 +133,10 @@ inline juce::Colour stripPalette(int color)
 
 inline juce::Colour stripFill(int index, const juce::String& hex)
 {
-    const auto dark = juce::Colour(0xff1e1e1e);
+    const auto dark = studio::panel;
     if (hex.length() == 6) return dark.interpolatedWith(juce::Colour::fromString("ff" + hex), 0.45f);
     if (index > 0) return dark.interpolatedWith(stripPalette(index), 0.45f);
-    return juce::Colour(0xff333333);
+    return studio::panel;
 }
 
 class StripNameButton : public juce::TextButton
@@ -144,11 +163,11 @@ public:
     void paintListBoxItem(int row, juce::Graphics& graphics, int width, int height, bool selected) override
     {
         if (row < 0 || row >= getNumRows()) return;
-        graphics.fillAll(selected ? juce::Colour(0xff3d5a80) : juce::Colour(0xff2c2c2c));
+        graphics.fillAll(selected ? studio::selectedFill() : studio::control);
         const auto& plugin = plugins[(size_t) row];
-        graphics.setColour(juce::Colour(0xfff2f2f2));
+        graphics.setColour(studio::text);
         graphics.drawText(plugin.name, 8, 0, width / 2 - 8, height, juce::Justification::centredLeft, true);
-        graphics.setColour(juce::Colour(0xffb8b8b8));
+        graphics.setColour(studio::muted);
         graphics.drawText(plugin.category.isEmpty() ? "Other" : plugin.category, width / 2, 0, width / 4, height, juce::Justification::centredLeft, true);
         graphics.drawText(plugin.pluginFormatName, width * 3 / 4, 0, width / 4 - 8, height, juce::Justification::centredRight, true);
     }
@@ -159,55 +178,205 @@ public:
     }
 };
 
+class CaptionButton : public juce::Button
+{
+public:
+    explicit CaptionButton(int kindIn) : juce::Button({}), kind(kindIn) {}
+    void paintButton(juce::Graphics& graphics, bool over, bool down) override
+    {
+        const bool close = kind == juce::DocumentWindow::closeButton;
+        if (over || down)
+        {
+            graphics.setColour(close ? juce::Colour(0xffff5d5d) : studio::control.brighter(down ? 0.0f : 0.08f));
+            graphics.fillRect(getLocalBounds());
+        }
+        auto ink = close && (over || down) ? juce::Colours::white : over ? studio::text : studio::muted;
+        auto mark = getLocalBounds().toFloat().reduced(16.0f, 12.0f);
+        graphics.setColour(ink);
+        if (kind == juce::DocumentWindow::minimiseButton)
+            graphics.drawLine(mark.getX(), mark.getBottom() - 1.0f, mark.getRight(), mark.getBottom() - 1.0f, 1.4f);
+        else if (kind == juce::DocumentWindow::maximiseButton && getToggleState())
+        {
+            auto back = mark.reduced(0.5f).translated(2.0f, -2.0f);
+            auto front = mark.reduced(0.5f).translated(-2.0f, 2.0f);
+            graphics.drawRect(back, 1.3f);
+            graphics.setColour(over || down ? studio::control.brighter(0.08f) : studio::panel);
+            graphics.fillRect(front);
+            graphics.setColour(ink);
+            graphics.drawRect(front, 1.3f);
+        }
+        else if (kind == juce::DocumentWindow::maximiseButton)
+            graphics.drawRect(mark, 1.3f);
+        else
+        {
+            graphics.drawLine(mark.getX(), mark.getY(), mark.getRight(), mark.getBottom(), 1.4f);
+            graphics.drawLine(mark.getRight(), mark.getY(), mark.getX(), mark.getBottom(), 1.4f);
+        }
+    }
+private:
+    int kind;
+};
+
 class ShellLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
     ShellLookAndFeel()
     {
-        const auto text = juce::Colour(0xfff2f2f2);
-        const auto control = juce::Colour(0xff2c2c2c);
-        const auto selected = juce::Colour(0xff3d5a80);
-        setColour(juce::Label::textColourId, text);
-        setColour(juce::ToggleButton::textColourId, text);
-        setColour(juce::ToggleButton::tickColourId, juce::Colour(0xff4da3ff));
-        setColour(juce::ToggleButton::tickDisabledColourId, juce::Colour(0xff6a6a6a));
-        setColour(juce::ComboBox::textColourId, text);
-        setColour(juce::ComboBox::backgroundColourId, control);
-        setColour(juce::ComboBox::outlineColourId, juce::Colour(0xff4a4a4a));
-        setColour(juce::ComboBox::arrowColourId, text);
-        setColour(juce::PopupMenu::backgroundColourId, control);
-        setColour(juce::PopupMenu::textColourId, text);
+        const auto selected = studio::selectedFill();
+        setColour(juce::Label::textColourId, studio::text);
+        setColour(juce::ToggleButton::textColourId, studio::text);
+        setColour(juce::ToggleButton::tickColourId, studio::accent);
+        setColour(juce::ToggleButton::tickDisabledColourId, studio::muted);
+        setColour(juce::ComboBox::textColourId, studio::text);
+        setColour(juce::ComboBox::backgroundColourId, studio::control);
+        setColour(juce::ComboBox::outlineColourId, studio::line);
+        setColour(juce::ComboBox::arrowColourId, studio::text);
+        setColour(juce::PopupMenu::backgroundColourId, studio::control);
+        setColour(juce::PopupMenu::textColourId, studio::text);
         setColour(juce::PopupMenu::highlightedBackgroundColourId, selected);
-        setColour(juce::PopupMenu::highlightedTextColourId, text);
-        setColour(juce::TextEditor::textColourId, text);
-        setColour(juce::TextEditor::backgroundColourId, control);
+        setColour(juce::PopupMenu::highlightedTextColourId, studio::text);
+        setColour(juce::TextEditor::textColourId, studio::text);
+        setColour(juce::TextEditor::backgroundColourId, studio::control);
         setColour(juce::TextEditor::highlightColourId, selected);
-        setColour(juce::TextEditor::highlightedTextColourId, text);
-        setColour(juce::TextEditor::outlineColourId, juce::Colour(0xff4a4a4a));
-        setColour(juce::ListBox::textColourId, text);
-        setColour(juce::ListBox::backgroundColourId, juce::Colour(0xff1e1e1e));
-        setColour(juce::TextButton::buttonColourId, control);
+        setColour(juce::TextEditor::highlightedTextColourId, studio::text);
+        setColour(juce::TextEditor::outlineColourId, studio::line);
+        setColour(juce::ListBox::textColourId, studio::text);
+        setColour(juce::ListBox::backgroundColourId, studio::background);
+        setColour(juce::TextButton::buttonColourId, studio::control);
         setColour(juce::TextButton::buttonOnColourId, selected);
-        setColour(juce::TextButton::textColourOffId, juce::Colours::white);
-        setColour(juce::TextButton::textColourOnId, juce::Colours::white);
-        setColour(juce::Slider::thumbColourId, juce::Colour(0xff4da3ff));
-        setColour(juce::Slider::trackColourId, juce::Colour(0xff6a6a6a));
-        setColour(juce::Slider::backgroundColourId, juce::Colour(0xff2a2a2a));
-        setColour(juce::AlertWindow::backgroundColourId, control);
-        setColour(juce::AlertWindow::textColourId, text);
-        setColour(juce::AlertWindow::outlineColourId, juce::Colour(0xff4a4a4a));
+        setColour(juce::TextButton::textColourOffId, studio::text);
+        setColour(juce::TextButton::textColourOnId, studio::text);
+        setColour(juce::Slider::thumbColourId, studio::accent);
+        setColour(juce::Slider::trackColourId, studio::line);
+        setColour(juce::Slider::backgroundColourId, studio::panel);
+        setColour(juce::ScrollBar::thumbColourId, studio::line);
+        setColour(juce::ScrollBar::backgroundColourId, studio::panel);
+        setColour(juce::AlertWindow::backgroundColourId, studio::control);
+        setColour(juce::AlertWindow::textColourId, studio::text);
+        setColour(juce::AlertWindow::outlineColourId, studio::line);
     }
 
-    void drawButtonBackground(juce::Graphics& graphics, juce::Button& button, const juce::Colour&, bool, bool) override
+    juce::Font getTextButtonFont(juce::TextButton&, int) override { return juce::Font(juce::FontOptions(13.0f)); }
+    juce::Font getLabelFont(juce::Label&) override { return juce::Font(juce::FontOptions(13.0f)); }
+
+    void drawButtonBackground(juce::Graphics& graphics, juce::Button& button, const juce::Colour&, bool over, bool down) override
     {
-        auto bounds = button.getLocalBounds().toFloat().reduced(0.5f);
-        graphics.setColour(button.getToggleState() ? juce::Colour(0xff3d5a80) : juce::Colour(0xff2c2c2c));
-        graphics.fillRoundedRectangle(bounds, 4.0f);
+        auto colour = button.getToggleState() ? studio::control.brighter(0.08f) : studio::control;
+        if (down) colour = colour.darker(0.12f);
+        else if (over) colour = colour.brighter(0.08f);
+        graphics.setColour(colour);
+        graphics.fillRoundedRectangle(button.getLocalBounds().toFloat().reduced(0.5f), 5.0f);
         if (button.getToggleState())
         {
-            graphics.setColour(juce::Colour(0xff4da3ff));
+            graphics.setColour(studio::accent);
             graphics.fillRect(button.getLocalBounds().removeFromLeft(3));
         }
+    }
+
+    void drawComboBox(juce::Graphics& graphics, int width, int height, bool, int buttonX, int buttonY, int buttonW, int buttonH, juce::ComboBox& box) override
+    {
+        auto bounds = juce::Rectangle<float>(0.5f, 0.5f, (float) width - 1.0f, (float) height - 1.0f);
+        graphics.setColour(studio::control);
+        graphics.fillRoundedRectangle(bounds, 6.0f);
+        graphics.setColour(studio::line);
+        graphics.drawRoundedRectangle(bounds, 6.0f, 1.0f);
+        juce::Path arrow;
+        const float centreX = (float) buttonX + buttonW * 0.5f;
+        const float centreY = (float) buttonY + buttonH * 0.5f;
+        arrow.addTriangle(centreX - 4.0f, centreY - 2.0f, centreX + 4.0f, centreY - 2.0f, centreX, centreY + 3.0f);
+        graphics.setColour(box.findColour(juce::ComboBox::arrowColourId));
+        graphics.fillPath(arrow);
+    }
+
+    int getSliderThumbRadius(juce::Slider& slider) override
+    {
+        return slider.isVertical() ? 8 : juce::LookAndFeel_V4::getSliderThumbRadius(slider);
+    }
+
+    void drawLinearSlider(juce::Graphics& graphics, int x, int y, int width, int height,
+                          float sliderPos, float minSliderPos, float maxSliderPos,
+                          juce::Slider::SliderStyle style, juce::Slider& slider) override
+    {
+        if (style != juce::Slider::LinearVertical && style != juce::Slider::LinearBarVertical)
+        {
+            juce::LookAndFeel_V4::drawLinearSlider(graphics, x, y, width, height, sliderPos, minSliderPos, maxSliderPos, style, slider);
+            return;
+        }
+        const float radius = (float) getSliderThumbRadius(slider);
+        const float centreX = x + width * 0.5f;
+        juce::Rectangle<float> track(centreX - 1.5f, (float) y + radius, 3.0f, juce::jmax(0.0f, (float) height - radius * 2.0f));
+        graphics.setColour(studio::line);
+        graphics.fillRoundedRectangle(track, 1.5f);
+        graphics.setColour(studio::accent);
+        graphics.fillRoundedRectangle({ track.getX(), sliderPos, track.getWidth(), juce::jmax(0.0f, track.getBottom() - sliderPos) }, 1.5f);
+        const float capWidth = juce::jmin(16.0f, (float) width - 4.0f);
+        juce::Rectangle<float> cap(centreX - capWidth * 0.5f, sliderPos - 6.0f, capWidth, 12.0f);
+        graphics.setColour(studio::text);
+        graphics.fillRoundedRectangle(cap, 3.0f);
+        graphics.setColour(studio::background);
+        graphics.fillRect(cap.getX() + 4.0f, cap.getCentreY() - 0.5f, cap.getWidth() - 8.0f, 1.0f);
+    }
+
+    void drawRotarySlider(juce::Graphics& graphics, int x, int y, int width, int height,
+                          float sliderPos, float rotaryStartAngle, float rotaryEndAngle, juce::Slider&) override
+    {
+        const float radius = juce::jmin(width, height) * 0.5f - 3.0f;
+        const float centreX = x + width * 0.5f;
+        const float centreY = y + height * 0.5f;
+        const float angle = rotaryStartAngle + sliderPos * (rotaryEndAngle - rotaryStartAngle);
+        graphics.setColour(studio::control);
+        graphics.fillEllipse(centreX - radius, centreY - radius, radius * 2.0f, radius * 2.0f);
+        graphics.setColour(studio::line);
+        graphics.drawEllipse(centreX - radius, centreY - radius, radius * 2.0f, radius * 2.0f, 1.0f);
+        const float arc = radius - 4.0f;
+        juce::Path track;
+        track.addCentredArc(centreX, centreY, arc, arc, 0.0f, rotaryStartAngle, rotaryEndAngle, true);
+        graphics.strokePath(track, juce::PathStrokeType(2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        juce::Path value;
+        value.addCentredArc(centreX, centreY, arc, arc, 0.0f, rotaryStartAngle, angle, true);
+        graphics.setColour(studio::accent);
+        graphics.strokePath(value, juce::PathStrokeType(2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        graphics.setColour(studio::text);
+        graphics.drawLine(centreX + std::sin(angle) * radius * 0.28f, centreY - std::cos(angle) * radius * 0.28f,
+                          centreX + std::sin(angle) * radius * 0.72f, centreY - std::cos(angle) * radius * 0.72f, 2.0f);
+        graphics.setColour(studio::accent);
+        graphics.fillEllipse(centreX - 2.5f, centreY - 2.5f, 5.0f, 5.0f);
+    }
+
+    void drawDocumentWindowTitleBar(juce::DocumentWindow& window, juce::Graphics& graphics, int width, int height,
+                                    int titleSpaceX, int titleSpaceW, const juce::Image*, bool) override
+    {
+        graphics.setColour(studio::panel);
+        graphics.fillAll();
+        graphics.setColour(studio::line);
+        graphics.fillRect(0, height - 1, width, 1);
+        graphics.setColour(studio::text);
+        graphics.setFont(juce::Font(juce::FontOptions(13.0f)));
+        graphics.drawText(window.getName(), titleSpaceX + 8, 0, titleSpaceW - 8, height, juce::Justification::centredLeft, true);
+    }
+
+    juce::Button* createDocumentWindowButton(int buttonType) override { return new CaptionButton(buttonType); }
+
+    void positionDocumentWindowButtons(juce::DocumentWindow&, int titleBarX, int titleBarY, int titleBarW, int titleBarH,
+                                       juce::Button* minimiseButton, juce::Button* maximiseButton, juce::Button* closeButton, bool) override
+    {
+        const int buttonWidth = 46;
+        int x = titleBarX + titleBarW - buttonWidth;
+        for (auto* button : { closeButton, maximiseButton, minimiseButton })
+        {
+            if (button == nullptr) continue;
+            button->setBounds(x, titleBarY, buttonWidth, titleBarH);
+            x -= buttonWidth;
+        }
+    }
+
+    void drawResizableWindowBorder(juce::Graphics& graphics, int width, int height, const juce::BorderSize<int>& border, juce::ResizableWindow&) override
+    {
+        if (border.isEmpty()) return;
+        graphics.setColour(juce::Colour(0xff0b0d12));
+        graphics.drawRect(0, 0, width, height, juce::jmax(1, border.getTop()));
+        graphics.setColour(studio::line);
+        graphics.drawRect(0, 0, width, height, 1);
     }
 };
 
@@ -294,15 +463,44 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChannelStripComponent)
 };
 
-class MixerView : public juce::Component, private juce::Timer
+class TransportButton : public juce::TextButton
+{
+public:
+    juce::Colour live { studio::accent };
+    bool armed = false;
+    void paintButton(juce::Graphics& graphics, bool over, bool down) override
+    {
+        auto colour = armed ? live : studio::control;
+        if (down) colour = colour.darker(0.16f);
+        else if (over) colour = colour.brighter(0.1f);
+        auto bounds = getLocalBounds().toFloat().reduced(1.0f);
+        graphics.setColour(colour);
+        graphics.fillRoundedRectangle(bounds, 7.0f);
+        if (!armed)
+        {
+            graphics.setColour(studio::line);
+            graphics.drawRoundedRectangle(bounds, 7.0f, 1.0f);
+        }
+        graphics.setColour(armed ? live.brighter(0.35f) : studio::muted);
+        graphics.fillEllipse(8.0f, bounds.getCentreY() - 3.0f, 6.0f, 6.0f);
+        graphics.setColour(juce::Colours::white);
+        graphics.setFont(juce::Font(juce::FontOptions(12.0f)));
+        graphics.drawText(getButtonText(), getLocalBounds().withTrimmedLeft(16), juce::Justification::centred, false);
+    }
+};
+
+class MixerView : public juce::Component, private juce::Timer, private juce::KeyListener
 {
 public:
     explicit MixerView(AudioEngine&);
+    ~MixerView() override;
     void refresh();
     void resized() override;
     void paint(juce::Graphics&) override;
+    void parentHierarchyChanged() override;
 
 private:
+    bool keyPressed(const juce::KeyPress&, juce::Component*) override;
     void timerCallback() override;
     void toggleGroup(const juce::String& name);
     void layoutStrips();
@@ -310,9 +508,12 @@ private:
     void startSavedStream();
     void moveStripTo(const juce::String& draggedId, ChannelStripComponent& target, bool after);
     AudioEngine& engine;
-    juce::TextButton addButton, undoButton, redoButton, muteButton, bypassButton, newProfile;
-    juce::TextButton recordButton, recordPause, recordStop, streamButton, streamPause, streamStop;
+    juce::Label profileLabel;
+    juce::TextButton addButton, newProfile;
+    TransportButton recordButton, recordPause, recordStop, streamButton, streamPause, streamStop;
     juce::ComboBox profiles;
+    juce::Component* keyHost = nullptr;
+    juce::String transportState;
     juce::Viewport viewport;
     juce::Component row;
     juce::OwnedArray<ChannelStripComponent> strips;
