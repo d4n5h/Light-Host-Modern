@@ -1,4 +1,5 @@
 #include "MixWriter.h"
+#include <algorithm>
 
 namespace
 {
@@ -33,23 +34,42 @@ juce::String MixWriter::start(const TakeRequest& incoming)
     request.folder = take;
     if (request.mixdown && !request.mp3)
         if (auto* writer = openWav(take.getChildFile("Master.wav"), 2)) wavs.push_back(std::unique_ptr<juce::AudioFormatWriter>(writer));
-    if (request.multitrack && request.interleaved)
+    if (request.armed.size() != request.names.size()) request.armed.assign(request.names.size(), 1);
+    const auto armedCount = (int) std::count(request.armed.begin(), request.armed.end(), 1);
+    if (request.multitrack && request.interleaved && armedCount > 0)
     {
         juce::String list;
+        int channel = 1;
         for (int i = 0; i < (int) request.names.size(); ++i)
-            list += juce::String(i * 2 + 1) + " " + request.names[(size_t) i] + " L\n" + juce::String(i * 2 + 2) + " " + request.names[(size_t) i] + " R\n";
+        {
+            if (!request.armed[(size_t) i]) continue;
+            list += juce::String(channel) + " " + request.names[(size_t) i] + " L\n" + juce::String(channel + 1) + " " + request.names[(size_t) i] + " R\n";
+            channel += 2;
+        }
         take.getChildFile("tracks.txt").replaceWithText(list);
-        if (auto* writer = openWav(take.getChildFile("Multitrack.wav"), juce::jmax(2, (int) request.names.size() * 2)))
+        if (auto* writer = openWav(take.getChildFile("Multitrack.wav"), juce::jmax(2, armedCount * 2)))
             interleaved.reset(writer);
     }
     else if (request.multitrack)
+    {
+        stemWavs.clear();
+        stemMp3.clear();
+        stemWavs.resize(request.names.size());
+        stemMp3.resize(request.names.size());
+        int fileIndex = 1;
         for (int i = 0; i < (int) request.names.size(); ++i)
         {
-            const auto file = take.getChildFile(juce::String(i + 1).paddedLeft('0', 2) + " " + safeName(request.names[(size_t) i]) + (request.mp3 ? ".mp3" : ".wav"));
-            if (request.mp3) mp3.push_back(std::make_unique<Mp3Sink>());
-            else if (auto* writer = openWav(file, 2)) wavs.push_back(std::unique_ptr<juce::AudioFormatWriter>(writer));
-            if (request.mp3 && !mp3.back()->open(file, request.bitrate, request.sampleRate, {})) return "MP3 encoder failed";
+            if (!request.armed[(size_t) i]) continue;
+            const auto file = take.getChildFile(juce::String(fileIndex++).paddedLeft('0', 2) + " " + safeName(request.names[(size_t) i]) + (request.mp3 ? ".mp3" : ".wav"));
+            if (request.mp3)
+            {
+                stemMp3[(size_t) i] = std::make_unique<Mp3Sink>();
+                if (!stemMp3[(size_t) i]->open(file, request.bitrate, request.sampleRate, {})) return "MP3 encoder failed";
+            }
+            else if (auto* writer = openWav(file, 2))
+                stemWavs[(size_t) i].reset(writer);
         }
+    }
     const auto feed = [this](const void* data, size_t bytes) { icecast.write(data, bytes); };
     if (request.mixdown && request.mp3)
     {
@@ -81,7 +101,9 @@ void MixWriter::stop()
 {
     if (isThreadRunning()) { signalThreadShouldExit(); stopThread(4000); }
     wavs.clear();
+    stemWavs.clear();
     mp3.clear();
+    stemMp3.clear();
     masterMp3.reset();
     interleaved.reset();
     icecast.close();
@@ -102,7 +124,8 @@ void MixWriter::run()
     for (auto& channel : stripL) channel.resize((size_t) block);
     for (auto& channel : stripR) channel.resize((size_t) block);
     juce::AudioBuffer<float> stereo(2, block);
-    juce::AudioBuffer<float> wide(juce::jmax(2, (int) request.names.size() * 2), block);
+    const int armedChannels = (int) std::count(request.armed.begin(), request.armed.end(), 1) * 2;
+    juce::AudioBuffer<float> wide(juce::jmax(2, armedChannels), block);
     while (!threadShouldExit())
     {
         int masterFrames = 0;
@@ -127,30 +150,33 @@ void MixWriter::run()
         }
         if (multiFrames > 0 && request.interleaved && interleaved)
         {
+            int dest = 0;
             for (int i = 0; i < (int) request.names.size(); ++i)
+            {
+                if (i >= (int) request.armed.size() || !request.armed[(size_t) i]) continue;
                 for (int sample = 0; sample < multiFrames; ++sample)
                 {
-                    wide.setSample(i * 2, sample, stripL[(size_t) i][(size_t) sample]);
-                    wide.setSample(i * 2 + 1, sample, stripR[(size_t) i][(size_t) sample]);
+                    wide.setSample(dest * 2, sample, stripL[(size_t) i][(size_t) sample]);
+                    wide.setSample(dest * 2 + 1, sample, stripR[(size_t) i][(size_t) sample]);
                 }
+                ++dest;
+            }
             interleaved->writeFromAudioSampleBuffer(wide, 0, multiFrames);
         }
         else if (multiFrames > 0)
             for (int i = 0; i < (int) request.names.size(); ++i)
             {
-                if (request.mp3 && i < (int) mp3.size()) mp3[(size_t) i]->write(stripL[(size_t) i].data(), stripR[(size_t) i].data(), multiFrames);
-                else
+                if (i < (int) request.armed.size() && !request.armed[(size_t) i]) continue;
+                if (request.mp3 && i < (int) stemMp3.size() && stemMp3[(size_t) i])
+                    stemMp3[(size_t) i]->write(stripL[(size_t) i].data(), stripR[(size_t) i].data(), multiFrames);
+                else if (i < (int) stemWavs.size() && stemWavs[(size_t) i])
                 {
-                    const int wavIndex = (request.mixdown && !request.mp3 ? 1 : 0) + i;
-                    if (wavIndex < (int) wavs.size())
+                    for (int sample = 0; sample < multiFrames; ++sample)
                     {
-                        for (int sample = 0; sample < multiFrames; ++sample)
-                        {
-                            stereo.setSample(0, sample, stripL[(size_t) i][(size_t) sample]);
-                            stereo.setSample(1, sample, stripR[(size_t) i][(size_t) sample]);
-                        }
-                        wavs[(size_t) wavIndex]->writeFromAudioSampleBuffer(stereo, 0, multiFrames);
+                        stereo.setSample(0, sample, stripL[(size_t) i][(size_t) sample]);
+                        stereo.setSample(1, sample, stripR[(size_t) i][(size_t) sample]);
                     }
+                    stemWavs[(size_t) i]->writeFromAudioSampleBuffer(stereo, 0, multiFrames);
                 }
             }
     }

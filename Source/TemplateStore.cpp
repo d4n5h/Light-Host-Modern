@@ -136,4 +136,45 @@ juce::String TemplateStore::remove(const juce::String& id) const
     if (!validId(id) || !fileFor(id).existsAsFile()) return "template_not_found";
     return fileFor(id).deleteFile() ? juce::String() : juce::String("template_write_failed");
 }
+
+juce::String TemplateStore::exportFile(const juce::String& id, const juce::File& destination) const
+{
+    if (!validId(id) || !fileFor(id).existsAsFile()) return "template_not_found";
+    auto target = destination.getFullPathName().isEmpty() ? juce::File() : destination;
+    if (target == juce::File()) return "template_write_failed";
+    if (!target.hasFileExtension("xml")) target = target.withFileExtension("xml");
+    target.getParentDirectory().createDirectory();
+    return fileFor(id).copyFileTo(target) ? juce::String() : juce::String("template_write_failed");
+}
+
+juce::String TemplateStore::importFile(const juce::File& source, juce::String& id) const
+{
+    const auto parsed = juce::XmlDocument::parse(source);
+    if (parsed == nullptr || !parsed->hasTagName("LIGHTHOSTTEMPLATE") || parsed->getIntAttribute("version") != 1)
+        return "template_session_invalid";
+    TemplateSnapshot snapshot;
+    snapshot.session = childCopy(*parsed, "LIGHTHOSTSESSION");
+    if (auto* wrap = parsed->getChildByName("AUDIOSTATE"))
+        if (auto* child = wrap->getFirstChildElement()) snapshot.device = std::make_unique<juce::XmlElement>(*child);
+    snapshot.channels = childCopy(*parsed, "CHANNELS");
+    if (auto* host = parsed->getChildByName("HOST"))
+    {
+        snapshot.monoInputs = host->getBoolAttribute("monoInputs");
+        snapshot.monoOutput = host->getBoolAttribute("monoOutput");
+        snapshot.persistence = host->getStringAttribute("persistence", "disabled");
+        snapshot.muted = host->getBoolAttribute("muted");
+        snapshot.bypassed = host->getBoolAttribute("bypassed");
+    }
+    if (snapshot.session == nullptr) return "template_session_invalid";
+    auto name = parsed->getStringAttribute("name");
+    if (name.isEmpty()) name = source.getFileNameWithoutExtension();
+    for (int extra = 2; extra < 100; ++extra)
+    {
+        const auto error = create(name, snapshot, id);
+        if (error != "template_name_taken") return error;
+        name = parsed->getStringAttribute("name") + " " + juce::String(extra);
+        if (parsed->getStringAttribute("name").isEmpty()) name = source.getFileNameWithoutExtension() + " " + juce::String(extra);
+    }
+    return "template_name_taken";
+}
 }

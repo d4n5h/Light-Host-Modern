@@ -62,6 +62,7 @@ public:
 	String renameChainProfile(const String& id, const String& name);
 	String duplicateChainProfile(const String& id);
 	String deleteChainProfile(const String& id);
+	String moveChainProfile(const String& id, int delta);
 	std::vector<lightHostModern::TemplateEntry> listTemplates() const { return templates ? templates->list() : std::vector<lightHostModern::TemplateEntry>{}; }
 	String activeTemplateId() const { return getAppProperties().getUserSettings()->getValue("activeTemplate"); }
 	String createTemplate(const String& name);
@@ -69,6 +70,8 @@ public:
 	String recallTemplate(const String& id);
 	String renameTemplate(const String& id, const String& name);
 	String deleteTemplate(const String& id);
+	String exportTemplate(const String& id, const File& file);
+	String importTemplate(const File& file);
 	int findKnownPluginIndexById(const String& id) const;
 	int findPluginIndexById(const PluginInstanceId& id) const;
 	void setGlobalMuted(bool value) { if (hostProcessor.setGlobalMuted(value)) ++chainVersion; }
@@ -151,6 +154,7 @@ public:
 	String setStripColour(const String& id, const String& hex);
 	String setStripMuted(const String& id, bool muted);
 	String setStripSolo(const String& id, bool solo);
+	String setStripRecord(const String& id, bool record);
 	String setStripGroup(const String& id, const String& group);
 	String orderStrips(const std::vector<std::pair<String, String>>& order);
 	float getStripLevel(const String& id) const { return hostProcessor.getStripLevel(id); }

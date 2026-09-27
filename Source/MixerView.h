@@ -443,7 +443,7 @@ private:
     ClickLabel gainLabel, panReadout;
     InputCombo inputBox;
     juce::ComboBox outputBox, outputBox2;
-    MarkButton muteStrip { "M", juce::Colour(0xffc44545) }, soloStrip { "S", juce::Colour(0xffd4a017) };
+    MarkButton muteStrip { "M", juce::Colour(0xffc44545) }, soloStrip { "S", juce::Colour(0xffd4a017) }, recordStrip { "R", juce::Colour(0xffff5d5d) };
     juce::TextButton plusButton;
     juce::Component insertList;
     juce::Viewport insertViewport;
@@ -509,7 +509,7 @@ private:
     void moveStripTo(const juce::String& draggedId, ChannelStripComponent& target, bool after);
     AudioEngine& engine;
     juce::Label profileLabel;
-    juce::TextButton addButton, newProfile;
+    juce::TextButton addButton, newProfile, profileMenu;
     TransportButton recordButton, recordPause, recordStop, streamButton, streamPause, streamStop;
     juce::ComboBox profiles;
     juce::Component* keyHost = nullptr;

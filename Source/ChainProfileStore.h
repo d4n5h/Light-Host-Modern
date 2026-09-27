@@ -35,6 +35,7 @@ public:
     juce::String rename(const juce::String& id, const juce::String& name);
     juce::String duplicate(const juce::String& id, juce::String& newId);
     juce::String remove(const juce::String& id);
+    juce::String move(const juce::String& id, int delta);
 private:
     juce::File fileFor(const juce::String& id) const { return directory.getChildFile(id + ".json"); }
     const ChainProfile* find(const juce::String& id) const;

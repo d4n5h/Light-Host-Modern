@@ -574,7 +574,7 @@ class TemplatesPage : public juce::Component, private juce::ListBoxModel
 public:
     explicit TemplatesPage(AudioEngine& engineIn) : engine(engineIn)
     {
-        for (auto* button : { &save, &saveAs, &recall, &rename, &remove }) addAndMakeVisible(button);
+        for (auto* button : { &save, &saveAs, &recall, &rename, &remove, &fileButton }) addAndMakeVisible(button);
         addAndMakeVisible(status);
         addAndMakeVisible(list);
         save.setButtonText("Save");
@@ -582,6 +582,7 @@ public:
         recall.setButtonText("Recall");
         rename.setButtonText("Rename");
         remove.setButtonText("Delete");
+        fileButton.setButtonText("File");
         save.onClick = [this] { saveSelected(); };
         saveAs.onClick = [this] { askName("Save template", {}, [this](const juce::String& name) { show(engine.createTemplate(name)); }); };
         recall.onClick = [this] { recallRow(list.getSelectedRow()); };
@@ -602,6 +603,32 @@ public:
             dialog->enterModalState(true, juce::ModalCallbackFunction::create([this, dialog, id](int choice) {
                 if (choice == 1) show(engine.deleteTemplate(id));
             }), false);
+        };
+        fileButton.onClick = [this] {
+            const int row = list.getSelectedRow();
+            juce::PopupMenu menu;
+            menu.addItem(1, "Save to file", valid(row));
+            menu.addItem(2, "Open from file");
+            menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&fileButton), [this, row](int result) {
+                if (result == 1 && valid(row))
+                {
+                    const auto id = entries[(size_t) row].id;
+                    const auto suggested = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile(entries[(size_t) row].name + ".xml");
+                    chooser = std::make_shared<juce::FileChooser>("Save template", suggested, "*.xml");
+                    chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting, [this, id](const juce::FileChooser& dialog) {
+                        const auto file = dialog.getResult();
+                        if (file != juce::File()) show(engine.exportTemplate(id, file));
+                    });
+                }
+                else if (result == 2)
+                {
+                    chooser = std::make_shared<juce::FileChooser>("Open template", juce::File::getSpecialLocation(juce::File::userDocumentsDirectory), "*.xml");
+                    chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this](const juce::FileChooser& dialog) {
+                        const auto file = dialog.getResult();
+                        if (file != juce::File()) show(engine.importTemplate(file));
+                    });
+                }
+            });
         };
         list.setModel(this);
         list.setRowHeight(28);
@@ -625,6 +652,7 @@ public:
         recall.setBounds(bar.removeFromLeft(90));
         rename.setBounds(bar.removeFromLeft(90));
         remove.setBounds(bar.removeFromLeft(90));
+        fileButton.setBounds(bar.removeFromLeft(70));
         status.setBounds(area.removeFromTop(24));
         list.setBounds(area);
     }
@@ -665,6 +693,7 @@ private:
         if (error == "template_not_found") return "Template was not found.";
         if (error == "template_session_invalid") return "Template file is damaged.";
         if (error == "template_limit") return "Too many templates.";
+        if (error == "template_write_failed") return "Could not write the template file.";
         if (error == "session_read_only") return "The session is read only.";
         return error;
     }
@@ -679,7 +708,8 @@ private:
         }), false);
     }
     AudioEngine& engine;
-    juce::TextButton save, saveAs, recall, rename, remove;
+    juce::TextButton save, saveAs, recall, rename, remove, fileButton;
+    std::shared_ptr<juce::FileChooser> chooser;
     juce::Label status;
     juce::ListBox list;
     std::vector<lightHostModern::TemplateEntry> entries;
@@ -814,12 +844,79 @@ void paintRecordIcon(juce::Graphics& graphics, juce::Rectangle<float> bounds)
     graphics.fillEllipse(bounds.reduced(2.0f));
 }
 
+void paintMidiIcon(juce::Graphics& graphics, juce::Rectangle<float> bounds)
+{
+    auto body = bounds.reduced(1.0f, 4.0f);
+    graphics.drawRoundedRectangle(body, 2.0f, 1.6f);
+    const float y = body.getCentreY() - 1.5f;
+    for (int i = 0; i < 3; ++i)
+    {
+        const float x = body.getX() + 3.0f + (float) i * (body.getWidth() - 6.0f) / 2.0f;
+        graphics.fillEllipse(x, y, 3.0f, 3.0f);
+    }
+}
+
+class MidiPage : public juce::Component
+{
+public:
+    explicit MidiPage(AudioEngine& engineIn) : engine(engineIn)
+    {
+        label.setText("Controller", juce::dontSendNotification);
+        help.setText("ICON, X-Touch, and Mackie Control. Faders, pan, mute, solo, and bank.", juce::dontSendNotification);
+        status.setColour(juce::Label::textColourId, studio::muted);
+        addAndMakeVisible(label);
+        addAndMakeVisible(input);
+        addAndMakeVisible(help);
+        addAndMakeVisible(status);
+        input.onChange = [this] {
+            if (applying) return;
+            if (input.getSelectedId() <= 1) { engine.closeMackie(); status.setText("Controller off.", juce::dontSendNotification); }
+            else if (const auto error = engine.openMackie(input.getSelectedId() - 2); error.isNotEmpty()) status.setText(error, juce::dontSendNotification);
+            else status.setText("Connected to " + input.getText() + ".", juce::dontSendNotification);
+        };
+    }
+
+    void refresh()
+    {
+        const auto selected = input.getText();
+        applying = true;
+        input.clear(juce::dontSendNotification);
+        input.addItem("Off", 1);
+        const auto inputs = engine.midiInputNames();
+        int id = 1;
+        for (int i = 0; i < inputs.size(); ++i)
+        {
+            input.addItem(inputs[i], i + 2);
+            if (inputs[i] == selected) id = i + 2;
+        }
+        input.setSelectedId(id, juce::dontSendNotification);
+        applying = false;
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced(16);
+        auto line = area.removeFromTop(28);
+        label.setBounds(line.removeFromLeft(120));
+        input.setBounds(line.removeFromLeft(320));
+        area.removeFromTop(8);
+        help.setBounds(area.removeFromTop(24));
+        status.setBounds(area.removeFromTop(24));
+    }
+
+private:
+    AudioEngine& engine;
+    juce::Label label, help, status;
+    juce::ComboBox input;
+    bool applying = false;
+};
+
 class RecordPage : public juce::Component, private juce::Timer
 {
 public:
     explicit RecordPage(AudioEngine& engineIn) : engine(engineIn)
     {
-        for (auto* label : { &folderLabel, &formatLabel, &rateLabel, &iceHostLabel, &icePortLabel, &iceMountLabel, &iceUserLabel, &icePassLabel, &iceNameLabel, &deviceLabel, &midiLabel })
+        for (auto* label : { &folderLabel, &formatLabel, &rateLabel, &iceHostLabel, &icePortLabel, &iceMountLabel, &iceUserLabel, &icePassLabel, &iceNameLabel, &deviceLabel })
             addAndMakeVisible(label);
         folderLabel.setText("Folder", juce::dontSendNotification);
         formatLabel.setText("Format", juce::dontSendNotification);
@@ -831,7 +928,6 @@ public:
         icePassLabel.setText("Password", juce::dontSendNotification);
         iceNameLabel.setText("Name", juce::dontSendNotification);
         deviceLabel.setText("Stream device", juce::dontSendNotification);
-        midiLabel.setText("Mackie MIDI", juce::dontSendNotification);
         addAndMakeVisible(folder);
         addAndMakeVisible(browse);
         addAndMakeVisible(format);
@@ -849,7 +945,6 @@ public:
         addAndMakeVisible(iceName);
         addAndMakeVisible(devices);
         addAndMakeVisible(stream);
-        addAndMakeVisible(midi);
         addAndMakeVisible(status);
         browse.setButtonText("Browse");
         record.setButtonText("Record");
@@ -892,11 +987,6 @@ public:
             getAppProperties().getUserSettings()->setValue("streamDevice", devices.getSelectedId() > 1 ? devices.getText() : juce::String());
             getAppProperties().getUserSettings()->saveIfNeeded();
         };
-        midi.onChange = [this] {
-            if (applying) return;
-            if (midi.getSelectedId() <= 1) engine.closeMackie();
-            else if (const auto error = engine.openMackie(midi.getSelectedId() - 2); error.isNotEmpty()) status.setText(error, juce::dontSendNotification);
-        };
         status.setText("Password is not encrypted on the network.", juce::dontSendNotification);
         startTimerHz(4);
     }
@@ -912,11 +1002,6 @@ public:
         int deviceId = 1;
         for (int i = 0; i < names.size(); ++i) if (names[i] == savedDevice) deviceId = i + 2;
         devices.setSelectedId(deviceId, juce::dontSendNotification);
-        midi.clear(juce::dontSendNotification);
-        midi.addItem("Off", 1);
-        const auto inputs = engine.midiInputNames();
-        for (int i = 0; i < inputs.size(); ++i) midi.addItem(inputs[i], i + 2);
-        if (midi.getSelectedId() == 0) midi.setSelectedId(1, juce::dontSendNotification);
         applying = false;
         interleaved.setEnabled(format.getSelectedId() != 2 && !engine.isRecording());
         raw.setEnabled(!engine.isRecording());
@@ -953,7 +1038,6 @@ public:
         row(deviceLabel, devices);
         stream.setBounds(area.removeFromTop(32).removeFromLeft(140));
         area.removeFromTop(8);
-        row(midiLabel, midi);
         status.setBounds(area.removeFromTop(48));
     }
 
@@ -998,9 +1082,9 @@ private:
     }
 
     AudioEngine& engine;
-    juce::Label folderLabel, formatLabel, rateLabel, iceHostLabel, icePortLabel, iceMountLabel, iceUserLabel, icePassLabel, iceNameLabel, deviceLabel, midiLabel, status;
+    juce::Label folderLabel, formatLabel, rateLabel, iceHostLabel, icePortLabel, iceMountLabel, iceUserLabel, icePassLabel, iceNameLabel, deviceLabel, status;
     juce::TextEditor folder, iceHost, icePort, iceMount, iceUser, icePass, iceName;
-    juce::ComboBox format, bitrate, devices, midi;
+    juce::ComboBox format, bitrate, devices;
     juce::ToggleButton mixdown, multi, interleaved, raw;
     juce::TextButton browse, record, stream;
     std::unique_ptr<juce::FileChooser> chooser;
@@ -1012,15 +1096,15 @@ class Shell : public juce::Component, public juce::DragAndDropContainer, private
 public:
     Shell(AudioEngine& engineIn, std::function<void()> refreshTray)
         : engine(engineIn), mixer(engineIn), templates(engineIn), installed(engineIn), audio(engineIn), dashboard(engineIn),
-          settings(engineIn, std::move(refreshTray)), diagnostics(engineIn), record(engineIn)
+          settings(engineIn, std::move(refreshTray)), diagnostics(engineIn), record(engineIn), midiPage(engineIn)
     {
         setLookAndFeel(&shellLook());
         juce::LookAndFeel::setDefaultLookAndFeel(&shellLook());
-        const char* names[] = { "Mixer", "Templates", "VST Plugins", "Audio", "Dashboard", "Settings", "Diagnostics", "Support", "Record" };
+        const char* names[] = { "Mixer", "Templates", "VST Plugins", "Audio", "Dashboard", "Settings", "Diagnostics", "Support", "Record", "MIDI" };
         const std::function<void(juce::Graphics&, juce::Rectangle<float>)> icons[] = {
-            paintMixerIcon, paintTemplatesIcon, paintPluginIcon, paintAudioIcon, paintDashboardIcon, paintSettingsIcon, paintDiagnosticsIcon, paintSupportIcon, paintRecordIcon
+            paintMixerIcon, paintTemplatesIcon, paintPluginIcon, paintAudioIcon, paintDashboardIcon, paintSettingsIcon, paintDiagnosticsIcon, paintSupportIcon, paintRecordIcon, paintMidiIcon
         };
-        for (int i = 0; i < 9; ++i)
+        for (int i = 0; i < 10; ++i)
         {
             titles[i] = names[i];
             rail[i].setTooltip(titles[i]);
@@ -1062,12 +1146,12 @@ public:
     }
 
 private:
-    std::array<juce::Component*, 9> pages() { return { &mixer, &templates, &installed, &audio, &dashboard, &settings, &diagnostics, &support, &record }; }
+    std::array<juce::Component*, 10> pages() { return { &mixer, &templates, &installed, &audio, &dashboard, &settings, &diagnostics, &support, &record, &midiPage }; }
     void applyRail()
     {
         collapse.collapsed = collapsed;
         collapse.repaint();
-        for (int i = 0; i < 9; ++i)
+        for (int i = 0; i < 10; ++i)
         {
             rail[i].showIcon = collapsed;
             rail[i].setButtonText(titles[i]);
@@ -1077,7 +1161,7 @@ private:
     {
         current = index;
         auto shown = pages();
-        for (int i = 0; i < 9; ++i)
+        for (int i = 0; i < 10; ++i)
         {
             shown[i]->setVisible(i == index);
             rail[i].setToggleState(i == index, juce::dontSendNotification);
@@ -1094,6 +1178,7 @@ private:
         else if (current == 5) settings.refresh();
         else if (current == 6) diagnostics.refresh();
         else if (current == 8) record.refresh();
+        else if (current == 9) midiPage.refresh();
     }
     void timerCallback() override
     {
@@ -1118,9 +1203,10 @@ private:
     DiagnosticsPage diagnostics;
     SupportPage support;
     RecordPage record;
-    RailButton rail[9];
+    MidiPage midiPage;
+    RailButton rail[10];
     ChevronButton collapse;
-    juce::String titles[9];
+    juce::String titles[10];
     bool collapsed = false;
     juce::TooltipWindow tooltips { this, 500 };
     int current = 0;

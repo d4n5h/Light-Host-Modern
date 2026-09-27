@@ -741,6 +741,7 @@ void AudioEngine::loadActivePlugins()
         item.pan = strip.pan;
         item.muted = strip.muted;
         item.solo = strip.solo;
+        item.record = strip.record;
         if (!strip.allInputs)
             for (int physical : strip.inputs) item.inputMap.push_back(packed(inputMask, physical));
         if (!strip.allOutputs)
@@ -1095,6 +1096,14 @@ String AudioEngine::deleteChainProfile(const String& id)
     return {};
 }
 
+String AudioEngine::moveChainProfile(const String& id, int delta)
+{
+    if (!isSessionWritable() || !chainProfiles) return "session_read_only";
+    if (const auto error = chainProfiles->move(id, delta); error.isNotEmpty()) return error;
+    ++profileVersion;
+    return {};
+}
+
 lightHostModern::TemplateSnapshot AudioEngine::captureTemplate()
 {
     lightHostModern::TemplateSnapshot snapshot;
@@ -1175,6 +1184,19 @@ String AudioEngine::deleteTemplate(const String& id)
         markSettingsDirty();
     }
     return {};
+}
+
+String AudioEngine::exportTemplate(const String& id, const File& file)
+{
+    if (!templates) return "session_read_only";
+    return templates->exportFile(id, file);
+}
+
+String AudioEngine::importTemplate(const File& file)
+{
+    if (!isSessionWritable() || !templates) return "session_read_only";
+    String id;
+    return templates->importFile(file, id);
 }
 
 bool AudioEngine::renamePlugin(int sortedIndex, const String& name)
@@ -1564,6 +1586,20 @@ String AudioEngine::setStripSolo(const String& id, bool solo)
     return {};
 }
 
+String AudioEngine::setStripRecord(const String& id, bool record)
+{
+    if (!isSessionWritable()) return "session_read_only";
+    auto* strip = const_cast<lightHostModern::ChainStrip*>(instances.findStrip(id));
+    if (!strip) return "strip_not_found";
+    if (strip->record == record) return {};
+    chainHistory.record(instances);
+    strip->record = record;
+    hostProcessor.setStripRecord(id, record);
+    ++chainVersion;
+    saveActivePluginChain(false);
+    return {};
+}
+
 String AudioEngine::setStripGroup(const String& id, const String& group)
 {
     if (!isSessionWritable()) return "session_read_only";
@@ -1656,7 +1692,11 @@ String AudioEngine::startRecording(const File& folder, bool mp3, int bitrate, bo
     request.interleaved = interleaved && !mp3;
     request.raw = raw;
     request.sampleRate = rate > 0 ? rate : 48000.0;
-    for (const auto& strip : instances.strips) request.names.push_back(strip.name);
+    for (const auto& strip : instances.strips)
+    {
+        request.names.push_back(strip.name);
+        request.armed.push_back(strip.record);
+    }
     request.icecastHost = icecastHost;
     request.icecastPort = icecastPort;
     request.icecastMount = mount;

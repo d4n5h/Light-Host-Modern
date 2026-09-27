@@ -272,10 +272,15 @@ ChannelStripComponent::ChannelStripComponent(AudioEngine& engineIn, bool masterI
         addAndMakeVisible(outputBox);
         addAndMakeVisible(outputBox2);
         addAndMakeVisible(soloStrip);
+        addAndMakeVisible(recordStrip);
         addAndMakeVisible(pan);
         addAndMakeVisible(panReadout);
         soloStrip.setClickingTogglesState(true);
         soloStrip.onClick = [this] { if (!applying) engine.setStripSolo(stripId, soloStrip.getToggleState()); };
+        recordStrip.setClickingTogglesState(true);
+        recordStrip.setToggleState(true, juce::dontSendNotification);
+        recordStrip.setTooltip("Record this channel");
+        recordStrip.onClick = [this] { if (!applying) engine.setStripRecord(stripId, recordStrip.getToggleState()); };
         inputBox.setTextWhenNothingSelected("Inputs");
         inputBox.onMenu = [this] { showInputMenu(); };
         const auto chosen = [](const juce::ComboBox& box, const std::vector<int>& channels, int firstId) {
@@ -446,6 +451,7 @@ void ChannelStripComponent::setStrip(const lightHostModern::ChainStrip& strip, c
     applying = true;
     muteStrip.setToggleState(strip.muted, juce::dontSendNotification);
     soloStrip.setToggleState(strip.solo, juce::dontSendNotification);
+    recordStrip.setToggleState(strip.record, juce::dontSendNotification);
     const bool showPair = !strip.allOutputs;
     const bool layoutChanged = widthChanged || outputBox2.isVisible() != showPair;
     outputBox2.setVisible(showPair);
@@ -591,7 +597,9 @@ void ChannelStripComponent::paint(juce::Graphics& graphics)
         {
             const int y = meterBounds.getBottom() - juce::roundToInt((float) meterBounds.getHeight() * ((mark + 60.0f) / 60.0f));
             graphics.fillRect(meterBounds.getX() - 4, y, 3, 1);
-            graphics.drawText(juce::String(mark, 0), tickBounds.withY(y - 6).withHeight(12), juce::Justification::centredRight, false);
+            auto label = tickBounds.withHeight(12);
+            label.setY(juce::jlimit(meterBounds.getY(), juce::jmax(meterBounds.getY(), meterBounds.getBottom() - 12), y - 6));
+            graphics.drawText(juce::String(mark, 0), label, juce::Justification::centredRight, false);
         }
     }
     if (pluginDropY >= 0)
@@ -624,8 +632,10 @@ void ChannelStripComponent::resized()
     if (master) muteStrip.setBounds(marks.reduced(1, 1));
     else
     {
-        muteStrip.setBounds(marks.removeFromLeft(marks.getWidth() / 2).reduced(1, 1));
-        soloStrip.setBounds(marks.reduced(1, 1));
+        const int third = marks.getWidth() / 3;
+        muteStrip.setBounds(marks.removeFromLeft(third).reduced(1, 1));
+        soloStrip.setBounds(marks.removeFromLeft(third).reduced(1, 1));
+        recordStrip.setBounds(marks.reduced(1, 1));
     }
     fader.setBounds(faderArea);
     gainLabel.setBounds(layout.gain);
@@ -642,6 +652,7 @@ void ChannelStripComponent::resized()
         if (outputBox2.isVisible()) outputBox2.setBounds(insertsArea.removeFromTop(26).reduced(0, 1));
     }
     const int rowHeight = 26;
+    if (master) insertsArea.removeFromBottom(16);
     plusButton.setBounds(insertsArea.removeFromBottom(rowHeight).reduced(0, 1));
     insertViewport.setBounds(insertsArea);
     const int contentHeight = inserts.size() * rowHeight;
@@ -922,6 +933,8 @@ MixerView::MixerView(AudioEngine& engineIn)
     profileLabel.setFont(juce::Font(juce::FontOptions(12.0f)));
     addAndMakeVisible(profileLabel);
     addAndMakeVisible(profiles);
+    profileMenu.setButtonText("Edit");
+    addAndMakeVisible(profileMenu);
     addAndMakeVisible(viewport);
     viewport.setViewedComponent(&row, false);
     viewport.setScrollBarsShown(false, true);
@@ -936,6 +949,50 @@ MixerView::MixerView(AudioEngine& engineIn)
             if (const auto error = engine.createChainProfile(editor->getTextEditorContents("name")); error.isNotEmpty())
                 juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Profile", error);
         }), false);
+    };
+    profileMenu.onClick = [this] {
+        const auto catalog = engine.chainProfileCatalog();
+        const int index = profiles.getSelectedId() - 1;
+        if (index < 0 || index >= (int) catalog.profiles.size()) return;
+        const auto id = catalog.profiles[(size_t) index].id;
+        const auto name = catalog.profiles[(size_t) index].name;
+        const auto tell = [](const juce::String& error) {
+            if (error.isEmpty()) return;
+            auto text = error;
+            if (error == "profile_name_taken") text = "That name is already used.";
+            else if (error == "profile_name_invalid") text = "Enter a name.";
+            else if (error == "last_profile") text = "Keep at least one profile.";
+            else if (error == "session_read_only") text = "The session is read only.";
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Profile", text);
+        };
+        juce::PopupMenu menu;
+        menu.addItem(1, "Rename");
+        menu.addItem(2, "Delete", catalog.profiles.size() > 1);
+        menu.addItem(3, "Move up", index > 0);
+        menu.addItem(4, "Move down", index + 1 < (int) catalog.profiles.size());
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&profileMenu), [this, id, name, tell](int result) {
+            if (result == 1)
+            {
+                auto editor = std::make_shared<juce::AlertWindow>("Rename profile", "Profile name", juce::AlertWindow::NoIcon);
+                editor->addTextEditor("name", name);
+                editor->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
+                editor->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+                editor->enterModalState(true, juce::ModalCallbackFunction::create([this, editor, id, tell](int choice) {
+                    if (choice == 1) tell(engine.renameChainProfile(id, editor->getTextEditorContents("name")));
+                }), false);
+            }
+            else if (result == 2)
+            {
+                auto dialog = std::make_shared<juce::AlertWindow>("Delete profile", "Delete " + name + "?", juce::AlertWindow::NoIcon);
+                dialog->addButton("Delete", 1);
+                dialog->addButton("Cancel", 0);
+                dialog->enterModalState(true, juce::ModalCallbackFunction::create([this, dialog, id, tell](int choice) {
+                    if (choice == 1) tell(engine.deleteChainProfile(id));
+                }), false);
+            }
+            else if (result == 3) tell(engine.moveChainProfile(id, -1));
+            else if (result == 4) tell(engine.moveChainProfile(id, 1));
+        });
     };
     profiles.onChange = [this] {
         if (applying || profiles.getSelectedId() <= 0) return;
@@ -1179,6 +1236,8 @@ void MixerView::resized()
     profiles.setBounds(transport.removeFromLeft(200).reduced(0, 4));
     transport.removeFromLeft(6);
     newProfile.setBounds(transport.removeFromLeft(64).reduced(0, 4));
+    transport.removeFromLeft(6);
+    profileMenu.setBounds(transport.removeFromLeft(64).reduced(0, 4));
     auto place = [&](juce::Button& button, int width) {
         if (!button.isVisible()) return;
         button.setBounds(transport.removeFromRight(width).reduced(3, 4));

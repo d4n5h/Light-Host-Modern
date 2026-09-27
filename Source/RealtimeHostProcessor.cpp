@@ -524,6 +524,7 @@ void RealtimeHostProcessor::prepareSnapshot(ChainSnapshot& snapshot)
 		strip.runtime->targetPan.store(juce::jlimit(-1.0f, 1.0f, strip.pan), std::memory_order_relaxed);
 		strip.runtime->muted.store(strip.muted, std::memory_order_relaxed);
 		strip.runtime->solo.store(strip.solo, std::memory_order_relaxed);
+		strip.runtime->record.store(strip.record, std::memory_order_relaxed);
 	}
 	for (const auto& slot : snapshot.masterSlots)
 		if (slot) { prepareSlot(*slot, 2); maximum = jmax(maximum, slot->getLatencySamples()); }
@@ -613,6 +614,17 @@ void RealtimeHostProcessor::processStrips(ChainSnapshot& snapshot, AudioBuffer<f
         const bool silent = muted || (anySolo.load(std::memory_order_relaxed) && !soloed);
         auto storeStem = [&](const float* inL, const float* inR, float gain, float pan) {
             if (!take || (!mixCapture->recordMulti() && !(rawTake && mixCapture->recordMaster()))) return;
+            if (strip.runtime && !strip.runtime->record.load(std::memory_order_relaxed))
+            {
+                if (mixCapture->recordMulti())
+                {
+                    auto* left = mixCapture->stem(0);
+                    auto* right = mixCapture->stem(1);
+                    for (int i = 0; i < count; ++i) left[i] = right[i] = 0.0f;
+                    mixCapture->pushStereo(stripIndex, left, right, count);
+                }
+                return;
+            }
             auto* left = mixCapture->stem(0);
             auto* right = mixCapture->stem(1);
             const float angle = (pan + 1.0f) * 0.25f * juce::MathConstants<float>::pi;

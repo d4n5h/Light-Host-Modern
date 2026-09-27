@@ -46,6 +46,7 @@ struct ChainStrip
     juce::String colour;
     bool muted = false;
     bool solo = false;
+    bool record = true;
     juce::String group;
 };
 
@@ -248,6 +249,7 @@ public:
             if (strip.colour.isNotEmpty()) item->setAttribute("colour", strip.colour);
             item->setAttribute("muted", strip.muted);
             item->setAttribute("solo", strip.solo);
+            item->setAttribute("record", strip.record);
             item->setAttribute("group", strip.group);
             item->setAttribute("inputs", channels(strip.inputs));
             item->setAttribute("outputs", channels(strip.outputs));
@@ -325,6 +327,7 @@ public:
                 if (strip.colour.length() != 6 || !strip.colour.containsOnly("0123456789abcdef")) strip.colour.clear();
                 strip.muted = item->getBoolAttribute("muted", false);
                 strip.solo = item->getBoolAttribute("solo", false);
+                strip.record = item->getBoolAttribute("record", true);
                 strip.group = item->getStringAttribute("group").trim();
                 if (!channels(item->getStringAttribute("inputs"), strip.inputs)
                     || !channels(item->getStringAttribute("outputs"), strip.outputs)) return false;

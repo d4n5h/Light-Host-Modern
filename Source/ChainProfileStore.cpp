@@ -356,4 +356,21 @@ juce::String ChainProfileStore::remove(const juce::String& id)
     fileFor(id).deleteFile();
     return {};
 }
+
+juce::String ChainProfileStore::move(const juce::String& id, int delta)
+{
+    if (broken) return "profile_catalog_invalid";
+    if (delta == 0) return {};
+    const auto found = std::find_if(current.profiles.begin(), current.profiles.end(), [&](const auto& profile) { return profile.id == id; });
+    if (found == current.profiles.end()) return "profile_not_found";
+    const int index = (int) std::distance(current.profiles.begin(), found);
+    const int next = juce::jlimit(0, (int) current.profiles.size() - 1, index + (delta < 0 ? -1 : 1));
+    if (next == index) return {};
+    const auto previous = current.profiles;
+    auto profile = *found;
+    current.profiles.erase(current.profiles.begin() + index);
+    current.profiles.insert(current.profiles.begin() + next, profile);
+    if (const auto error = saveCatalog(); error.isNotEmpty()) { current.profiles = previous; return error; }
+    return {};
+}
 }

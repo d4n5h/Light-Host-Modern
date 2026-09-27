@@ -83,6 +83,7 @@ struct StripRuntime
 	float pan = 0.0f;
 	std::atomic<bool> muted { false };
 	std::atomic<bool> solo { false };
+	std::atomic<bool> record { true };
 	std::atomic<float> level { 0.0f };
 	DryDelay align;
 };
@@ -95,6 +96,7 @@ struct StripSnapshot
 	float pan = 0.0f;
 	bool muted = false;
 	bool solo = false;
+	bool record = true;
 	std::shared_ptr<StripRuntime> runtime;
 	std::vector<int> inputMap, outputMap;
 	int busChannels = 2, latencySamples = 0;
@@ -163,6 +165,11 @@ public:
 	{
 		if (const auto found = stripRuntimes.find(id); found != stripRuntimes.end() && found->second)
 			found->second->solo.store(solo, std::memory_order_relaxed);
+	}
+	void setStripRecord(const juce::String& id, bool record) noexcept
+	{
+		if (const auto found = stripRuntimes.find(id); found != stripRuntimes.end() && found->second)
+			found->second->record.store(record, std::memory_order_relaxed);
 	}
 	void setAnySolo(bool value) noexcept { anySolo.store(value, std::memory_order_relaxed); }
 	float getStripLevel(const juce::String& id) const noexcept

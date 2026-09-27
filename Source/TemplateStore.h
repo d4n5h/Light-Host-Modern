@@ -34,6 +34,8 @@ public:
     juce::String read(const juce::String& id, TemplateSnapshot& snapshot) const;
     juce::String rename(const juce::String& id, const juce::String& name) const;
     juce::String remove(const juce::String& id) const;
+    juce::String exportFile(const juce::String& id, const juce::File& destination) const;
+    juce::String importFile(const juce::File& source, juce::String& id) const;
 
 private:
     juce::File fileFor(const juce::String& id) const { return directory.getChildFile(id + ".xml"); }

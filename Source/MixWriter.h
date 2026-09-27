@@ -17,6 +17,7 @@ struct TakeRequest
     bool raw = false;
     double sampleRate = 48000.0;
     std::vector<juce::String> names;
+    std::vector<char> armed;
     juce::String icecastHost;
     int icecastPort = 8000;
     juce::String icecastMount, icecastUser, icecastPassword, icecastName;
@@ -38,7 +39,9 @@ private:
     MixCapture& capture;
     TakeRequest request;
     std::vector<std::unique_ptr<juce::AudioFormatWriter>> wavs;
+    std::vector<std::unique_ptr<juce::AudioFormatWriter>> stemWavs;
     std::vector<std::unique_ptr<Mp3Sink>> mp3;
+    std::vector<std::unique_ptr<Mp3Sink>> stemMp3;
     std::unique_ptr<Mp3Sink> masterMp3;
     IcecastSource icecast;
     std::unique_ptr<juce::AudioFormatWriter> interleaved;
