@@ -1,126 +1,39 @@
 #include "Mp3Sink.h"
-#include <mfapi.h>
-#include <mfidl.h>
-#include <mftransform.h>
-#include <mferror.h>
-
-namespace
-{
-struct Release { template <typename T> void operator()(T* p) const { if (p) p->Release(); } };
-
-int& mediaUsers()
-{
-    static int users = 0;
-    return users;
-}
-
-void emit(IMFTransform* transform, juce::FileOutputStream* file, const std::function<void(const void*, size_t)>& onBytes)
-{
-    MFT_OUTPUT_STREAM_INFO info{};
-    transform->GetOutputStreamInfo(0, &info);
-    IMFSample* sample = nullptr;
-    IMFMediaBuffer* buffer = nullptr;
-    const DWORD bytes = info.cbSize > 4096u ? info.cbSize : 4096u;
-    if (FAILED(MFCreateSample(&sample)) || FAILED(MFCreateMemoryBuffer(bytes, &buffer)))
-    {
-        if (sample) sample->Release();
-        return;
-    }
-    sample->AddBuffer(buffer);
-    buffer->Release();
-    MFT_OUTPUT_DATA_BUFFER output{};
-    output.pSample = sample;
-    DWORD status = 0;
-    while (transform->ProcessOutput(0, 1, &output, &status) == S_OK)
-    {
-        IMFMediaBuffer* out = nullptr;
-        if (SUCCEEDED(sample->ConvertToContiguousBuffer(&out)) && out)
-        {
-            BYTE* data = nullptr;
-            DWORD length = 0;
-            if (SUCCEEDED(out->Lock(&data, nullptr, &length)) && data && length)
-            {
-                if (file) file->write(data, length);
-                if (onBytes) onBytes(data, length);
-                out->Unlock();
-            }
-            out->Release();
-        }
-        sample->Release();
-        sample = nullptr;
-        const DWORD bytes = info.cbSize > 4096u ? info.cbSize : 4096u;
-    if (FAILED(MFCreateSample(&sample)) || FAILED(MFCreateMemoryBuffer(bytes, &buffer))) break;
-        sample->AddBuffer(buffer);
-        buffer->Release();
-        output = {};
-        output.pSample = sample;
-    }
-    if (sample) sample->Release();
-}
-}
+#include <lame.h>
+#include <cmath>
+#include <vector>
 
 Mp3Sink::~Mp3Sink() { close(); }
 
 bool Mp3Sink::open(const juce::File& target, int bitsPerSecond, double rate, std::function<void(const void*, size_t)> bytes)
 {
     close();
-    sourceRate = rate > 0 ? rate : 48000.0;
     onBytes = std::move(bytes);
-    if (target != juce::File())
+    sourceRate = rate > 0 ? rate : 48000.0;
+    phase = 0.0;
+    if (!onBytes)
     {
         target.deleteFile();
         file = new juce::FileOutputStream(target);
         if (!file->openedOk()) { delete file; file = nullptr; return false; }
     }
-    if (mediaUsers()++ == 0) MFStartup(MF_VERSION);
-    started = true;
-    MFT_REGISTER_TYPE_INFO inInfo{ MFMediaType_Audio, MFAudioFormat_PCM };
-    MFT_REGISTER_TYPE_INFO outInfo{ MFMediaType_Audio, MFAudioFormat_MP3 };
-    IMFActivate** activates = nullptr;
-    UINT32 count = 0;
-    if (FAILED(MFTEnumEx(MFT_CATEGORY_AUDIO_ENCODER, MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_LOCALMFT | MFT_ENUM_FLAG_SORTANDFILTER, &inInfo, &outInfo, &activates, &count)) || count == 0)
-    {
-        close();
-        return false;
-    }
-    IMFTransform* transform = nullptr;
-    activates[0]->ActivateObject(IID_PPV_ARGS(&transform));
-    for (UINT32 i = 0; i < count; ++i) activates[i]->Release();
-    CoTaskMemFree(activates);
-    if (!transform) { close(); return false; }
-    IMFMediaType* outType = nullptr;
-    IMFMediaType* inType = nullptr;
-    MFCreateMediaType(&outType);
-    outType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-    outType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_MP3);
-    outType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2);
-    outType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, 48000);
-    outType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, (UINT32) (juce::jlimit(32000, 320000, bitsPerSecond) / 8));
-    const auto outOk = transform->SetOutputType(0, outType, 0);
-    outType->Release();
-    MFCreateMediaType(&inType);
-    inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-    inType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
-    inType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2);
-    inType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, 48000);
-    inType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
-    inType->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, 4);
-    inType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 48000 * 4);
-    const auto inOk = transform->SetInputType(0, inType, 0);
-    inType->Release();
-    if (FAILED(outOk) || FAILED(inOk)) { transform->Release(); close(); return false; }
-    transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
-    transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
-    encoder = transform;
-    started = true;
-    phase = 0;
-    timestamp = 0;
+    auto* flags = lame_init();
+    if (flags == nullptr) { close(); return false; }
+    const int kbps = juce::jlimit(32, 320, bitsPerSecond / 1000);
+    lame_set_in_samplerate(flags, 48000);
+    lame_set_out_samplerate(flags, 48000);
+    lame_set_num_channels(flags, 2);
+    lame_set_mode(flags, STEREO);
+    lame_set_brate(flags, kbps);
+    lame_set_quality(flags, 2);
+    if (lame_init_params(flags) < 0) { lame_close(flags); close(); return false; }
+    encoder = flags;
     return true;
 }
 
 void Mp3Sink::write(const float* left, const float* right, int frames)
 {
-    if (!encoder || frames <= 0) return;
+    if (!encoder || frames <= 0 || left == nullptr || right == nullptr) return;
     if (std::abs(sourceRate - 48000.0) < 1.0)
     {
         encode(left, right, frames);
@@ -143,46 +56,28 @@ void Mp3Sink::write(const float* left, const float* right, int frames)
 
 void Mp3Sink::encode(const float* left, const float* right, int frames)
 {
-    auto* transform = static_cast<IMFTransform*>(encoder);
-    const DWORD bytes = (DWORD) frames * 4;
-    IMFSample* sample = nullptr;
-    IMFMediaBuffer* buffer = nullptr;
-    if (FAILED(MFCreateSample(&sample)) || FAILED(MFCreateMemoryBuffer(bytes, &buffer))) { if (sample) sample->Release(); return; }
-    BYTE* data = nullptr;
-    buffer->Lock(&data, nullptr, nullptr);
-    auto* pcm = reinterpret_cast<int16_t*>(data);
-    for (int i = 0; i < frames; ++i)
-    {
-        pcm[i * 2] = (int16_t) juce::jlimit(-32768, 32767, (int) std::lrint(left[i] * 32767.0f));
-        pcm[i * 2 + 1] = (int16_t) juce::jlimit(-32768, 32767, (int) std::lrint(right[i] * 32767.0f));
-    }
-    buffer->Unlock();
-    buffer->SetCurrentLength(bytes);
-    sample->AddBuffer(buffer);
-    buffer->Release();
-    sample->SetSampleTime(timestamp);
-    const auto duration = (LONGLONG) frames * 10000000 / 48000;
-    sample->SetSampleDuration(duration);
-    timestamp += duration;
-    if (SUCCEEDED(transform->ProcessInput(0, sample, 0)))
-        emit(transform, file, onBytes);
-    sample->Release();
+    auto* flags = static_cast<lame_global_flags*>(encoder);
+    const int capacity = (int) (1.25 * frames) + 7200;
+    std::vector<unsigned char> mp3((size_t) capacity);
+    const int written = lame_encode_buffer_ieee_float(flags, left, right, frames, mp3.data(), capacity);
+    if (written <= 0) return;
+    if (onBytes) onBytes(mp3.data(), (size_t) written);
+    else if (file) file->write(mp3.data(), (size_t) written);
 }
 
 void Mp3Sink::close()
 {
-    if (auto* transform = static_cast<IMFTransform*>(encoder))
+    if (auto* flags = static_cast<lame_global_flags*>(encoder))
     {
-        transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
-        transform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, 0);
-        emit(transform, file, onBytes);
-        transform->Release();
+        unsigned char tail[7200];
+        const int written = lame_encode_flush(flags, tail, (int) sizeof(tail));
+        if (written > 0)
+        {
+            if (onBytes) onBytes(tail, (size_t) written);
+            else if (file) file->write(tail, (size_t) written);
+        }
+        lame_close(flags);
         encoder = nullptr;
     }
     if (file) { file->flush(); delete file; file = nullptr; }
-    if (started)
-    {
-        started = false;
-        if (--mediaUsers() <= 0) MFShutdown();
-    }
 }

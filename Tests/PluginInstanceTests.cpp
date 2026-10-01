@@ -331,6 +331,18 @@ int main(int argc, char** argv)
         broken = instances.serialize();
         broken->setAttribute("version", 3);
         require(!round.deserialize(*broken) && round.records[0].id == record.id, "version 3");
+        ChainStrip armed;
+        armed.allInputs = false;
+        armed.inputs = { 0, 3 };
+        armed.stereo = true;
+        ChainStrip everything;
+        everything.allInputs = true;
+        everything.inputs = { 3 };
+        std::vector<ChainStrip> routed { armed, everything };
+        require(eraseInactiveInputs(routed, { true, false, false, false }), "inactive input removed");
+        require(routed[0].inputs.size() == 1 && routed[0].inputs[0] == 0 && !routed[0].stereo, "one remaining input is not stereo");
+        require(routed[1].allInputs && routed[1].inputs.size() == 1, "all-inputs strip keeps its list");
+        require(!eraseInactiveInputs(routed, { true, false, false, false }), "second pass finds nothing to remove");
     });
     return runner.result();
 }

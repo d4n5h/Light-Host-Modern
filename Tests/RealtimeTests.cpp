@@ -123,7 +123,7 @@ int main()
             mono->setMonoInputs(true); fill(.25f,.5f); mono->processBlock(audio,midi);
             require(std::abs(audio.getSample(0,0)-previous)<.01f,"Mono toggle dropped output abruptly");
             for (int i=0;i<10;++i) { fill(.25f,.5f); mono->processBlock(audio,midi); }
-            const auto expected = pluginChannels ? 1.0f : .75f;
+            const auto expected = pluginChannels ? softPin(1.5f) : .75f;
             require(std::abs(audio.getSample(0,63)-expected)<.0001f && std::abs(audio.getSample(1,63)-expected)<.0001f,"Mono unity sum or plugin centering failed");
             mono->setGlobalBypassed(true);
             for (int i=0;i<10;++i) { fill(.25f,.5f); mono->processBlock(audio,midi); }
@@ -131,7 +131,7 @@ int main()
             mono->setGlobalBypassed(false); mono->setMonoInputs(false);
             for (int i=0;i<10;++i) { fill(.25f,.5f); mono->processBlock(audio,midi); }
             require(std::abs(audio.getSample(0,63)-(pluginChannels ? .5f:.25f))<.0001f,"Stereo left not restored");
-            if (pluginChannels != 1) require(std::abs(audio.getSample(1,63)-(pluginChannels ? 1.f:.5f))<.0001f,"True stereo not preserved");
+            if (pluginChannels != 1) require(std::abs(audio.getSample(1,63)-(pluginChannels ? softPin(1.f):.5f))<.0001f,"True stereo not preserved");
             mono->setMonoInputs(true);
             for (int i=0;i<10;++i) { fill(.5f,-.5f); mono->processBlock(audio,midi); }
             require(audio.getMagnitude(0,64)<.0001f,"Mono phase cancellation changed");
@@ -188,9 +188,8 @@ int main()
                 output->processBlock(audio, events);
             };
             process(.2f,.6f); process(.2f,.6f);
-            auto pin = [](float sample) { return std::abs(sample) <= 1.0f ? sample : std::copysign(1.0f, sample); };
-            const float left = pin((inputMono ? .8f : .2f) * (pluginChannels ? 2.f : 1.f));
-            const float right = pin(pluginChannels == 1 && !inputMono ? 0.f : (inputMono ? .8f : .6f) * (pluginChannels ? 2.f : 1.f));
+            const float left = softPin((inputMono ? .8f : .2f) * (pluginChannels ? 2.f : 1.f));
+            const float right = pluginChannels == 1 && !inputMono ? 0.f : softPin((inputMono ? .8f : .6f) * (pluginChannels ? 2.f : 1.f));
             require(std::abs(audio.getSample(0,511) - (outputMono ? (left+right)*.5f : left)) < .0001f
                 && std::abs(audio.getSample(1,511) - (outputMono ? (left+right)*.5f : right)) < .0001f, "Independent input/output mono combination failed");
             output->setGlobalBypassed(true); process(.2f,.6f); process(.2f,.6f);
@@ -264,9 +263,11 @@ int main()
             const auto fill = [&] { FloatVectorOperations::fill(audio.getWritePointer(0), .75f, 14400); FloatVectorOperations::fill(audio.getWritePointer(1), .25f, 14400); };
             fill(); measured->processBlock(audio, events);
             fill(); measured->processBlock(audio, events);
-            require(measured->getInputMeters().aggregate.rms == .75f && measured->getOutputMeters().aggregate.rms == 1.0f,
+            const float pinned = softPin(1.5f);
+            require(measured->getInputMeters().aggregate.rms == .75f && std::abs(measured->getOutputMeters().aggregate.rms - pinned) < 0.002f,
                 "Input RMS must precede processing; output RMS must measure the pinned main pair");
-            require(measured->getMeterPeaks() == std::make_pair(.75f, 1.0f),
+            const auto livePeaks = measured->getMeterPeaks();
+            require(std::abs(livePeaks.first - .75f) < 0.0001f && std::abs(livePeaks.second - pinned) < 0.002f,
                 "Live meter peaks must reflect the pinned main pair");
             require(!measured->getInputMeters().aggregate.clipped && measured->getOutputMeters().channels[0].clipped
                 && !measured->getOutputMeters().channels[1].clipped, "Clipping direction and channel isolation");
@@ -315,7 +316,7 @@ int main()
         impulse.clear(); impulse.setSample(0, 63, 1.0f);
         host->processBlock(impulse, midi);
         impulse.clear(); host->processBlock(impulse, midi);
-        require(std::abs(impulse.getSample(0, 16) - 1.0f) < 0.0001f, "Global bypass must retain chain latency across blocks");
+        require(std::abs(impulse.getSample(0, 16) - softPin(1.0f)) < 0.0001f, "Global bypass must retain chain latency across blocks");
         host->setGlobalMuted(true);
         gain->hold.store(true);
         gain->entered.store(false);
@@ -509,7 +510,7 @@ int main()
             const auto fillFull = [&] { for (int i = 0; i < 512; ++i) { audio.setSample(0, i, 1.0f); audio.setSample(1, i, 1.0f); } };
             for (int i = 0; i < 2; ++i) { fillFull(); host->processBlock(audio, midi); }
             const float left = audio.getSample(0, 511), right = audio.getSample(1, 511);
-            require(std::abs(left - 1.0f) < 0.0001f && std::abs(right - 1.0f) < 0.0001f, "two inputs were summed instead of one per side");
+            require(std::abs(left - softPin(1.0f)) < 0.0001f && std::abs(right - softPin(1.0f)) < 0.0001f, "two inputs were summed instead of one per side");
         }
         std::cout << "Channels, asymmetric buses, bounded MIDI, preserved delay history, lifecycle, diagnostics opt-out and Release allocation audit passed\n";
         return 0;

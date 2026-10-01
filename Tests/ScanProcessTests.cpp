@@ -33,6 +33,15 @@ int wmain(int argc, wchar_t** argv)
         }
         if (argc == 3 && std::wstring(argv[1]) == L"tree")
         {
+            BOOL contained = FALSE;
+            const auto jobDeadline = GetTickCount64() + 2000;
+            do
+            {
+                contained = FALSE;
+                if (IsProcessInJob(GetCurrentProcess(), nullptr, &contained) && contained) break;
+                Sleep(1);
+            } while (GetTickCount64() < jobDeadline);
+            if (!contained) return 94;
             auto command = lightHostModern::scan::quoteArgument(executablePath()) + L" hang";
             STARTUPINFOW startup {}; startup.cb = sizeof(startup);
             PROCESS_INFORMATION child {};
@@ -47,7 +56,14 @@ int wmain(int argc, wchar_t** argv)
             return 0;
         }
         BOOL contained = FALSE;
-        if (!IsProcessInJob(GetCurrentProcess(), nullptr, &contained) || !contained) return 90;
+        const auto jobDeadline = GetTickCount64() + 2000;
+        do
+        {
+            contained = FALSE;
+            if (IsProcessInJob(GetCurrentProcess(), nullptr, &contained) && contained) break;
+            Sleep(1);
+        } while (GetTickCount64() < jobDeadline);
+        if (!contained) return 90;
         return argc == 3 && std::wstring(argv[2]) == L"Unicode \u65e5\u672c \\\"quoted\\\" \\" ? 0 : 91;
     }
     try

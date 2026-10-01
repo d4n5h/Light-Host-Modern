@@ -287,7 +287,7 @@ public:
             if (config.bufferSizes[(size_t) i] == live.bufferSize) buffer.setSelectedId(i + 1, juce::dontSendNotification);
         }
         persistence.clear(juce::dontSendNotification);
-        persistence.addItem("Disabled", 1);
+        persistence.addItem("This device only", 1);
         persistence.addItem("Last device", 2);
         persistence.addItem("Custom", 3);
         persistence.setSelectedId(recovery.mode == "custom" ? 3 : recovery.mode == "last" ? 2 : 1, juce::dontSendNotification);
@@ -875,15 +875,29 @@ public:
         addAndMakeVisible(status);
         input.onChange = [this] {
             if (applying) return;
-            if (input.getSelectedId() <= 1) { engine.closeMackie(); status.setText("Controller off.", juce::dontSendNotification); }
+            auto* settings = getAppProperties().getUserSettings();
+            if (input.getSelectedId() <= 1)
+            {
+                engine.closeMackie();
+                opened.clear();
+                settings->removeValue("mackieDevice");
+                status.setText("Controller off.", juce::dontSendNotification);
+            }
             else if (const auto error = engine.openMackie(input.getSelectedId() - 2); error.isNotEmpty()) status.setText(error, juce::dontSendNotification);
-            else status.setText("Connected to " + input.getText() + ".", juce::dontSendNotification);
+            else
+            {
+                opened = input.getText();
+                settings->setValue("mackieDevice", opened);
+                status.setText("Connected to " + opened + ".", juce::dontSendNotification);
+            }
+            settings->saveIfNeeded();
         };
     }
 
     void refresh()
     {
-        const auto selected = input.getText();
+        const auto saved = getAppProperties().getUserSettings()->getValue("mackieDevice");
+        const auto selected = input.getText().isNotEmpty() ? input.getText() : saved;
         applying = true;
         input.clear(juce::dontSendNotification);
         input.addItem("Off", 1);
@@ -896,6 +910,11 @@ public:
         }
         input.setSelectedId(id, juce::dontSendNotification);
         applying = false;
+        if (id > 1 && opened != inputs[id - 2])
+        {
+            if (const auto error = engine.openMackie(id - 2); error.isNotEmpty()) status.setText(error, juce::dontSendNotification);
+            else { opened = inputs[id - 2]; status.setText("Connected to " + opened + ".", juce::dontSendNotification); }
+        }
     }
 
     void resized() override
@@ -913,6 +932,7 @@ private:
     AudioEngine& engine;
     juce::Label label, help, status;
     juce::ComboBox input;
+    juce::String opened;
     bool applying = false;
 };
 
@@ -941,7 +961,6 @@ public:
         addAndMakeVisible(multi);
         addAndMakeVisible(interleaved);
         addAndMakeVisible(raw);
-        addAndMakeVisible(record);
         addAndMakeVisible(iceHost);
         addAndMakeVisible(icePort);
         addAndMakeVisible(iceMount);
@@ -949,11 +968,8 @@ public:
         addAndMakeVisible(icePass);
         addAndMakeVisible(iceName);
         addAndMakeVisible(devices);
-        addAndMakeVisible(stream);
         addAndMakeVisible(status);
         browse.setButtonText("Browse");
-        record.setButtonText("Record");
-        stream.setButtonText("Stream");
         mixdown.setButtonText("Master mixdown");
         multi.setButtonText("Multitrack");
         interleaved.setButtonText("One multichannel WAV");
@@ -978,15 +994,30 @@ public:
         iceMount.setText(settings->getValue("icecastMount", "/live"), juce::dontSendNotification);
         iceUser.setText(settings->getValue("icecastUser", "source"), juce::dontSendNotification);
         iceName.setText(settings->getValue("icecastName", "LightHostModern"), juce::dontSendNotification);
+        settings->removeValue("icecastPassword");
+        settings->saveIfNeeded();
+        const auto persist = [this] { if (!applying) save(); };
         browse.onClick = [this] {
             chooser = std::make_unique<juce::FileChooser>("Recordings", juce::File(folder.getText()), "*", true);
             chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories, [this](const juce::FileChooser& box) {
-                if (box.getResult() != juce::File()) folder.setText(box.getResult().getFullPathName(), juce::dontSendNotification);
+                if (box.getResult() == juce::File()) return;
+                folder.setText(box.getResult().getFullPathName(), juce::dontSendNotification);
+                save();
             });
         };
-        format.onChange = [this] { interleaved.setEnabled(format.getSelectedId() != 2 && !engine.isRecording()); };
-        record.onClick = [this] { toggleRecord(); };
-        stream.onClick = [this] { toggleStream(); };
+        folder.onTextChange = persist;
+        format.onChange = [this] { interleaved.setEnabled(format.getSelectedId() != 2 && !engine.isRecording()); if (!applying) save(); };
+        bitrate.onChange = persist;
+        mixdown.onClick = persist;
+        multi.onClick = persist;
+        interleaved.onClick = persist;
+        raw.onClick = persist;
+        iceHost.onTextChange = persist;
+        icePort.onTextChange = persist;
+        iceMount.onTextChange = persist;
+        iceUser.onTextChange = persist;
+        iceName.onTextChange = persist;
+        icePass.onTextChange = [this] { engine.setStreamPassword(icePass.getText()); };
         devices.onChange = [this] {
             if (applying) return;
             getAppProperties().getUserSettings()->setValue("streamDevice", devices.getSelectedId() > 1 ? devices.getText() : juce::String());
@@ -1031,8 +1062,6 @@ public:
         multi.setBounds(checks.removeFromLeft(140));
         interleaved.setBounds(checks.removeFromLeft(190));
         raw.setBounds(checks.removeFromLeft(160));
-        area.removeFromTop(6);
-        record.setBounds(area.removeFromTop(32).removeFromLeft(140));
         area.removeFromTop(12);
         row(iceHostLabel, iceHost);
         row(icePortLabel, icePort);
@@ -1041,7 +1070,6 @@ public:
         row(icePassLabel, icePass);
         row(iceNameLabel, iceName);
         row(deviceLabel, devices);
-        stream.setBounds(area.removeFromTop(32).removeFromLeft(140));
         area.removeFromTop(8);
         status.setBounds(area.removeFromTop(48));
     }
@@ -1063,27 +1091,8 @@ private:
         settings->setValue("icecastMount", iceMount.getText());
         settings->setValue("icecastUser", iceUser.getText());
         settings->setValue("icecastName", iceName.getText());
-        settings->setValue("icecastPassword", icePass.getText());
+        settings->removeValue("icecastPassword");
         settings->saveIfNeeded();
-    }
-    void toggleRecord()
-    {
-        if (engine.isRecording()) { engine.stopRecording(); record.setButtonText("Record"); raw.setEnabled(true); return; }
-        save();
-        const auto error = engine.startRecording(juce::File(folder.getText()), format.getSelectedId() == 2, bitrate.getSelectedId() * 1000,
-                                                  mixdown.getToggleState(), multi.getToggleState(), interleaved.getToggleState(), raw.getToggleState(),
-                                                  iceHost.getText().trim(), icePort.getText().getIntValue(), iceMount.getText().trim(), iceUser.getText().trim(), icePass.getText(), iceName.getText().trim());
-        if (error.isNotEmpty()) { status.setText(error, juce::dontSendNotification); return; }
-        record.setButtonText("Stop");
-        raw.setEnabled(false);
-    }
-    void toggleStream()
-    {
-        if (engine.isStreaming()) { engine.stopStream(); stream.setButtonText("Stream"); return; }
-        const int id = devices.getSelectedId();
-        if (id <= 1) { status.setText("Choose a stream device. Install a virtual cable so other apps can select it.", juce::dontSendNotification); return; }
-        if (const auto error = engine.startStream(devices.getText()); error.isNotEmpty()) status.setText(error, juce::dontSendNotification);
-        else { stream.setButtonText("Stop stream"); status.setText("Streaming. Other apps select the cable input.", juce::dontSendNotification); }
     }
 
     AudioEngine& engine;
@@ -1091,7 +1100,7 @@ private:
     juce::TextEditor folder, iceHost, icePort, iceMount, iceUser, icePass, iceName;
     juce::ComboBox format, bitrate, devices;
     juce::ToggleButton mixdown, multi, interleaved, raw;
-    juce::TextButton browse, record, stream;
+    juce::TextButton browse;
     std::unique_ptr<juce::FileChooser> chooser;
     bool applying = false;
 };

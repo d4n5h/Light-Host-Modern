@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_audio_basics/juce_audio_basics.h>
+#include <atomic>
 
 // Controller-owned allocation; capture() only accesses prepared storage. The
 // ring retains recent input even at zero latency, allowing short live changes.
@@ -12,19 +13,21 @@ public:
         const int transition = juce::jmax(1, static_cast<int>(sampleRate * 0.005));
         if (channels == history.getNumChannels() && blockSize == dry.getNumSamples()
             && latency == delaySamples && rate == sampleRate) return true;
+        const int known = validSamples.load(std::memory_order_acquire);
         const bool compatible = rate == sampleRate && channels == history.getNumChannels()
-            && latency <= validSamples;
+            && latency <= known;
         const int retainedDelay = compatible ? delaySamples : latency;
         const int capacity = juce::jmax(latency, retainedDelay) + blockSize + transition + 1;
         juce::AudioBuffer<float> replacement(channels, capacity);
         replacement.clear();
-        const int retained = rate == sampleRate ? juce::jmin(validSamples, capacity - 1) : 0;
+        const int retained = rate == sampleRate ? juce::jmin(known, capacity - 1) : 0;
         for (int channel = 0; channel < juce::jmin(channels, history.getNumChannels()); ++channel)
             for (int age = 1; age <= retained; ++age)
                 replacement.setSample(channel, capacity - age, history.getSample(channel,
                     (position + history.getNumSamples() - age) % history.getNumSamples()));
         history = std::move(replacement);
-        validSamples = retained;
+        pendingLatency.store(-1, std::memory_order_relaxed);
+        validSamples.store(retained, std::memory_order_release);
         position = 0;
         oldDelaySamples = delaySamples;
         transitionRemaining = compatible && latency != delaySamples ? transition : 0;
@@ -36,8 +39,22 @@ public:
         return compatible;
     }
 
+    bool requestLatency(int latency) noexcept
+    {
+        latency = juce::jmax(0, latency);
+        if (history.getNumChannels() == 0 || dry.getNumChannels() != history.getNumChannels() || rate == 0.0)
+            return false;
+        const int transition = juce::jmax(1, static_cast<int>(rate * 0.005));
+        const int needed = latency + dry.getNumSamples() + transition + 1;
+        if (latency > validSamples.load(std::memory_order_acquire) || needed > history.getNumSamples())
+            return false;
+        pendingLatency.store(latency, std::memory_order_release);
+        return true;
+    }
+
     void capture(const juce::AudioBuffer<float>& input) noexcept
     {
+        applyPending();
         const int capacity = history.getNumSamples();
         const int samples = input.getNumSamples();
         const float transitionStep = 1.0f / static_cast<float>(transitionLength);
@@ -75,15 +92,27 @@ public:
         }
         position = (position + samples) % capacity;
         transitionRemaining = juce::jmax(0, transitionRemaining - samples);
-        validSamples = juce::jmin(capacity - 1, validSamples + samples);
+        validSamples.store(juce::jmin(capacity - 1, validSamples.load(std::memory_order_relaxed) + samples), std::memory_order_release);
     }
     const juce::AudioBuffer<float>& output() const noexcept { return dry; }
     int channels() const noexcept { return dry.getNumChannels(); }
     size_t allocatedSamples() const noexcept { return static_cast<size_t>(history.getNumChannels()) * history.getNumSamples(); }
 
 private:
+    void applyPending() noexcept
+    {
+        const int next = pendingLatency.exchange(-1, std::memory_order_acq_rel);
+        if (next < 0 || next == delaySamples) return;
+        oldDelaySamples = delaySamples;
+        transitionLength = juce::jmax(1, static_cast<int>(rate * 0.005));
+        transitionRemaining = transitionLength;
+        delaySamples = next;
+    }
+
     juce::AudioBuffer<float> history, dry;
-    int position = 0, validSamples = 0, delaySamples = 0, oldDelaySamples = 0;
+    std::atomic<int> pendingLatency { -1 };
+    std::atomic<int> validSamples { 0 };
+    int position = 0, delaySamples = 0, oldDelaySamples = 0;
     int transitionRemaining = 0, transitionLength = 1;
     double rate = 0;
 };

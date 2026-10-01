@@ -50,6 +50,27 @@ struct ChainStrip
     juce::String group;
 };
 
+inline bool eraseInactiveInputs(std::vector<ChainStrip>& strips, const std::vector<bool>& active)
+{
+    const auto on = [&](int channel) {
+        return channel >= 0 && channel < (int) active.size() && active[(size_t) channel];
+    };
+    bool needs = false;
+    for (const auto& strip : strips)
+    {
+        if (strip.allInputs) continue;
+        for (int channel : strip.inputs) if (!on(channel)) needs = true;
+    }
+    if (!needs) return false;
+    for (auto& strip : strips)
+    {
+        if (strip.allInputs) continue;
+        strip.inputs.erase(std::remove_if(strip.inputs.begin(), strip.inputs.end(), [&](int channel) { return !on(channel); }), strip.inputs.end());
+        strip.stereo = strip.inputs.size() == 2;
+    }
+    return true;
+}
+
 inline juce::String defaultStripId()
 {
     const auto seed = juce::String("LightHostModern default strip");

@@ -8,6 +8,7 @@
 #include <array>
 #include <map>
 #include <mutex>
+#include <cmath>
 #include "PluginInstanceId.h"
 #include "GlobalAudioControls.h"
 #include "BoundedMidi.h"
@@ -52,6 +53,8 @@ struct PluginSlot : private AudioProcessorListener
 	std::atomic<bool> bypassed { false };
 	std::atomic<bool> processDisabled { false };
 	std::atomic<bool> processFailed { false };
+	std::atomic<bool> processing { false };
+	std::atomic<bool> rebuilding { false };
 	std::atomic<bool> stateDirty { true };
 	int inputChannels = 0;
 	int outputChannels = 0;
@@ -85,8 +88,18 @@ struct StripRuntime
 	std::atomic<bool> solo { false };
 	std::atomic<bool> record { true };
 	std::atomic<float> level { 0.0f };
+	std::atomic<bool> processing { false };
+	std::atomic<bool> rebuilding { false };
 	DryDelay align;
 };
+
+inline float softPin(float sample) noexcept
+{
+	const float absolute = std::abs(sample);
+	if (absolute <= 0.9f) return sample;
+	const float curved = 0.9f + 0.1f * std::tanh((absolute - 0.9f) / 0.1f);
+	return std::copysign(curved, sample);
+}
 
 struct StripSnapshot
 {

@@ -183,6 +183,8 @@ public:
 	juce::StringArray midiInputNames() const;
 	juce::String openMackie(int deviceIndex);
 	void closeMackie();
+	void setStreamPassword(const juce::String& value) { streamPasswordValue = value; }
+	juce::String streamPassword() const { return streamPasswordValue; }
 	String movePluginToStrip(const String& instanceId, const String& stripId, const String& beforeInstanceId);
 	bool undoChain();
 	bool redoChain();
@@ -316,6 +318,7 @@ private:
 	double stateCaptureDue = 0;
 	bool sessionLoadSuppressed = false;
 	KnownPluginList::SortMethod pluginSortMethod = KnownPluginList::sortByManufacturer;
+	juce::String streamPasswordValue;
 	std::unique_ptr<MixCapture> mixCapture;
 	std::unique_ptr<MixWriter> mixWriter;
 	std::unique_ptr<StreamOutput> streamOutput;

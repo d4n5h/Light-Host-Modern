@@ -534,23 +534,10 @@ bool AudioEngine::setAudioInputChannelCount(int channelCount)
 void AudioEngine::dropInactiveStripInputs()
 {
     const auto config = getAudioDeviceConfiguration();
-    const auto active = [&](int channel) {
-        return channel >= 0 && channel < (int) config.activeInputChannels.size() && config.activeInputChannels[(size_t) channel];
-    };
-    bool needs = false;
-    for (const auto& strip : instances.strips)
-    {
-        if (strip.allInputs) continue;
-        if (std::any_of(strip.inputs.begin(), strip.inputs.end(), [&](int channel) { return !active(channel); })) needs = true;
-    }
-    if (!needs) return;
+    auto next = instances.strips;
+    if (!lightHostModern::eraseInactiveInputs(next, config.activeInputChannels)) return;
     chainHistory.record(instances);
-    for (auto& strip : instances.strips)
-    {
-        if (strip.allInputs) continue;
-        strip.inputs.erase(std::remove_if(strip.inputs.begin(), strip.inputs.end(), [&](int channel) { return !active(channel); }), strip.inputs.end());
-        strip.stereo = strip.inputs.size() == 2;
-    }
+    instances.strips = std::move(next);
     ++chainVersion;
     loadActivePlugins();
     saveActivePluginChain(false);
@@ -1010,6 +997,11 @@ void AudioEngine::savePluginStates()
         if (index < 0) continue;
         auto& record = instances.records[static_cast<size_t>(index)];
         if (!record.stateCaptureAllowed || slot->processDisabled.load()) continue;
+        if (slot->processing.load(std::memory_order_acquire))
+        {
+            slot->stateDirty.store(true, std::memory_order_relaxed);
+            continue;
+        }
         slot->stateDirty.store(false, std::memory_order_relaxed);
         if (lightHostModern::capturePluginState(record, [&](MemoryBlock& binary) { slot->processor->getStateInformation(binary); }))
         {

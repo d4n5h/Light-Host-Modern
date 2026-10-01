@@ -2,6 +2,8 @@
 #include "IpcPipe.h"
 #include "ProcessMetrics.h"
 #include "ScanTiming.h"
+#include <juce_core/juce_core.h>
+#include <TlHelp32.h>
 #include <atomic>
 #include <functional>
 #include <string>
@@ -38,13 +40,39 @@ inline Result run(const std::wstring& executable, const std::wstring& arguments,
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     if (!job || !SetInformationJobObject(job.get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits)))
         return { Exit::launchFailed, GetLastError() };
-    auto command = quoteArgument(executable) + L" " + arguments;
-    STARTUPINFOW startup {}; startup.cb = sizeof(startup);
-    PROCESS_INFORMATION process {};
-    if (!CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, FALSE,
-                        CREATE_SUSPENDED | CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process))
-        return { Exit::launchFailed, GetLastError() };
-    Handle child(process.hProcess), thread(process.hThread);
+    juce::ChildProcess launched;
+    const juce::String command = juce::String(executable.c_str()) + (arguments.empty() ? juce::String() : " " + juce::String(arguments.c_str()));
+    if (!launched.start(command, 0)) return { Exit::launchFailed, ERROR_FILE_NOT_FOUND };
+    const auto childPid = [&] {
+        DWORD found = 0;
+        Handle snap(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
+        if (!snap) return found;
+        PROCESSENTRY32W entry {};
+        entry.dwSize = sizeof(entry);
+        const auto self = GetCurrentProcessId();
+        if (Process32FirstW(snap.get(), &entry))
+            do { if (entry.th32ParentProcessID == self) found = entry.th32ProcessID; }
+            while (Process32NextW(snap.get(), &entry));
+        return found;
+    };
+    DWORD pid = 0;
+    for (int attempt = 0; attempt < 50 && pid == 0 && launched.isRunning(); ++attempt)
+    {
+        pid = childPid();
+        if (pid == 0) Sleep(1);
+    }
+    Handle child(pid == 0 ? nullptr : OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE, FALSE, pid));
+    if (!child || !AssignProcessToJobObject(job.get(), child.get()))
+    {
+        if (!launched.isRunning())
+        {
+            const auto code = launched.getExitCode();
+            return { code == 0 ? Exit::success : Exit::failed, code };
+        }
+        const auto error = GetLastError();
+        launched.kill();
+        return { Exit::launchFailed, error != 0 ? error : ERROR_INVALID_HANDLE };
+    }
     struct WorkerStatistics
     {
         HANDLE process;
@@ -97,15 +125,6 @@ inline Result run(const std::wstring& executable, const std::wstring& arguments,
         }
         ~WorkerAccounting() { update(); workerResidentBytes.fetch_sub(resident); workerCommittedBytes.fetch_sub(committed); if (unavailable) --workerMemoryUnavailable; }
     } accounting{child.get()};
-    if (!AssignProcessToJobObject(job.get(), child.get()))
-    {
-        const auto error = GetLastError();
-        TerminateProcess(child.get(), error);
-        WaitForSingleObject(child.get(), 1000);
-        return { Exit::launchFailed, error };
-    }
-    if (ResumeThread(thread.get()) == static_cast<DWORD>(-1))
-        return { Exit::launchFailed, GetLastError() };
     timing.add("launchMs", timing.elapsedMs());
     auto deadline = GetTickCount64() + timeoutMs;
     auto totalDeadline = GetTickCount64() + totalTimeoutMs;

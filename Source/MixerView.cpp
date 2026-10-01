@@ -336,10 +336,11 @@ void ChannelStripComponent::applyMasterLive(float gainDb)
     gainLabel.setText(juce::String(gainDb, 1) + " dB", juce::dontSendNotification);
 }
 
-void ChannelStripComponent::setMeter(float peak)
+void ChannelStripComponent::setMeter(float raw, float decay)
 {
-    if (std::abs(peak - meterPeak) < 0.001f) return;
-    meterPeak = peak;
+    const float shown = juce::jmax(raw, meterPeak * decay);
+    if (std::abs(shown - meterPeak) < 0.001f) return;
+    meterPeak = shown;
     repaint(meterBounds);
 }
 
@@ -419,7 +420,8 @@ void ChannelStripComponent::setStrip(const lightHostModern::ChainStrip& strip, c
     {
         juce::StringArray picked;
         for (int channel : strip.inputs) picked.add(channelLabel(channel, config.inputChannelNames, "In "));
-        inputBox.setText(picked.isEmpty() ? "No input" : picked.joinIntoString(", "), juce::dontSendNotification);
+        inputBox.setText(picked.isEmpty() ? "Off on Audio" : picked.joinIntoString(", "), juce::dontSendNotification);
+        inputBox.setTooltip(picked.isEmpty() ? "Turn this input back on under Audio." : juce::String());
     }
     juce::String outputKey = "outputs";
     std::vector<int> outputs;
@@ -929,6 +931,9 @@ MixerView::MixerView(AudioEngine& engineIn)
     recordStop.setVisible(false);
     streamPause.setVisible(false);
     streamStop.setVisible(false);
+    status.setColour(juce::Label::textColourId, studio::muted);
+    status.setVisible(false);
+    addAndMakeVisible(status);
     for (juce::Component* button : { (juce::Component*) &addButton, (juce::Component*) &newProfile, (juce::Component*) &recordButton, (juce::Component*) &recordPause, (juce::Component*) &recordStop, (juce::Component*) &streamButton, (juce::Component*) &streamPause, (juce::Component*) &streamStop })
         addAndMakeVisible(button);
     recordButton.onClick = [this] { startSavedRecording(); };
@@ -979,6 +984,9 @@ MixerView::MixerView(AudioEngine& engineIn)
         menu.addItem(2, "Delete", catalog.profiles.size() > 1);
         menu.addItem(3, "Move up", index > 0);
         menu.addItem(4, "Move down", index + 1 < (int) catalog.profiles.size());
+        menu.addSeparator();
+        menu.addItem(5, "Undo    Ctrl+Z");
+        menu.addItem(6, "Redo    Ctrl+Y");
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&profileMenu), [this, id, name, tell](int result) {
             if (result == 1)
             {
@@ -1001,6 +1009,8 @@ MixerView::MixerView(AudioEngine& engineIn)
             }
             else if (result == 3) tell(engine.moveChainProfile(id, -1));
             else if (result == 4) tell(engine.moveChainProfile(id, 1));
+            else if (result == 5) engine.undoChain();
+            else if (result == 6) engine.redoChain();
         });
     };
     profiles.onChange = [this] {
@@ -1045,7 +1055,7 @@ void MixerView::startSavedRecording()
     const auto folder = juce::File(settings->getValue("recordFolder", juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile("LightHostModern").getChildFile("Recordings").getFullPathName()));
     const auto error = engine.startRecording(folder, settings->getBoolValue("recordMp3", false), settings->getIntValue("recordBitrate", 192) * 1000,
         settings->getBoolValue("recordMixdown", true), settings->getBoolValue("recordMulti", false), settings->getBoolValue("recordInterleaved", false), settings->getBoolValue("recordRaw", false),
-        settings->getValue("icecastHost"), settings->getIntValue("icecastPort", 8000), settings->getValue("icecastMount", "/live"), settings->getValue("icecastUser", "source"), settings->getValue("icecastPassword"), settings->getValue("icecastName", "LightHostModern"));
+        settings->getValue("icecastHost"), settings->getIntValue("icecastPort", 8000), settings->getValue("icecastMount", "/live"), settings->getValue("icecastUser", "source"), engine.streamPassword(), settings->getValue("icecastName", "LightHostModern"));
     if (error.isNotEmpty()) juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Record", error);
 }
 
@@ -1115,12 +1125,30 @@ void MixerView::refresh()
 void MixerView::timerCallback()
 {
     if (!isShowing()) return;
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    const float dt = lastMeterMs == 0 ? (1.0f / 30.0f) : (float) juce::jlimit(0.0, 0.25, (now - lastMeterMs) / 1000.0);
+    lastMeterMs = now;
+    const float decay = std::exp(-dt / 0.3f);
     const auto& chain = engine.chainStrips();
     const int count = juce::jmin((int) chain.size(), strips.size());
     for (int i = 0; i < count; ++i)
-        strips[i]->setMeter(engine.getStripLevel(chain[(size_t) i].id));
+        strips[i]->setMeter(engine.getStripLevel(chain[(size_t) i].id), decay);
     if (strips.size() == (int) chain.size() + 1)
-        if (auto* master = strips.getLast()) master->setMeter(engine.getMasterLevel());
+        if (auto* master = strips.getLast()) master->setMeter(engine.getMasterLevel(), decay);
+    juce::StringArray notes;
+    const auto config = engine.getAudioDeviceConfiguration();
+    bool outputsOn = false;
+    for (bool on : config.activeOutputChannels) if (on) outputsOn = true;
+    if (!config.outputChannelNames.empty() && !outputsOn) notes.add("No outputs are on");
+    if (const auto error = engine.getLastAudioConfigurationError(); error.isNotEmpty()) notes.add(error);
+    if (const auto drops = engine.getDiagnosticsSnapshot().xRunCount; drops > 0) notes.add("Dropouts: " + juce::String(drops));
+    const auto text = notes.joinIntoString(". ");
+    if (text != status.getText())
+    {
+        status.setText(text, juce::dontSendNotification);
+        const bool show = text.isNotEmpty();
+        if (show != status.isVisible()) { status.setVisible(show); resized(); }
+    }
     if (engine.surfaceGeneration() != seenSurface)
     {
         seenSurface = engine.surfaceGeneration();
@@ -1245,6 +1273,11 @@ void MixerView::resized()
     auto transport = area.removeFromTop(36);
     toolbarBottom = transport.getBottom() + 4;
     area.removeFromTop(8);
+    if (status.isVisible())
+    {
+        status.setBounds(area.removeFromTop(20));
+        area.removeFromTop(4);
+    }
     profileLabel.setBounds(transport.removeFromLeft(52));
     profiles.setBounds(transport.removeFromLeft(200).reduced(0, 4));
     transport.removeFromLeft(6);

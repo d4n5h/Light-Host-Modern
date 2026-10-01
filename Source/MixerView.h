@@ -410,7 +410,7 @@ public:
     ~ChannelStripComponent() override;
     void setStrip(const lightHostModern::ChainStrip&, const std::vector<lightHostModern::PluginInstanceRecord>&);
     void setMaster(float gainDb, const std::vector<lightHostModern::PluginInstanceRecord>& plugins);
-    void setMeter(float peak);
+    void setMeter(float raw, float decay);
     void applyLive(float gainDb, float panValue, bool muted, bool soloed);
     void applyMasterLive(float gainDb);
     const juce::String& group() const { return groupName; }
@@ -523,7 +523,7 @@ private:
     void startSavedStream();
     void moveStripTo(const juce::String& draggedId, ChannelStripComponent& target, bool after);
     AudioEngine& engine;
-    juce::Label profileLabel;
+    juce::Label profileLabel, status;
     juce::TextButton addButton, newProfile, profileMenu;
     TransportButton recordButton, recordPause, recordStop, streamButton, streamPause, streamStop;
     juce::ComboBox profiles;
@@ -536,6 +536,7 @@ private:
     juce::StringArray collapsed;
     juce::String layoutKey;
     int toolbarBottom = 0;
+    double lastMeterMs = 0;
     uint64 seenSurface = 0;
     bool applying = false;
 };

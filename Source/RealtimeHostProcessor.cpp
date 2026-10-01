@@ -8,6 +8,46 @@
 void lightHostModernLog(const String& message);
 void setLightHostModernCrashContext(const String& context);
 
+namespace {
+bool applyAlign(StripRuntime& runtime, int channels, int blockSize, int latency, double sampleRate)
+{
+    if (runtime.align.requestLatency(latency)) return true;
+    runtime.rebuilding.store(true, std::memory_order_release);
+    while (runtime.processing.load(std::memory_order_acquire)) std::this_thread::yield();
+    const bool compatible = runtime.align.prepare(channels, blockSize, latency, sampleRate);
+    runtime.rebuilding.store(false, std::memory_order_release);
+    return compatible;
+}
+
+struct SlotBusy {
+    PluginSlot& slot;
+    bool held = false;
+    explicit SlotBusy(PluginSlot& target) : slot(target)
+    {
+        slot.processing.store(true, std::memory_order_release);
+        if (slot.rebuilding.load(std::memory_order_acquire)) slot.processing.store(false, std::memory_order_release);
+        else held = true;
+    }
+    ~SlotBusy() { if (held) slot.processing.store(false, std::memory_order_release); }
+    explicit operator bool() const { return held; }
+};
+
+float channelPeak(const float* samples, int count)
+{
+    if (samples == nullptr || count <= 0) return 0.0f;
+    const auto range = juce::FloatVectorOperations::findMinAndMax(samples, count);
+    return juce::jmax(std::abs(range.getStart()), std::abs(range.getEnd()));
+}
+
+float bufferPeak(const AudioBuffer<float>& buffer, int offset, int count)
+{
+    float peak = 0.0f;
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+        peak = juce::jmax(peak, channelPeak(buffer.getReadPointer(channel, offset), count));
+    return peak;
+}
+}
+
 PluginSlot::PluginSlot(PluginDescription descriptionIn, std::unique_ptr<AudioPluginInstance> processorIn)
 	: description(std::move(descriptionIn)),
 	  processor(std::move(processorIn))
@@ -107,8 +147,12 @@ bool PluginSlot::refreshLatency()
     if (!prepared || processor == nullptr) return true;
     const int next = requestedLatency.load();
     if (next == latencySamples) return true;
+    if (dryDelay.requestLatency(next)) { latencySamples = next; return true; }
+    rebuilding.store(true, std::memory_order_release);
+    while (processing.load(std::memory_order_acquire)) std::this_thread::yield();
     const bool compatible = dryDelay.prepare(dryDelay.channels(), preparedBlockSize, next, preparedSampleRate);
     latencySamples = next;
+    rebuilding.store(false, std::memory_order_release);
     return compatible;
 }
 
@@ -163,7 +207,6 @@ void RealtimeHostProcessor::refreshLatencies()
     for (const auto& slot : snapshot->slots)
         if (slot && slot->processor && slot->prepared && slot->hasPendingLatency()) changed = true;
     if (!changed) return;
-    ScopedSuspension suspension(*this, false);
     bool compatible = true;
     if (snapshot->strips.empty())
     {
@@ -181,8 +224,10 @@ void RealtimeHostProcessor::refreshLatencies()
                 if (slot) { compatible = slot->refreshLatency() && compatible; strip.latencySamples += slot->getLatencySamples(); }
             maximum = jmax(maximum, strip.latencySamples);
         }
+        for (const auto& slot : snapshot->masterSlots)
+            if (slot) compatible = slot->refreshLatency() && compatible;
         for (auto& strip : snapshot->strips)
-            if (strip.runtime) compatible = strip.runtime->align.prepare(strip.busChannels, currentBlockSize, maximum - strip.latencySamples, currentSampleRate) && compatible;
+            if (strip.runtime) compatible = applyAlign(*strip.runtime, strip.busChannels, currentBlockSize, maximum - strip.latencySamples, currentSampleRate) && compatible;
         snapshot->totalLatencySamples = maximum;
     }
     setLatencySamples(snapshot->totalLatencySamples);
@@ -314,7 +359,7 @@ void RealtimeHostProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&
     if (channels > preparedHostChannels || channels == 0) { buffer.clear(); return; }
     const bool collect = lightHostModern::diagnosticsCollectionEnabled.load(std::memory_order_relaxed);
     lastInputLevel.store(collect ? inputMeters.process(buffer.getArrayOfReadPointers(), channels, buffer.getNumSamples())
-                                : buffer.getMagnitude(0, buffer.getNumSamples()), std::memory_order_relaxed);
+                                : bufferPeak(buffer, 0, buffer.getNumSamples()), std::memory_order_relaxed);
     inputPresentation.process(lastInputLevel.load(std::memory_order_relaxed), buffer.getNumSamples(), currentSampleRate);
     if (collect) inputMidiEvents.fetch_add(static_cast<uint64>(midiMessages.getNumEvents()), std::memory_order_relaxed);
     auto* const snapshot = realtimeSnapshot.load(std::memory_order_acquire);
@@ -358,7 +403,14 @@ void RealtimeHostProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&
             else masterInsert.copyFrom(1, 0, masterInsert, 0, 0, count);
             masterView.setDataToReferTo(masterInsert.getArrayOfWritePointers(), 2, count);
             for (const auto& slot : snapshot->masterSlots)
-                if (slot && slot->processor && slot->prepared) processSlot(*slot, masterView, segmentMidi);
+            {
+                if (!slot || !slot->processor || !slot->prepared) continue;
+                SlotBusy busy(*slot);
+                if (!busy) continue;
+                processSlot(*slot, masterView, segmentMidi);
+                if (slot->mainOutputChannels == 1 && masterView.getNumChannels() >= 2)
+                    masterView.copyFrom(1, 0, masterView, 0, 0, count);
+            }
             if (left < channels) segment.copyFrom(left, 0, masterInsert, 0, 0, count);
             if (right != left && right < channels) segment.copyFrom(right, 0, masterInsert, 1, 0, count);
         }
@@ -373,24 +425,19 @@ void RealtimeHostProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&
         {
             const int left = mainOutputLeft >= 0 ? mainOutputLeft : 0;
             const int right = mainOutputRight >= 0 && mainOutputRight < channels ? mainOutputRight : jmin(1, channels - 1);
-            auto pin = [](float sample) { return std::abs(sample) <= 1.0f ? sample : std::copysign(1.0f, sample); };
-            if (left < channels)
-            {
-                auto* samples = segment.getWritePointer(left);
-                for (int i = 0; i < count; ++i) samples[i] = pin(samples[i]);
-            }
-            if (right != left && right < channels)
-            {
-                auto* samples = segment.getWritePointer(right);
-                for (int i = 0; i < count; ++i) samples[i] = pin(samples[i]);
-            }
+            auto soften = [&](int channel) {
+                if (channel < 0 || channel >= channels) return;
+                auto* samples = segment.getWritePointer(channel);
+                for (int i = 0; i < count; ++i)
+                {
+                    if (std::abs(samples[i]) > 1.0f && collect) outputMeters.markClipped(channel);
+                    samples[i] = softPin(samples[i]);
+                }
+            };
+            soften(left);
+            if (right != left) soften(right);
         }
-        {
-            const float peak = segment.getMagnitude(0, count);
-            const float previous = masterLevel.load(std::memory_order_relaxed);
-            const float decay = std::exp(-static_cast<float>(count) / static_cast<float>(currentSampleRate) / 0.3f);
-            masterLevel.store(jmax(peak, previous * decay), std::memory_order_relaxed);
-        }
+        masterLevel.store(bufferPeak(segment, 0, count), std::memory_order_relaxed);
         globalControls.applyMute(segment);
         if (mixCapture)
         {
@@ -432,7 +479,7 @@ void RealtimeHostProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&
     float outputPeak = 0.0f;
     if (!collect)
         for (int ch = 0; ch < jmin(preparedOutputChannels, channels); ++ch)
-            outputPeak = jmax(outputPeak, buffer.getMagnitude(ch, 0, buffer.getNumSamples()));
+            outputPeak = jmax(outputPeak, channelPeak(buffer.getReadPointer(ch), buffer.getNumSamples()));
     lastOutputLevel.store(collect ? outputMeters.process(buffer.getArrayOfReadPointers(), jmin(preparedOutputChannels, channels), buffer.getNumSamples())
                                  : outputPeak, std::memory_order_relaxed);
     outputPresentation.process(lastOutputLevel.load(std::memory_order_relaxed), buffer.getNumSamples(), currentSampleRate);
@@ -569,6 +616,8 @@ void RealtimeHostProcessor::processStrips(ChainSnapshot& snapshot, AudioBuffer<f
         for (const auto& slot : strip.slots)
         {
             if (!slot || !slot->processor || !slot->prepared) continue;
+            SlotBusy busy(*slot);
+            if (!busy) continue;
             slot->captureDry(bus);
             processSlot(*slot, bus, midi);
             if (midi.data.getAllocatedCapacity() < midiCapacity) midiStorageNeedsRepair.store(true);
@@ -586,13 +635,30 @@ void RealtimeHostProcessor::processStrips(ChainSnapshot& snapshot, AudioBuffer<f
                 if (strip.runtime->gain == 1.0f) continue;
                 for (int ch = 0; ch < busChannels; ++ch) bus.getWritePointer(ch)[i] *= strip.runtime->gain;
             }
-            const float peak = bus.getMagnitude(0, count);
-            const float previous = strip.runtime->level.load(std::memory_order_relaxed);
-            const float decay = std::exp(-static_cast<float>(count) / static_cast<float>(currentSampleRate) / 0.3f);
-            strip.runtime->level.store(jmax(peak, previous * decay), std::memory_order_relaxed);
-            strip.runtime->align.capture(bus);
+            strip.runtime->level.store(bufferPeak(bus, 0, count), std::memory_order_relaxed);
         }
-        const auto& delayed = strip.runtime ? strip.runtime->align.output() : bus;
+        struct AlignHold {
+            StripRuntime* runtime = nullptr;
+            bool held = false;
+            const AudioBuffer<float>* delayed = nullptr;
+            void arm(StripRuntime& target, const AudioBuffer<float>& bus)
+            {
+                runtime = &target;
+                target.processing.store(true, std::memory_order_release);
+                if (target.rebuilding.load(std::memory_order_acquire))
+                {
+                    target.processing.store(false, std::memory_order_release);
+                    delayed = &bus;
+                    return;
+                }
+                held = true;
+                target.align.capture(bus);
+                delayed = &target.align.output();
+            }
+            ~AlignHold() { if (held && runtime) runtime->processing.store(false, std::memory_order_release); }
+        } align;
+        if (strip.runtime) align.arm(*strip.runtime, bus);
+        const auto& delayed = align.delayed != nullptr ? *align.delayed : bus;
         const bool monoBus = busChannels == 1 && strip.outputMap.size() > 1;
         const bool monoSource = strip.inputMap.size() <= 1;
         const bool stereoImage = !strip.allInputs && !monoSource && strip.outputMap.size() >= 2;
@@ -753,5 +819,5 @@ void RealtimeHostProcessor::processSlot(PluginSlot& slot, AudioBuffer<float>& bu
     for (int channel = copied; channel < buffer.getNumChannels(); ++channel) buffer.clear(channel, 0, samples);
     if (slot.mainOutputChannels == 1 && buffer.getNumChannels() >= 2)
         for (int sample = 0; sample < samples; ++sample)
-            buffer.setSample(1, sample, scratchBuffer.getSample(0, sample) * monoGains[static_cast<size_t>(sample)]);
+            buffer.setSample(1, sample, buffer.getSample(0, sample) * monoGains[static_cast<size_t>(sample)]);
 }

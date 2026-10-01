@@ -2,10 +2,6 @@ cmake_minimum_required(VERSION 3.22)
 
 project(LightHostModern VERSION 1.4.1 LANGUAGES C CXX)
 
-if(NOT WIN32)
-    message(FATAL_ERROR "LightHostModern is now maintained as a Windows-only application.")
-endif()
-
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -276,6 +272,8 @@ if(NOT EXISTS "${LIGHTHOST_ASIO_INCLUDE_DIR}/iasiodrv.h")
     message(FATAL_ERROR "ASIO SDK not found. Expected iasiodrv.h in ${LIGHTHOST_ASIO_INCLUDE_DIR}")
 endif()
 
+include("${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/lame/CMakeLists.txt")
+
 add_library(LightHostModernCore STATIC)
 
 target_sources(LightHostModernCore
@@ -331,9 +329,7 @@ target_link_libraries(LightHostModernCore
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
-        mfplat
-        mfreadwrite
-        mfuuid)
+        mp3lame)
 
 juce_add_gui_app(LightHostModern
     BUNDLE_ID "com.lighthost.app"
@@ -416,6 +412,7 @@ if(BUILD_TESTING)
     add_executable(LightHostModernVerboseLogTests Tests/VerboseLogTests.cpp)
     target_include_directories(LightHostModernVerboseLogTests PRIVATE Source)
     add_test(NAME verbose-capture-lifecycle-and-export COMMAND LightHostModernVerboseLogTests)
+    target_link_libraries(LightHostModernScanProcessTests PRIVATE juce::juce_core)
     target_include_directories(LightHostModernScanProcessTests PRIVATE Source)
     add_test(NAME scanner-process-lifetime COMMAND LightHostModernScanProcessTests)
     set_tests_properties(scanner-process-lifetime PROPERTIES TIMEOUT 15)
@@ -478,18 +475,3 @@ target_link_libraries(LightHostModern
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
-if(MSVC)
-    set(LIGHTHOST_WINUI_TARGET_DIR
-        "$<TARGET_FILE_DIR:LightHostModern>/WinUI/x64/$<CONFIG>/LightHostModern.WinUI")
-
-    # Staging must also run when only WinUI changed and the host does not relink.
-    # CMP0112 (NEW through cmake_minimum_required) makes TARGET_FILE_DIR a
-    # directory query, so this prerequisite does not create a target cycle.
-    add_custom_target(LightHostModernStageWinUI
-        COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
-            "${CMAKE_CURRENT_SOURCE_DIR}/Utilities/WinUI Output.ps1" -Mode Stage -Platform x64 -Configuration $<CONFIG>
-            -Destination "${LIGHTHOST_WINUI_TARGET_DIR}"
-        COMMENT "Verifying and staging the current WinUI shell"
-        VERBATIM)
-    add_dependencies(LightHostModern LightHostModernStageWinUI)
-endif()

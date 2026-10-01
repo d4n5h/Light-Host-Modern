@@ -116,6 +116,11 @@ public:
         return blockPeak;
     }
 
+    void markClipped(int channel) noexcept
+    {
+        if (channel >= 0 && channel < maximumChannels) published[static_cast<size_t>(channel)].clipped.store(true, std::memory_order_release);
+    }
+
     MeterSnapshot snapshot() const noexcept
     {
         MeterSnapshot result;

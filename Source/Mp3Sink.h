@@ -17,9 +17,6 @@ private:
     void* encoder = nullptr;
     juce::FileOutputStream* file = nullptr;
     std::function<void(const void*, size_t)> onBytes;
-    std::vector<float> pendingL, pendingR;
     double sourceRate = 48000.0;
     double phase = 0.0;
-    int64_t timestamp = 0;
-    bool started = false;
 };
