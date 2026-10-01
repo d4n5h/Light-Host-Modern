@@ -643,9 +643,10 @@ void RealtimeHostProcessor::processStrips(ChainSnapshot& snapshot, AudioBuffer<f
                 }
                 else
                 {
-                    const float mix = ((inL ? inL[i] : 0.0f) + (inR ? inR[i] : 0.0f)) * std::sqrt(2.0f);
-                    left[i] = mix * std::cos(angle) * gain;
-                    right[i] = mix * std::sin(angle) * gain;
+                    const float leftGain = pan >= 0.0f ? 1.0f - pan : 1.0f;
+                    const float rightGain = pan <= 0.0f ? 1.0f + pan : 1.0f;
+                    left[i] = (inL ? inL[i] : 0.0f) * leftGain * gain;
+                    right[i] = (inR ? inR[i] : 0.0f) * rightGain * gain;
                 }
             }
             if (mixCapture->recordMulti()) mixCapture->pushStereo(stripIndex, left, right, count);
@@ -664,14 +665,14 @@ void RealtimeHostProcessor::processStrips(ChainSnapshot& snapshot, AudioBuffer<f
             float leftGain = 1.0f, rightGain = 1.0f;
             if (stereoImage && delayed.getNumChannels() >= 1)
             {
-                const float angle = (position + 1.0f) * 0.25f * juce::MathConstants<float>::pi;
                 const float inLeft = delayed.getSample(0, i);
                 const float inRight = delayed.getNumChannels() > 1 ? delayed.getSample(1, i) : 0.0f;
-                const float mix = (inLeft + inRight) * std::sqrt(2.0f);
+                leftGain = position >= 0.0f ? 1.0f - position : 1.0f;
+                rightGain = position <= 0.0f ? 1.0f + position : 1.0f;
                 const int destLeft = strip.outputMap[0];
                 const int destRight = strip.outputMap[1];
-                if (destLeft >= 0 && destLeft < channels) mixBus.addSample(destLeft, i, mix * std::cos(angle));
-                if (destRight >= 0 && destRight < channels) mixBus.addSample(destRight, i, mix * std::sin(angle));
+                if (destLeft >= 0 && destLeft < channels) mixBus.addSample(destLeft, i, inLeft * leftGain);
+                if (destRight >= 0 && destRight < channels) mixBus.addSample(destRight, i, inRight * rightGain);
                 continue;
             }
             if (position != 0.0f)

@@ -509,7 +509,7 @@ int main()
             const auto fillFull = [&] { for (int i = 0; i < 512; ++i) { audio.setSample(0, i, 1.0f); audio.setSample(1, i, 1.0f); } };
             for (int i = 0; i < 2; ++i) { fillFull(); host->processBlock(audio, midi); }
             const float left = audio.getSample(0, 511), right = audio.getSample(1, 511);
-            require(std::isfinite(left) && std::isfinite(right) && std::abs(left) <= 1.0f && std::abs(right) <= 1.0f, "two full-scale inputs exceeded full scale");
+            require(std::abs(left - 1.0f) < 0.0001f && std::abs(right - 1.0f) < 0.0001f, "two inputs were summed instead of one per side");
         }
         std::cout << "Channels, asymmetric buses, bounded MIDI, preserved delay history, lifecycle, diagnostics opt-out and Release allocation audit passed\n";
         return 0;
