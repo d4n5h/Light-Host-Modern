@@ -331,7 +331,7 @@ public:
                 strip.group = item->getStringAttribute("group").trim();
                 if (!channels(item->getStringAttribute("inputs"), strip.inputs)
                     || !channels(item->getStringAttribute("outputs"), strip.outputs)) return false;
-                if ((!strip.allInputs && strip.inputs.empty()) || (!strip.allOutputs && strip.outputs.empty())) return false;
+                if (!strip.allOutputs && strip.outputs.empty()) return false;
                 strip.stereo = !strip.allInputs && strip.inputs.size() == 2;
                 loadedStrips.push_back(std::move(strip));
                 continue;

@@ -419,7 +419,7 @@ void ChannelStripComponent::setStrip(const lightHostModern::ChainStrip& strip, c
     {
         juce::StringArray picked;
         for (int channel : strip.inputs) picked.add(channelLabel(channel, config.inputChannelNames, "In "));
-        inputBox.setText(picked.isEmpty() ? "All inputs" : picked.joinIntoString(", "), juce::dontSendNotification);
+        inputBox.setText(picked.isEmpty() ? "No input" : picked.joinIntoString(", "), juce::dontSendNotification);
     }
     juce::String outputKey = "outputs";
     std::vector<int> outputs;

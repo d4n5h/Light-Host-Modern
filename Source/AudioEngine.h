@@ -258,6 +258,7 @@ private:
 		diagnosticsTimerId = 3
 	};
 
+	void dropInactiveStripInputs();
 	void timerCallback(int timerId) override;
 	void changeListenerCallback(ChangeBroadcaster* changed) override;
 	void markSettingsDirty();

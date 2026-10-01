@@ -502,7 +502,9 @@ bool AudioEngine::setAudioBufferSize(int bufferSize)
 
 bool AudioEngine::setAudioInputChannelEnabled(int channelIndex, bool enabled)
 {
-    return deviceController.setAudioInputChannelEnabled(channelIndex, enabled);
+    if (!deviceController.setAudioInputChannelEnabled(channelIndex, enabled)) return false;
+    dropInactiveStripInputs();
+    return true;
 }
 
 bool AudioEngine::setAudioOutputChannelEnabled(int channelIndex, bool enabled)
@@ -512,7 +514,9 @@ bool AudioEngine::setAudioOutputChannelEnabled(int channelIndex, bool enabled)
 
 bool AudioEngine::setAllAudioInputChannelsEnabled(bool enabled)
 {
-    return deviceController.setAllAudioInputChannelsEnabled(enabled);
+    if (!deviceController.setAllAudioInputChannelsEnabled(enabled)) return false;
+    dropInactiveStripInputs();
+    return true;
 }
 
 bool AudioEngine::setAllAudioOutputChannelsEnabled(bool enabled)
@@ -522,7 +526,34 @@ bool AudioEngine::setAllAudioOutputChannelsEnabled(bool enabled)
 
 bool AudioEngine::setAudioInputChannelCount(int channelCount)
 {
-    return deviceController.setAudioInputChannelCount(channelCount);
+    if (!deviceController.setAudioInputChannelCount(channelCount)) return false;
+    dropInactiveStripInputs();
+    return true;
+}
+
+void AudioEngine::dropInactiveStripInputs()
+{
+    const auto config = getAudioDeviceConfiguration();
+    const auto active = [&](int channel) {
+        return channel >= 0 && channel < (int) config.activeInputChannels.size() && config.activeInputChannels[(size_t) channel];
+    };
+    bool needs = false;
+    for (const auto& strip : instances.strips)
+    {
+        if (strip.allInputs) continue;
+        if (std::any_of(strip.inputs.begin(), strip.inputs.end(), [&](int channel) { return !active(channel); })) needs = true;
+    }
+    if (!needs) return;
+    chainHistory.record(instances);
+    for (auto& strip : instances.strips)
+    {
+        if (strip.allInputs) continue;
+        strip.inputs.erase(std::remove_if(strip.inputs.begin(), strip.inputs.end(), [&](int channel) { return !active(channel); }), strip.inputs.end());
+        strip.stereo = strip.inputs.size() == 2;
+    }
+    ++chainVersion;
+    loadActivePlugins();
+    saveActivePluginChain(false);
 }
 
 bool AudioEngine::setAudioOutputChannelCount(int channelCount)
