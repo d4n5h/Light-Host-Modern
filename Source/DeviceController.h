@@ -91,6 +91,7 @@ private:
     bool recoverStalledStream();
     static bool isStallMessage(const String& message);
     void loadActivePlugins() { if (reconfigure) reconfigure(); }
+    void ensureMainOutputs();
     PropertySet* preferencesPtr() const { return &preferences; }
     std::unique_ptr<XmlElement> getXmlValueOrClear(const String& key) { return preferences.getXmlValue(key); }
     AudioDeviceManager& deviceManager;
@@ -104,7 +105,7 @@ private:
     bool callbacksObserved = false, stallPrimed = false;
     uint64 latestCallbacks = 0, lastCallbacks = 0;
     Clock::time_point stallSince{}, stallNextRetry{};
-    bool manualAudioSelectionInProgress = false, audioStartSuspended = false, applicationsSuspended = false;
+    bool manualAudioSelectionInProgress = false, audioStartSuspended = false, applicationsSuspended = false, ensuringOutputs = false;
     String audioRecoveryState = "running", audioRecoveryMessage, lastAudioConfigurationError;
     String configuredBackend;
     String openingBackend, openingInput, openingOutput;

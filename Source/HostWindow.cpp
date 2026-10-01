@@ -203,7 +203,7 @@ public:
     explicit AudioPage(AudioEngine& engineIn) : engine(engineIn)
     {
         for (auto* box : { &backend, &input, &output, &rate, &buffer, &persistence }) addAndMakeVisible(box);
-        for (auto* label : { &deviceHeading, &formatHeading, &channelHeading, &driverLabel, &inputLabel, &outputLabel, &rateLabel, &bufferLabel, &recoveryLabel, &inputsHeading, &outputsHeading })
+        for (auto* label : { &deviceHeading, &formatHeading, &channelHeading, &driverLabel, &inputLabel, &outputLabel, &rateLabel, &bufferLabel, &recoveryLabel, &inputsHeading, &outputsHeading, &deviceStatus })
         {
             label->setJustificationType(juce::Justification::centredLeft);
             addAndMakeVisible(label);
@@ -293,6 +293,8 @@ public:
         persistence.setSelectedId(recovery.mode == "custom" ? 3 : recovery.mode == "last" ? 2 : 1, juce::dontSendNotification);
         monoIn.setToggleState(engine.isMonoInputs(), juce::dontSendNotification);
         monoOut.setToggleState(engine.isMonoOutput(), juce::dontSendNotification);
+        deviceStatus.setText(engine.getLastAudioConfigurationError(), juce::dontSendNotification);
+        deviceStatus.setColour(juce::Label::textColourId, juce::Colour(0xffff5d5d));
         inputList.removeAllChildren();
         outputList.removeAllChildren();
         inputToggles.clear();
@@ -330,6 +332,9 @@ public:
         place(driverLabel, backend, true);
         place(inputLabel, input, true);
         place(outputLabel, output, !asioMode);
+        if (deviceStatus.getText().isNotEmpty())
+            deviceStatus.setBounds(area.removeFromTop(36).removeFromLeft(420));
+        else deviceStatus.setBounds({});
         area.removeFromTop(6);
         formatHeading.setBounds(area.removeFromTop(26));
         place(rateLabel, rate, true);
@@ -357,7 +362,7 @@ private:
     bool applying = false;
     bool asioMode = false;
     juce::Label deviceHeading, formatHeading, channelHeading;
-    juce::Label driverLabel, inputLabel, outputLabel, rateLabel, bufferLabel, recoveryLabel, inputsHeading, outputsHeading;
+    juce::Label driverLabel, inputLabel, outputLabel, rateLabel, bufferLabel, recoveryLabel, inputsHeading, outputsHeading, deviceStatus;
     juce::ComboBox backend, input, output, rate, buffer, persistence;
     juce::ToggleButton monoIn, monoOut;
     juce::Viewport inputViewport, outputViewport;
