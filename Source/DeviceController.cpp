@@ -194,10 +194,11 @@ String DeviceController::apply(AudioDeviceManager& manager, const String& backen
         return "Audio device is blocked by settings";
     if (setup.inputDeviceName.isEmpty() && setup.outputDeviceName.isEmpty())
         return "No audio device was selected";
-    bool exists = false;
+    AudioIODeviceType* targetType = nullptr;
     for (auto* type : manager.getAvailableDeviceTypes())
-        exists = exists || type->getTypeName() == backend;
-    if (!exists) return "Audio backend is unavailable: " + backend;
+        if (type != nullptr && type->getTypeName() == backend)
+            targetType = type;
+    if (targetType == nullptr) return "Audio backend is unavailable: " + backend;
     auto verify = [&](const String& error) -> String {
         if (applyingGeneration != generation)
         {
@@ -212,10 +213,18 @@ String DeviceController::apply(AudioDeviceManager& manager, const String& backen
             if (!asio) return requested == actualName;
             return sameAsioDevice(requested, actualName) || (actual && sameAsioDevice(requested, actual->getName()));
         };
-        if (!actual || !actual->isOpen() || !actual->getTypeName().equalsIgnoreCase(backend)
-            || !namesMatch(setup.inputDeviceName, effectiveSetup.inputDeviceName)
-            || !namesMatch(setup.outputDeviceName, effectiveSetup.outputDeviceName))
-            return "The opened audio device does not match the requested configuration";
+        if (actual == nullptr)
+            return "The audio device did not open";
+        if (!actual->isOpen())
+            return "The audio device is closed";
+        if (!actual->isPlaying())
+            return "The audio device is not playing";
+        if (!actual->getTypeName().equalsIgnoreCase(backend))
+            return "The opened audio backend does not match the requested backend";
+        if (!namesMatch(setup.inputDeviceName, effectiveSetup.inputDeviceName))
+            return "The opened input device does not match the requested input";
+        if (!namesMatch(setup.outputDeviceName, effectiveSetup.outputDeviceName))
+            return "The opened output device does not match the requested output";
         if (!isAudioDeviceChoiceAllowed(backend, effectiveSetup.inputDeviceName, effectiveSetup.outputDeviceName))
         {
             manager.closeAudioDevice();
@@ -226,7 +235,14 @@ String DeviceController::apply(AudioDeviceManager& manager, const String& backen
         ensureMainOutputs();
         return {};
     };
-    if (manager.getCurrentAudioDeviceType() == backend && manager.getCurrentAudioDevice() != nullptr)
+    auto* current = manager.getCurrentAudioDevice();
+    if (current != nullptr && (!current->isOpen() || !current->isPlaying()))
+    {
+        manager.closeAudioDevice();
+        targetType->scanForDevices();
+        current = nullptr;
+    }
+    if (manager.getCurrentAudioDeviceType() == backend && current != nullptr)
         return verify(manager.setAudioDeviceSetup(setup, true));
 
     // initialise(XML) selects a backend and the complete setup in one operation.
@@ -1513,7 +1529,15 @@ bool DeviceController::setAudioInputDeviceByIndex(int deviceIndex)
 		+ "' sampleRate=" + String(setup.sampleRate, 0)
 		+ " bufferSize=" + String(setup.bufferSize));
 
+	auto* liveDevice = deviceManager.getCurrentAudioDevice();
+	const bool requestedDeviceIsRunning = liveDevice != nullptr
+		&& liveDevice->isOpen()
+		&& liveDevice->isPlaying()
+		&& liveDevice->getTypeName().equalsIgnoreCase(currentType->getTypeName())
+		&& (!isAsioBackend || sameAsioDevice(requestedInputDevice, liveDevice->getName()));
+
 	if (isAsioBackend
+		&& requestedDeviceIsRunning
 		&& setup.inputDeviceName == requestedInputDevice
 		&& setup.outputDeviceName == requestedInputDevice)
 	{
@@ -1522,7 +1546,7 @@ bool DeviceController::setAudioInputDeviceByIndex(int deviceIndex)
 		return true;
 	}
 
-	if (!isAsioBackend && setup.inputDeviceName == requestedInputDevice)
+	if (!isAsioBackend && requestedDeviceIsRunning && setup.inputDeviceName == requestedInputDevice)
 	{
 		lightHostModernLog("AudioEngine setAudioInputDeviceByIndex no-op; already using input='" + setup.inputDeviceName + "'");
 		rememberManualSelectedAudioDevice();
@@ -1659,7 +1683,15 @@ bool DeviceController::setAudioOutputDeviceByIndex(int deviceIndex)
 		+ "' sampleRate=" + String(setup.sampleRate, 0)
 		+ " bufferSize=" + String(setup.bufferSize));
 
+	auto* liveDevice = deviceManager.getCurrentAudioDevice();
+	const bool requestedDeviceIsRunning = liveDevice != nullptr
+		&& liveDevice->isOpen()
+		&& liveDevice->isPlaying()
+		&& liveDevice->getTypeName().equalsIgnoreCase(currentType->getTypeName())
+		&& (!isAsioBackend || sameAsioDevice(requestedOutputDevice, liveDevice->getName()));
+
 	if (isAsioBackend
+		&& requestedDeviceIsRunning
 		&& setup.inputDeviceName == requestedOutputDevice
 		&& setup.outputDeviceName == requestedOutputDevice)
 	{
@@ -1668,7 +1700,7 @@ bool DeviceController::setAudioOutputDeviceByIndex(int deviceIndex)
 		return true;
 	}
 
-	if (!isAsioBackend && setup.outputDeviceName == requestedOutputDevice)
+	if (!isAsioBackend && requestedDeviceIsRunning && setup.outputDeviceName == requestedOutputDevice)
 	{
 		lightHostModernLog("AudioEngine setAudioOutputDeviceByIndex no-op; already using output='" + setup.outputDeviceName + "'");
 		rememberManualSelectedAudioDevice();

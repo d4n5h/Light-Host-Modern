@@ -10,7 +10,8 @@ struct Hardware
 {
     StringArray names{"A", "B"};
     int creations = 0, opens = 0, scans = 0;
-    bool fail = false;
+    bool fail = false, forceClosed = false, forceStopped = false, refuseCreate = false;
+    String reportedType;
     std::function<void()> opening;
 };
 class Device final : public AudioIODevice
@@ -31,10 +32,10 @@ public:
         return opened ? String{} : "Simulated driver failure";
     }
     void close() override { opened = false; playing = false; }
-    bool isOpen() override { return opened; }
+    bool isOpen() override { return opened && !hardware.forceClosed; }
     void start(AudioIODeviceCallback* callback) override { playing = opened; if (callback) callback->audioDeviceAboutToStart(this); }
     void stop() override { playing = false; }
-    bool isPlaying() override { return playing; }
+    bool isPlaying() override { return playing && !hardware.forceStopped; }
     String getLastError() override { return {}; }
     int getCurrentBufferSizeSamples() override { return blockSize; }
     double getCurrentSampleRate() override { return sampleRate; }
@@ -62,8 +63,9 @@ public:
     AudioIODevice* createDevice(const String& output, const String& input) override
     {
         ++hardware.creations;
+        if (hardware.refuseCreate) return nullptr;
         if ((!input.isEmpty() && !hardware.names.contains(input)) || (!output.isEmpty() && !hardware.names.contains(output))) return nullptr;
-        return new Device(output.isEmpty() ? input : output, hardware, getTypeName());
+        return new Device(output.isEmpty() ? input : output, hardware, hardware.reportedType.isNotEmpty() ? hardware.reportedType : getTypeName());
     }
 private:
     Hardware& hardware;
@@ -74,10 +76,11 @@ public:
     Hardware hardware;
     Hardware alternative;
     bool includeAlternative = false;
+    String backendName { "Simulated" };
     GuardedAudioDeviceType::Policy policy;
     void createAudioDeviceTypes(OwnedArray<AudioIODeviceType>& types) override
     {
-        types.add(new GuardedAudioDeviceType(std::make_unique<DeviceType>(hardware),
+        types.add(new GuardedAudioDeviceType(std::make_unique<DeviceType>(hardware, backendName),
             [this](const auto& backend, const auto& in, const auto& out) { return policy && policy(backend, in, out); }));
         if (includeAlternative) types.add(new GuardedAudioDeviceType(std::make_unique<DeviceType>(alternative, "Alternative"),
             [this](const auto& backend, const auto& in, const auto& out) { return policy && policy(backend, in, out); }));
@@ -372,6 +375,121 @@ int main()
         require(scenario.manager.hardware.opens == opens + 3, "Attempt limit was not enforced");
         require(scenario.controller.createDiagnosticsSnapshot(scenario.manager).recoveryState == "failed", "Stall did not fail closed");
         require(scenario.controller.createDiagnosticsSnapshot(scenario.manager).recoveryMessage == "The audio stream stopped and did not restart.", "Failure notice missing");
+    });
+    tests.run("an unchanged setup reopens a stopped or closed device", [] {
+        for (const bool stopped : { true, false })
+        {
+            Scenario scenario("disabled");
+            scenario.controller.start(false, true);
+            AudioDeviceManager::AudioDeviceSetup setup;
+            setup.inputDeviceName = setup.outputDeviceName = "A";
+            require(scenario.controller.apply(scenario.manager, "Simulated", setup).isEmpty(), "Initial open failed");
+            scenario.manager.getAudioDeviceSetup(setup);
+            const auto healthyOpens = scenario.manager.hardware.opens;
+            require(scenario.controller.apply(scenario.manager, "Simulated", setup).isEmpty(), "Healthy reapply failed");
+            require(scenario.manager.hardware.opens == healthyOpens, "Healthy reapply reopened the device");
+            if (stopped) scenario.manager.hardware.forceStopped = true;
+            else scenario.manager.hardware.forceClosed = true;
+            scenario.manager.hardware.opening = [&] {
+                scenario.manager.hardware.forceStopped = false;
+                scenario.manager.hardware.forceClosed = false;
+            };
+            const auto opens = scenario.manager.hardware.opens;
+            const auto scans = scenario.manager.hardware.scans;
+            const auto error = scenario.controller.apply(scenario.manager, "Simulated", setup);
+            require(error.isEmpty(), error.toRawUTF8());
+            require(scenario.manager.hardware.opens == opens + 1, stopped ? "Stopped device was not reopened once" : "Closed device was not reopened once");
+            require(scenario.manager.hardware.scans > scans, "Stale device was not rescanned");
+            auto* device = scenario.manager.getCurrentAudioDevice();
+            require(device && device->isOpen() && device->isPlaying() && device->getName() == "A", "Reopened device is not live");
+        }
+    });
+    tests.run("preferred recovery reopens a stopped or closed device and clears the failure", [] {
+        for (const bool stopped : { true, false })
+        {
+            Scenario scenario("lastSelected");
+            scenario.controller.start(false, false);
+            auto* device = scenario.manager.getCurrentAudioDevice();
+            require(device && device->isPlaying() && device->getName() == "A", "Preferred device did not start");
+            if (stopped) scenario.manager.hardware.forceStopped = true;
+            else scenario.manager.hardware.forceClosed = true;
+            scenario.manager.hardware.opening = [&] {
+                scenario.manager.hardware.forceStopped = false;
+                scenario.manager.hardware.forceClosed = false;
+            };
+            const auto opens = scenario.manager.hardware.opens;
+            scenario.advance();
+            device = scenario.manager.getCurrentAudioDevice();
+            require(scenario.manager.hardware.opens == opens + 1, "Preferred recovery did not reopen once");
+            require(device && device->isOpen() && device->isPlaying() && device->getName() == "A", "Preferred device was not restored");
+            const auto state = scenario.controller.createDiagnosticsSnapshot(scenario.manager);
+            require(state.recoveryAttempt == 0 && state.recoveryState == "running" && state.recoveryMessage.isEmpty(), "Recovery failure was not cleared");
+        }
+    });
+    tests.run("selecting a live device does not reopen it", [] {
+        Scenario scenario("disabled");
+        scenario.manager.backendName = "ASIO";
+        scenario.controller.start(false, true);
+        require(scenario.controller.setAudioBackendByIndex(0), "ASIO device did not open");
+        const auto opens = scenario.manager.hardware.opens;
+        require(scenario.controller.setAudioInputDeviceByIndex(0), "Live input selection failed");
+        require(scenario.controller.setAudioOutputDeviceByIndex(0), "Live output selection failed");
+        require(scenario.manager.hardware.opens == opens, "Live selection reopened the device");
+    });
+    tests.run("selecting a stopped device reopens it", [] {
+        for (const bool input : { true, false })
+        {
+            Scenario scenario("disabled");
+            scenario.manager.backendName = "ASIO";
+            scenario.controller.start(false, true);
+            require(scenario.controller.setAudioBackendByIndex(0), "ASIO device did not open");
+            scenario.manager.hardware.forceStopped = true;
+            scenario.manager.hardware.opening = [&] { scenario.manager.hardware.forceStopped = false; };
+            const auto opens = scenario.manager.hardware.opens;
+            const auto selected = input ? scenario.controller.setAudioInputDeviceByIndex(0)
+                                         : scenario.controller.setAudioOutputDeviceByIndex(0);
+            require(selected, input ? "Stopped input selection failed" : "Stopped output selection failed");
+            require(scenario.manager.hardware.opens == opens + 1, "Stopped selection did not reopen");
+            auto* device = scenario.manager.getCurrentAudioDevice();
+            require(device && device->isOpen() && device->isPlaying() && device->getName() == "A", "Selected device is not live");
+        }
+    });
+    tests.run("a closed, stopped, missing, or wrong-backend open reports that check", [] {
+        const auto request = [] {
+            AudioDeviceManager::AudioDeviceSetup setup;
+            setup.inputDeviceName = setup.outputDeviceName = "A";
+            return setup;
+        };
+        {
+            Scenario scenario("disabled");
+            scenario.controller.start(false, true);
+            scenario.manager.hardware.forceClosed = true;
+            const auto error = scenario.controller.apply(scenario.manager, "Simulated", request());
+            require(error == "The audio device is closed", error.toRawUTF8());
+        }
+        {
+            Scenario scenario("disabled");
+            scenario.controller.start(false, true);
+            scenario.manager.hardware.forceStopped = true;
+            const auto error = scenario.controller.apply(scenario.manager, "Simulated", request());
+            require(error == "The audio device is not playing", error.toRawUTF8());
+        }
+        {
+            Scenario scenario("disabled");
+            scenario.controller.start(false, true);
+            scenario.manager.hardware.refuseCreate = true;
+            const auto error = scenario.controller.apply(scenario.manager, "Simulated", request());
+            require(error.contains("Can't open the audio device"), error.toRawUTF8());
+            require(!error.contains("does not match the requested configuration"), "Generic mismatch hid a missing device");
+            require(scenario.manager.getCurrentAudioDevice() == nullptr, "Missing create left a device");
+        }
+        {
+            Scenario scenario("disabled");
+            scenario.controller.start(false, true);
+            scenario.manager.hardware.reportedType = "Other";
+            const auto error = scenario.controller.apply(scenario.manager, "Simulated", request());
+            require(error == "The opened audio backend does not match the requested backend", error.toRawUTF8());
+        }
     });
     return tests.result();
 }

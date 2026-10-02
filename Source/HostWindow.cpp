@@ -290,7 +290,7 @@ public:
         persistence.addItem("This device only", 1);
         persistence.addItem("Last device", 2);
         persistence.addItem("Custom", 3);
-        persistence.setSelectedId(recovery.mode == "custom" ? 3 : recovery.mode == "last" ? 2 : 1, juce::dontSendNotification);
+        persistence.setSelectedId(recovery.mode == "custom" ? 3 : recovery.mode == "lastSelected" ? 2 : 1, juce::dontSendNotification);
         monoIn.setToggleState(engine.isMonoInputs(), juce::dontSendNotification);
         monoOut.setToggleState(engine.isMonoOutput(), juce::dontSendNotification);
         deviceStatus.setText(engine.getLastAudioConfigurationError(), juce::dontSendNotification);
